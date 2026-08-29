@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — **repository visibility decision requires owner action (Gate 1).**
+Accepted — owner decision D-15 (2026-08-29): monorepo/thin-apps/`packages/domain`, immutable-image delivery, DB role separation, backup + restore-drill gate, StoragePort, stateless applications, environment separation, and PRIVATE repository posture approved **as policy**. The actual visibility flip remains a manual owner action (D-06) — not yet performed; Gate 1 stays BLOCKED until flipped and confirmed.
 
 ## Context
 

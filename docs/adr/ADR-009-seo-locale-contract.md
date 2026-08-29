@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted — owner decision D-14 (2026-08-29): route-map contract, locale URL strategy, `X-VELORA-Locale`, cache classes A–D, CSP-nonce policy approved. **Checkout URL shape decided: `/fa/checkout` + `/en/checkout`** (resolves F-03 design). hreflang/canonical current-state verification remains a Phase 2 item.
 
 ## Context
 
@@ -33,6 +33,10 @@ contract problem, not a frontend detail. Next.js does not solve SEO automaticall
 2. **Locale URLs:** `/` = fa default, `/en/` prefix for English (status-quo);
    `X-VELORA-Locale` header preserved (frozen external tier). All routes have a
    defined locale variant or explicit exclusion (fixes F-03-class bypasses by design).
+   **Checkout (F-03) — DECIDED (owner decision D-14, 2026-08-29): `/fa/checkout` +
+   `/en/checkout`.** Note: fa routes are otherwise prefixless; whether a prefixless
+   `/checkout` alias/redirect is also served is a Phase 2 route-map detail under
+   this ADR — not decided here.
 3. **SEO surface contracts:** sitemap (DB-driven, env-gated as today), robots
    (env-differentiated), canonical per page, hreflang fa/en pairs (verify current
    state, then freeze correct behavior), structured-data registry (inventory in Phase 2).
@@ -84,7 +88,7 @@ Locale routing rules prevent bypasses of the F-03 class.
 ## Open Questions
 
 1. Current hreflang/canonical exact state (NEEDS VERIFICATION — then frozen).
-2. Checkout route locale design (fixes F-03 — owner decision on URL shape).
+2. Checkout route locale design — **RESOLVED**: `/fa/checkout` + `/en/checkout` (owner decision D-14, 2026-08-29); prefixless-alias detail deferred to Phase 2 route-map work.
 
 ## Phase
 

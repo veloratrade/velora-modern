@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — **contains an unresolved blocking question for migration.**
+Accepted — owner decision D-11 (2026-08-29): timestamptz/UTC-only standard, dual-column trading timestamps (`occurred_at` + `source_time_naive` + `source_tz_offset`), and the sampling procedure approved. **Legacy datetime interpretation remains evidence-gated** (sampling + owner confirmation) and is NOT part of this approval; migration transform code stays blocked until then.
 
 ## Context
 

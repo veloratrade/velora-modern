@@ -18,13 +18,18 @@ OWNER DECISION REQUIRED.
 | D-08 | Kill criterion | **Accepted** (text below). |
 | D-09 | Hosting validation | **AUTHORIZED** — evidence gathering only; no infrastructure provisioning/modification. Status stays BLOCKED until evidence complete. |
 | D-10 | Phase 1 | **NOT AUTHORIZED** — blocked until all mandatory gates pass. |
+| D-11 | ADR-004 time model | **Accepted** (2026-08-29) — timestamptz/UTC, dual-column trading timestamps, sampling procedure. Legacy-TZ interpretation remains evidence-gated (not part of approval; no timezone value recorded). |
+| D-12 | ADR-006 contract tiering | **Accepted** (2026-08-29) — two-tier model + frozen external list; C-11 verification Phase 1; C-15 added as unfrozen candidate. |
+| D-13 | ADR-007 job semantics | **Accepted** (2026-08-29) — pg-boss + job standard + four Redis triggers. |
+| D-14 | ADR-009 SEO/locale | **Accepted** (2026-08-29) — route map, locale strategy, cache classes, CSP nonces; **checkout URL = `/fa/checkout` + `/en/checkout`** (F-03). hreflang verification Phase 2. |
+| D-15 | ADR-010 delivery/repo | **Accepted as policy** (2026-08-29) — monorepo, immutable images, roles, restore-drill gate, PRIVATE posture. Actual visibility flip remains manual owner action (D-06). |
 
 ## Mandatory gates (recalculated 2026-08-29)
 
 | Gate | Requirement | Status | Evidence |
 |---|---|---|---|
 | 1 — Repository visibility | `velora-modern` private before push | **BLOCKED** | API-verified public (2026-08-29); D-06: owner will flip manually; push forbidden until owner confirms private |
-| 2 — Ten ADRs reviewed | All reviewed + business decisions approved | **BLOCKED (5/10)** | Accepted: ADR-001, 002, 003, 005, 008 (D-01…D-05). Still Proposed: **ADR-004, 006, 007, 009, 010** |
+| 2 — Ten ADRs reviewed | All reviewed + business decisions approved | **PASS (10/10)** | Accepted: ADR-001, 002, 003, 005, 008 (D-01…D-05) + ADR-004, 006, 007, 009, 010 (D-11…D-15), all 2026-08-29. Evidence-gated sub-items (ADR-004 legacy TZ, ADR-009 hreflang) tracked inside their ADRs — not owner guesses |
 | 2a — Trade policy | ADR-002 approved | **PASS** | D-01 (Option B), 2026-08-29 |
 | 2b — Email policy | ADR-003 approved | **PASS** | D-02 (policy a), 2026-08-29 |
 | 3 — Hosting validated | 20-row checklist fully evidenced | **BLOCKED** | 0/20 rows evidenced; gathering authorized (D-09) |
@@ -42,13 +47,12 @@ OWNER DECISION REQUIRED.
 ## Remaining to unlock Phase 1
 
 1. Owner: flip repository to private, then **confirm** → unlock push of Phase 0 commits.
-2. Owner: review/approve the five remaining ADRs (004, 006, 007, 009, 010).
-3. Execute authorized hosting validation (D-09) until 20/20 rows evidenced.
-4. Owner: provide parity target date (D-07).
-5. Owner: explicit Phase 1 authorization (D-10).
+2. Execute authorized hosting validation (D-09) until 20/20 rows evidenced.
+3. Owner: provide parity target date (D-07).
+4. Owner: explicit Phase 1 authorization (D-10).
 
 ## Supporting exit items (complete)
 
-Capability registry v1 (28 rows) · external contracts (14) · threat model (30 rows)
+Capability registry v1 (28 rows) · external contracts (14 frozen + C-15 candidate) · threat model (30 rows)
 · security policy + production gates · migration strategy (rows+bytes rule)
 · parity plan · observability contract · governance contract (`AGENTS.md`).

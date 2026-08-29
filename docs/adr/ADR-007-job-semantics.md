@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted — owner decision D-13 (2026-08-29): pg-boss initially (major version pinned at Phase 1), the job-semantics standard (idempotency key, lease/visibility, retry with jitter, max attempts → DLQ + replay, priority, timeout, retention, monitoring), and the four explicit Redis introduction triggers approved.
 
 ## Context
 

@@ -53,7 +53,7 @@ Every architectural claim must be tagged:
 
 | Path | Role |
 |---|---|
-| `docs/adr/ADR-001…010` | Locked-pending-approval architectural decisions |
+| `docs/adr/ADR-001…010` | Architectural decisions — all ten Accepted (2026-08-29, D-01…D-05 + D-11…D-15); evidence-gated sub-items tracked within each ADR |
 | `docs/threat-model.md` | Threats, controls, detection, residual risk |
 | `docs/security-policy.md` | Mandatory baseline + production security gates |
 | `docs/external-contracts.md` | Frozen external contract tier |

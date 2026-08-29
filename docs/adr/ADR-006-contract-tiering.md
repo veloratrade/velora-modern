@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted — owner decision D-12 (2026-08-29): two-tier contract model + frozen external tier (`docs/external-contracts.md`) approved. C-11 consumer verification remains a Phase 1 item; C-15 structured-data added as an unfrozen candidate row.
 
 ## Context
 

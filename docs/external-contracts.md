@@ -19,6 +19,7 @@ are deliberately absent. "Frozen?" = proposed classification for owner review.
 | C-12 | n8n article pipeline interface | n8n (approved+archived gate) → GitHub/site content | N8N_ARCHIVE_AGENT (verified docs) | YES (gate semantics) | n8n automation | Phase 3 adapter; approval authority stays n8n+human | gate tests (no auto-publish) | Medium (workflow rewiring) |
 | C-13 | GSC verification | verification file on origin | repo file (verified presence) | YES | Google Search Console | preserved on new origin | cutover checklist item | Low |
 | C-14 | Auth link expiry/limits | resend-verification 4/3600s etc. | baseline §4 (verified limits) | PARTIAL (limits as defaults, tunable) | users | carried as defaults | throttle parity tests | Low |
+| C-15 | Structured data (JSON-LD) | **Candidate — Phase 2 inventory item.** Presence/scope on public pages NEEDS VERIFICATION; ADR-009 references a "structured-data registry" to be inventoried in Phase 2 | ADR-009 (design reference only — no implementation evidence inspected yet) | **NOT FROZEN — candidate**; classification happens after the Phase 2 inventory | search engines (prospective) | TBD — inventory first, then classify freeze status | Low (additive; no existing externally observed behavior) |
 
 ## Maintenance rules
 
