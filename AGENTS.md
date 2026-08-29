@@ -69,5 +69,7 @@ Every architectural claim must be tagged:
 1. Read this file, then the ADRs relevant to your mission.
 2. Work only within the scope the owner stated.
 3. Report concise, evidence-tagged conclusions — no file dumps, no raw logs.
-4. Commit/push only after owner approval (Phase 0 material: see Gate 1 in
-   exit criteria — repository must be private before security material is pushed).
+4. Commit/push only after owner approval. The repository is intentionally PUBLIC
+   (owner decision D-06, revised 2026-08-29); visibility and secret safety are
+   separate concerns — the standing pre-push secret-safety scan must be re-run
+   with zero findings before every push.

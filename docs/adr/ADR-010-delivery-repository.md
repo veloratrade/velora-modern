@@ -2,13 +2,13 @@
 
 ## Status
 
-Accepted — owner decision D-15 (2026-08-29): monorepo/thin-apps/`packages/domain`, immutable-image delivery, DB role separation, backup + restore-drill gate, StoragePort, stateless applications, environment separation, and PRIVATE repository posture approved **as policy**. The actual visibility flip remains a manual owner action (D-06) — not yet performed; Gate 1 stays BLOCKED until flipped and confirmed.
+Accepted — owner decision D-15 (2026-08-29): monorepo/thin-apps/`packages/domain`, immutable-image delivery, DB role separation, backup + restore-drill gate, StoragePort, stateless applications, environment separation approved. **Repository posture: PUBLIC — owner decision D-06 (revised 2026-08-29)**; PRIVATE was originally proposed, the owner explicitly chose to keep the repository public. Public visibility does **not** relax secret-safety requirements (see Decision).
 
 ## Context
 
 The modern system needs a delivery model that is reproducible, rollback-safe, and
-operable by a small team — and a repository posture that does not publish the
-system's security architecture.
+operable by a small team — and a repository posture deliberately chosen by the
+owner with secret-safety rules that hold under either visibility.
 
 ## Verified Evidence
 
@@ -25,10 +25,16 @@ system's security architecture.
 
 - Monorepo (`apps/web`, `apps/api`, `apps/worker` thin; `packages/domain` holds
   business logic; `packages/contracts` the schema source).
-- **`velora-modern` = PRIVATE** — *proposed*. REQUIRED DECISION (Gate 1): the
-  repository must be switched to private **by the owner** before architectural/
-  security material (threat model, ADRs, contracts) is pushed. Agent must not
-  change visibility automatically. Current verified state: **public**.
+- **`velora-modern` = PUBLIC — owner decision D-06 (revised 2026-08-29).**
+  PRIVATE was originally proposed; the owner explicitly revised the decision to
+  keep the repository public. This is an intentional, approved posture — not a
+  pending action. **Boundary that survives the revision:** visibility policy and
+  secret safety are separate concerns. Public visibility changes nothing about the
+  absolute rules — no secrets, no credentials, no operational infrastructure
+  identifiers, no user data in the repository, ever — and the pre-push
+  secret-safety scan (performed 2026-08-29: zero findings) remains a standing
+  gate before every push. The agent never changes visibility in either direction
+  without explicit owner instruction.
 - TypeScript, Next.js (public/SEO + app route groups), NestJS (API), PostgreSQL,
   dedicated workers, pg-boss (ADR-007), stateless applications.
 
@@ -52,7 +58,7 @@ system's security architecture.
 ## Alternatives Considered
 
 - Kubernetes now: rejected (no ops team; Compose is sufficient to 5k+ users on 2–3 nodes).
-- Public repo (transparency): rejected for the modernization period (security-sensitive docs); can be revisited post-cutover.
+- Public repo: **chosen by owner** (D-06 revised 2026-08-29) — transparency accepted after review; conditioned on the standing secret-safety scan and no-operational-data rules above.
 - Single mixed image: rejected (independent scaling/rollback of worker vs api).
 
 ## Consequences
@@ -66,8 +72,10 @@ system's security architecture.
 
 ## Security Impact
 
-Env separation + role separation + private posture directly retire three verified
-PHP-era risks (shared FTP account, shared mail key, public security docs).
+Env separation + role separation directly retire two verified PHP-era risks
+(shared FTP account, shared mail key). Public posture is accepted by owner
+decision with secret-safety scanning as the compensating control — it does not
+make security concerns irrelevant; it makes the no-secrets rule absolute.
 
 ## Migration Impact
 
@@ -79,7 +87,7 @@ None directly; delivery model must exist before Phase 3 scale tests.
 
 ## Open Questions
 
-1. **Owner: flip `velora-modern` to private (Gate 1) — REQUIRED DECISION.**
+1. Repository visibility — **RESOLVED**: KEEP PUBLIC (owner decision D-06, revised 2026-08-29).
 2. Registry choice + mirror strategy (hosting-validation).
 
 ## Phase
