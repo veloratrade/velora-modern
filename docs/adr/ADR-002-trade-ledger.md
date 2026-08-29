@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — **contains a genuine business decision (Option A vs B) that only the owner may approve.**
+Accepted — owner decision D-01 (2026-08-29): **Option B approved** — immutable trade ledger, correction events, tombstone deletion, explicit mutation ownership (user/sync/webhook/admin), append-only trade events, optimistic concurrency/versioning, idempotent external trade identifiers. Implementation not started (Phase 1 schema design / Phase 2 wave ④).
 
 ## Context
 
@@ -26,8 +26,8 @@ scale, unspecified mutation semantics are the largest correctness risk in the sy
 
 ## Decision
 
-**Recommendation: Option B — immutable ledger + correction events + tombstone deletion.**
-This is NOT accepted until the owner approves.
+**Option B — immutable ledger + correction events + tombstone deletion.**
+Accepted by owner decision D-01 (2026-08-29).
 
 | | Option A — mutable rows (status quo) | Option B — ledger + events + tombstones (recommended) |
 |---|---|---|
@@ -97,7 +97,7 @@ not exist for past deletes — accepted gap (documented, not fabricated).
 
 ## Open Questions
 
-1. **Option A vs B — OWNER DECISION REQUIRED.**
+1. Ledger model — **RESOLVED**: Option B (owner decision D-01, 2026-08-29).
 2. Live `trades` index/uniqueness set (inspect staging DB) — NEEDS VERIFICATION.
 3. Field-group conflict mapping (Phase 2).
 4. Whether `trade_events` is currently populated by writes (inspect code/DB) — NEEDS VERIFICATION.

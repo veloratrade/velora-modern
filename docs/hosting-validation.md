@@ -1,5 +1,11 @@
 # VELORA-MODERN — Hosting Validation Checklist (Phase 0 — NOT a deployment)
 
+**Authorization: GRANTED** — owner decision D-09 (2026-08-29). Evidence gathering
+only. **No infrastructure provisioning or modification is authorized.** Every
+evidence item must be dated, reproducible, obtained from the candidate production
+host/network position, and attached to the appropriate evidence record. Hosting
+remains BLOCKED until all required evidence exists.
+
 Status: **NOT VALIDATED — no evidence yet.** No hosting claims may be made until
 each row has evidence (command output, screenshot, timestamped log). This is the
 plan's load-bearing assumption (the PHP system exists because of hosting limits).

@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted — owner decision D-04 (2026-08-29): Argon2id **m=19456 KiB, t=2, p=1**; rehash-on-login; password change/reset → Argon2id; bcrypt `$2y$` verification retained as the mandatory Phase 1 proof gate. Existing PHP password hashes unchanged.
 
 ## Context
 
@@ -83,7 +83,7 @@ rehearsal; sessions table intentionally imported empty.
 
 ## Open Questions
 
-1. Argon2id parameters final values (owner confirmation of defaults).
+1. Argon2id parameters — **RESOLVED**: m=19456 KiB, t=2, p=1 (owner decision D-04, 2026-08-29).
 2. Device-notification policy in modern (keep parity or refine).
 
 ## Phase

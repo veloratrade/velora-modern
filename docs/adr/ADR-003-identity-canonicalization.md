@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted — owner decision D-02 (2026-08-29): **policy (a)** — lowercase canonicalization at every write path; plain UNIQUE on canonical email; mandatory duplicate scan before migration; existing case-colliding identities must be resolved before import. PHP database untouched.
 
 ## Context
 

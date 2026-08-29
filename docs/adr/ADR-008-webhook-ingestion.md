@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted — owner decision D-05 (2026-08-29): timestamp tolerance **±5 minutes**, configurable per webhook source; timestamp validation before processing; constant-time signature comparison; event-id deduplication; raw payload preservation; replay support. Implementation not started.
 
 ## Context
 
@@ -25,7 +25,7 @@ prevents forgery, replay, and duplicate-processing bugs.
 
 ```
 Receive
-  → Timestamp validation (tolerance window, proposed ±5 min, configurable, clock-skew aware)
+  → Timestamp validation (tolerance ±5 min — owner-approved D-05, configurable per source, clock-skew aware)
   → HMAC verification (constant-time compare; per-source secret, env-only)
   → Event-ID dedupe (persistent, windowed)
   → Immutable raw payload archive (append-only store)
@@ -84,7 +84,7 @@ rebuilt, not migrated.
 
 ## Open Questions
 
-1. Final timestamp tolerance value (proposed ±5 min) — owner confirmation.
+1. Timestamp tolerance — **RESOLVED**: ±5 minutes, configurable per source (owner decision D-05, 2026-08-29).
 2. MetaApi signature header details for spec extraction (Phase 2, read-only against PHP code + docs).
 
 ## Phase

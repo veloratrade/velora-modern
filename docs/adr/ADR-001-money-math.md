@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted — owner decision D-03 (2026-08-29): decimal-only arithmetic + scale matrix + golden vectors approved; rounding = **half-even for new currency computations**; historical parity preserves verified bcmath-equivalent behavior. Implementation not started.
 
 ## Context
 
