@@ -4,8 +4,13 @@
   "private": true,
   "description": "Velora modern architecture foundation (Phase 1 — dev/staging only)",
   "type": "module",
-  "engines": { "node": ">=20 <23" },
-  "workspaces": ["packages/*", "apps/*"],
+  "engines": {
+    "node": ">=20 <23"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "build": "tsc -b packages/contracts packages/domain packages/config",
     "typecheck": "tsc -b packages/contracts packages/domain packages/config apps/api apps/worker apps/web",
@@ -15,6 +20,7 @@
     "migrate:dev": "tsx db/migrate.ts"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@types/node": "^20.14.0",
     "tsx": "^4.19.0",
     "typescript": "^5.5.4"
