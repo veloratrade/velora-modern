@@ -1,0 +1,13 @@
+{
+  "name": "@velora/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/server.ts",
+  "dependencies": {
+    "@velora/contracts": "0.1.0",
+    "@velora/domain": "0.1.0",
+    "bcryptjs": "^2.4.3",
+    "hash-wasm": "^4.11.0"
+  }
+}

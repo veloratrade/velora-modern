@@ -1,0 +1,8 @@
+{
+  "name": "@velora/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/localeKernel.ts",
+  "dependencies": { "@velora/contracts": "0.1.0" }
+}
