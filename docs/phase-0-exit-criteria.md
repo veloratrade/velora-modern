@@ -32,10 +32,12 @@ OWNER DECISION REQUIRED.
 | 2 — Ten ADRs reviewed | All reviewed + business decisions approved | **PASS (10/10)** | Accepted: ADR-001, 002, 003, 005, 008 (D-01…D-05) + ADR-004, 006, 007, 009, 010 (D-11…D-15), all 2026-08-29. Evidence-gated sub-items (ADR-004 legacy TZ, ADR-009 hreflang) tracked inside their ADRs — not owner guesses |
 | 2a — Trade policy | ADR-002 approved | **PASS** | D-01 (Option B), 2026-08-29 |
 | 2b — Email policy | ADR-003 approved | **PASS** | D-02 (policy a), 2026-08-29 |
-| 3 — Hosting validated | 20-row checklist fully evidenced | **BLOCKED** | 0/20 rows evidenced; gathering authorized (D-09). Attempt 2026-08-31 stopped: candidate host not identified, no access — see `docs/evidence/BLOCKED-REPORT-2026-08-31.md` |
+| 3A — Development/Staging Foundation | Phase 1 foundation work requires only a clearly identified **non-production** dev/staging environment | **PASS (policy gate)** | Owner governance correction 2026-08-31: production hosting is NOT a prerequisite for Phase 1 Architecture Foundation. Dev/staging environment is created within Phase 1 (local/temporary non-production infra) and must never be represented as production evidence |
+| 3B — Production Hosting Validation | 20-row **production** checklist fully evidenced **from a candidate production host** | **BLOCKED — NOT YET APPLICABLE** | 0/20 rows evidenced; **no production host currently exists** (planning/infrastructure decision, not a failed validation). Attempt 2026-08-31 stopped pre-execution — see `docs/evidence/BLOCKED-REPORT-2026-08-31.md`. Gates ONLY production deployment/cutover/readiness — never Phase 1 |
 | 4 — Parity date | Concrete owner-committed date | **PASS** | D-07 = **2027-03-31** (owner decision, recorded verbatim) |
 | 5 — Kill criterion | Written stall-termination condition | **PASS** | D-08 accepted 2026-08-29 (text below) |
-| — Phase 1 authorization | Explicit owner authorization | **NOT AUTHORIZED** | D-10 |
+| — Production deployment / cutover / readiness | Real production hosting validated + migration rehearsal + explicit owner Go | **BLOCKED** | Requires Gate 3B PASS (20/20) + Phase 4 rehearsal per `docs/migration-strategy.md`; no production host exists yet |
+| — Phase 1 authorization | Explicit owner authorization (D-10) | **NOT AUTHORIZED — ELIGIBLE** | All Phase-1-side gates now PASS (1, 2, 2a, 2b, 3A, 4, 5). D-10 is the sole remaining owner action to start Phase 1 |
 
 ## Kill criterion (ACCEPTED — owner decision D-08, 2026-08-29)
 
@@ -46,11 +48,33 @@ OWNER DECISION REQUIRED.
 
 ## Remaining to unlock Phase 1
 
-1. Execute authorized hosting validation (D-09) until 20/20 rows evidenced
-   (candidate production network position, registry reachability, repeated-pull
-   throttling, OCR-sized image pull, PostgreSQL backup + restore drill to a
-   running stack, and all remaining checklist rows).
-2. Owner: explicit Phase 1 authorization (D-10).
+1. Owner: explicit Phase 1 authorization (**D-10**) — the sole remaining action;
+   all Phase-1-side gates are PASS.
+
+## Production track (separate from Phase 1 start)
+
+```
+Phase 0 Governance (ADRs / policies / parity date)   — DONE
+        ↓
+Phase 1 Architecture Foundation (dev/staging only)   — awaiting D-10
+  (repo/package structure, domain boundaries, contracts, DB foundation,
+   auth foundation, observability, testing, CI/CD, local/dev/staging env)
+        ↓
+Production capacity / hosting decision               — owner, future
+        ↓
+Candidate production host identified + access
+        ↓
+Gate 3B: 20/20 Production Hosting Validation (docs/hosting-validation.md)
+        ↓
+Production Readiness (security gates, load tests, rehearsal)
+        ↓
+Migration / Cutover (docs/migration-strategy.md)
+```
+
+**Production-host status (2026-08-31):** «No production host currently exists for
+`velora-modern`. This is a planning/infrastructure decision, not a failed
+validation result.» Gate 3B stays BLOCKED until a real candidate production host
+exists; dev/staging evidence must never be counted as production evidence.
 
 Push of the Phase 0 commits is permitted only on explicit owner authorization;
 the repository's public posture (D-06) allows it at any time, and the standing

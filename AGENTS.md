@@ -6,8 +6,10 @@ It is deliberately **governance-only**: it does not prescribe framework internal
 ## Project status
 
 Phase 0 (Architecture & Governance) — **documentation only**. No application code
-exists in this repository yet. Phase 1 starts only after the owner has explicitly
-approved Phase 0 exit (see `docs/phase-0-exit-criteria.md`).
+exists in this repository yet. Phase 1 (Architecture Foundation, dev/staging only)
+starts only after the owner has explicitly authorized it (D-10 — see
+`docs/phase-0-exit-criteria.md`); production hosting validation (Gate 3B) gates
+production deployment/cutover, not Phase 1.
 
 ## Non-negotiable rules
 

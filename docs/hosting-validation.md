@@ -1,9 +1,20 @@
-# VELORA-MODERN — Hosting Validation Checklist (Phase 0 — NOT a deployment)
+# VELORA-MODERN — Production Hosting Validation Checklist (Gate 3B — NOT a deployment)
+
+**Scope (owner governance correction, 2026-08-31):** this checklist validates the
+**production** hosting environment only (Gate 3B). It **does not gate the start of
+Phase 1 Architecture Foundation** — Phase 1 runs on a clearly identified
+non-production dev/staging environment and may not treat any dev/staging evidence
+as production evidence. Nothing in this file may be marked PASS on dev/staging
+results.
+
+**Production-host status:** «No production host currently exists for
+`velora-modern`. This is a planning/infrastructure decision, not a failed
+validation result.»
 
 **Authorization: GRANTED** — owner decision D-09 (2026-08-29). Evidence gathering
 only. **No infrastructure provisioning or modification is authorized.** Every
 evidence item must be dated, reproducible, obtained from the candidate production
-host/network position, and attached to the appropriate evidence record. Hosting
+host/network position, and attached to the appropriate evidence record. Gate 3B
 remains BLOCKED until all required evidence exists.
 
 Status: **NOT VALIDATED — no evidence yet.** No hosting claims may be made until

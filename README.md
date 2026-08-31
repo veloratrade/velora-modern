@@ -10,4 +10,6 @@ Modern TypeScript implementation of Velora (trading journal platform).
   → `docs/adr/` (decisions — all ten Accepted 2026-08-29; evidence-gated sub-items
   remain open inside ADR-004 [legacy-TZ sampling] and ADR-009 [hreflang verification]).
 
-Phase 1 starts only after Phase 0 gates are PASS and the owner approves.
+Phase 1 (Architecture Foundation — dev/staging only) awaits only the owner's
+explicit authorization (D-10); production hosting validation (Gate 3B) is a
+separate, later gate on the production track.
