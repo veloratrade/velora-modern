@@ -1,0 +1,12 @@
+{
+  "name": "locale-routing",
+  "contract": "C-02/C-03",
+  "cases": [
+    { "request": { "method": "GET", "path": "/" }, "expect": { "status": 200, "headers": { "X-VELORA-Locale": "fa" } } },
+    { "request": { "method": "GET", "path": "/en/" }, "expect": { "status": 200, "headers": { "X-VELORA-Locale": "en" } } },
+    { "request": { "method": "GET", "path": "/fa/checkout" }, "expect": { "status": 200, "headers": { "X-VELORA-Locale": "fa" } } },
+    { "request": { "method": "GET", "path": "/en/checkout" }, "expect": { "status": 200, "headers": { "X-VELORA-Locale": "en" } } },
+    { "request": { "method": "GET", "path": "/definitely-not-a-route" }, "expect": { "status": 404 } }
+  ],
+  "tolerances": ["non-contractual headers", "body shape where only headers are contractual"]
+}

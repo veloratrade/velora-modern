@@ -9,5 +9,9 @@
     "@velora/domain": "0.1.0",
     "bcryptjs": "^2.4.3",
     "hash-wasm": "^4.11.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/pg": "^8.23.1"
   }
 }

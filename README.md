@@ -1,7 +1,8 @@
 # velora-modern
 
 Modern TypeScript implementation of Velora (trading journal platform).
-**Status: PHASE 0 — ARCHITECTURE & GOVERNANCE (documentation only).**
+**Status: PHASE 1 — ARCHITECTURE FOUNDATION (in progress, D-10 authorized
+2026-08-31, dev/staging only).**
 
 - No application code exists in this repository yet, by design.
 - The production system remains the PHP repository (`veloratrade/veloratrade`)

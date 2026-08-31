@@ -5,11 +5,13 @@ It is deliberately **governance-only**: it does not prescribe framework internal
 
 ## Project status
 
-Phase 0 (Architecture & Governance) — **documentation only**. No application code
-exists in this repository yet. Phase 1 (Architecture Foundation, dev/staging only)
-starts only after the owner has explicitly authorized it (D-10 — see
-`docs/phase-0-exit-criteria.md`); production hosting validation (Gate 3B) gates
-production deployment/cutover, not Phase 1.
+Phase 1 (Architecture Foundation) — **IN PROGRESS under D-10 (2026-08-31),
+dev/staging only**. Foundation implemented: contracts, pure domain (decimal/
+PnL/ledger), PostgreSQL migrations + roles, auth primitives (bcrypt `$2y$`
+proof gate PASSED), queue semantics, API/web kernels, CI/infra/parity
+scaffolding — see `docs/adr/ADR-011-phase1-implementation-record.md`.
+Production hosting validation (Gate 3B) gates production deployment/cutover,
+not Phase 1.
 
 ## Non-negotiable rules
 

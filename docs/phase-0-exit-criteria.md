@@ -17,7 +17,7 @@ OWNER DECISION REQUIRED.
 | D-07 | Parity target date | **Accepted — 2027-03-31** (owner decision, recorded verbatim; not reinterpreted, extended, or changed). |
 | D-08 | Kill criterion | **Accepted** (text below). |
 | D-09 | Hosting validation | **AUTHORIZED** — evidence gathering only; no infrastructure provisioning/modification. Status stays BLOCKED until evidence complete. |
-| D-10 | Phase 1 | **NOT AUTHORIZED** — blocked until all mandatory gates pass. |
+| D-10 | Phase 1 | **AUTHORIZED (2026-08-31) — Architecture Foundation only, dev/staging environment only.** Production deployment/cutover remains gated by Gate 3B + Phase 4 rehearsal. Implementation record: `docs/adr/ADR-011-phase1-implementation-record.md`. |
 | D-11 | ADR-004 time model | **Accepted** (2026-08-29) — timestamptz/UTC, dual-column trading timestamps, sampling procedure. Legacy-TZ interpretation remains evidence-gated (not part of approval; no timezone value recorded). |
 | D-12 | ADR-006 contract tiering | **Accepted** (2026-08-29) — two-tier model + frozen external list; C-11 verification Phase 1; C-15 added as unfrozen candidate. |
 | D-13 | ADR-007 job semantics | **Accepted** (2026-08-29) — pg-boss + job standard + four Redis triggers. |
@@ -37,7 +37,7 @@ OWNER DECISION REQUIRED.
 | 4 — Parity date | Concrete owner-committed date | **PASS** | D-07 = **2027-03-31** (owner decision, recorded verbatim) |
 | 5 — Kill criterion | Written stall-termination condition | **PASS** | D-08 accepted 2026-08-29 (text below) |
 | — Production deployment / cutover / readiness | Real production hosting validated + migration rehearsal + explicit owner Go | **BLOCKED** | Requires Gate 3B PASS (20/20) + Phase 4 rehearsal per `docs/migration-strategy.md`; no production host exists yet |
-| — Phase 1 authorization | Explicit owner authorization (D-10) | **NOT AUTHORIZED — ELIGIBLE** | All Phase-1-side gates now PASS (1, 2, 2a, 2b, 3A, 4, 5). D-10 is the sole remaining owner action to start Phase 1 |
+| — Phase 1 authorization | Explicit owner authorization (D-10) | **AUTHORIZED (2026-08-31)** — Architecture Foundation, dev/staging only | D-10 recorded; foundation implemented + verified (ADR-011 test evidence); production track unchanged |
 
 ## Kill criterion (ACCEPTED — owner decision D-08, 2026-08-29)
 
@@ -48,8 +48,11 @@ OWNER DECISION REQUIRED.
 
 ## Remaining to unlock Phase 1
 
-1. Owner: explicit Phase 1 authorization (**D-10**) — the sole remaining action;
-   all Phase-1-side gates are PASS.
+~~Owner: explicit Phase 1 authorization (D-10)~~ — **D-10 GRANTED 2026-08-31**
+(Architecture Foundation, dev/staging only). Phase 1 foundation implemented and
+verified — see `docs/adr/ADR-011-phase1-implementation-record.md` for evidence
+and the explicit BLOCKED items (compose startup, pg-boss live run, CI
+execution, restore drill — all environment-gated, none fabricated).
 
 ## Production track (separate from Phase 1 start)
 

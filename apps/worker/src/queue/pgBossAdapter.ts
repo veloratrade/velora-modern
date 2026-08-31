@@ -8,14 +8,34 @@
 import type { JobDescriptor } from "@velora/contracts";
 import type { QueuePort, QueuedJob } from "./QueuePort.js";
 
+/**
+ * Minimal structural interface for the pinned pg-boss major. The adapter binds
+ * to the live instance only when a real PostgreSQL exists (dev/staging bring-up);
+ * exact option-shape verification is part of that first live run (ADR-011 §2).
+ */
+interface PgBossMinimal {
+  start(): Promise<void>;
+  send(args: { name: string; data: unknown; options: { singletonKey: string; priority: number } }): Promise<string | null>;
+  fetch(opts: { queues: string[]; limit: number }): Promise<Array<{ id: string; data: unknown }> | null>;
+  complete(id: string): Promise<unknown>;
+  fail(id: string, options?: { data?: unknown }): Promise<unknown>;
+  getJobCounts(): Promise<Record<string, number>>;
+}
+
 export async function createPgBossQueue(connectionString: string): Promise<QueuePort> {
   const { default: PgBoss } = await import("pg-boss");
-  const boss = new PgBoss({ connectionString, max: 10 });
+  const boss = new PgBoss({ connectionString, max: 10 }) as unknown as PgBossMinimal;
   await boss.start();
   return {
     async enqueue<P>(descriptor: JobDescriptor<P>): Promise<string> {
-      // pg-boss deduplicates by singletonKey when provided
-      return boss.send({ name: descriptor.jobClass, data: descriptor as never, options: { singletonKey: descriptor.idempotencyKey, priority: 1 } });
+      // pg-boss deduplicates by singletonKey; a null id means the singleton
+      // already existed (duplicate suppressed) → return a stable derived id.
+      const id = await boss.send({
+        name: descriptor.jobClass,
+        data: descriptor as never,
+        options: { singletonKey: descriptor.idempotencyKey, priority: 1 },
+      });
+      return id ?? `dup:${descriptor.idempotencyKey}`;
     },
     async claim(): Promise<QueuedJob | null> {
       const jobs = await boss.fetch({ queues: ["*"], limit: 1 });

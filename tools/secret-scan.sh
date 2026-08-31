@@ -6,8 +6,9 @@ cd "$(git rev-parse --show-toplevel)"
 
 PATTERNS='github_pat_|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}|xox[bpoas]-|sk-[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{30,}|-----BEGIN [A-Z ]*PRIVATE KEY|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|://[^/"'"'"' ]+:[^/@"'"'"' ]+@'
 
-# files tracked by git (staged+committed); never scans node_modules (ignored)
-FILES=$(git ls-files)
+# files tracked by git (staged+committed); never scans node_modules (ignored).
+# This script itself is excluded — it contains the detection patterns verbatim.
+FILES=$(git ls-files | grep -v "^tools/secret-scan.sh$" || true)
 
 if [ -z "$FILES" ]; then echo "secret-scan: no tracked files"; exit 0; fi
 

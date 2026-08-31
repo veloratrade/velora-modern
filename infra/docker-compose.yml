@@ -1,0 +1,53 @@
+# Dev/staging reproducible environment — Phase 1 (ADR-010/D-15).
+#
+# ⚠️ GOVERNANCE: this file is DEV/STAGING ONLY. Starting this stack proves
+# NOTHING about production hosting (Gate 3B remains BLOCKED 0/20 — no production
+# host exists). Image digests are NOT pinned here because registry evidence
+# (reachability/throttling) is a Gate 3B checklist item; pin before production.
+#
+# Usage: cp infra/env/.env.example .env  (fill values locally; never commit)
+
+name: velora-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      API_ALLOWED_ORIGINS: ${API_ALLOWED_ORIGINS}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.worker
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
