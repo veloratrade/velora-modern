@@ -10,6 +10,13 @@ Status: **NOT VALIDATED — no evidence yet.** No hosting claims may be made unt
 each row has evidence (command output, screenshot, timestamped log). This is the
 plan's load-bearing assumption (the PHP system exists because of hosting limits).
 
+**Attempt log:**
+- 2026-08-31 — Validation attempt STOPPED before execution: no candidate
+  production host has been identified and no host access exists; the session
+  environment is a disqualified (sandbox/CI-class) position. All 20 rows remain
+  BLOCKED. Missing inputs and a ready-to-run per-row command plan:
+  see `docs/evidence/BLOCKED-REPORT-2026-08-31.md`.
+
 | # | Requirement | Validation method (planned) | Evidence | Status |
 |---|---|---|---|---|
 | 1 | Node.js LTS runtime | run target-version `node -v` on candidate host | — | NOT VALIDATED |

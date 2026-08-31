@@ -32,7 +32,7 @@ OWNER DECISION REQUIRED.
 | 2 — Ten ADRs reviewed | All reviewed + business decisions approved | **PASS (10/10)** | Accepted: ADR-001, 002, 003, 005, 008 (D-01…D-05) + ADR-004, 006, 007, 009, 010 (D-11…D-15), all 2026-08-29. Evidence-gated sub-items (ADR-004 legacy TZ, ADR-009 hreflang) tracked inside their ADRs — not owner guesses |
 | 2a — Trade policy | ADR-002 approved | **PASS** | D-01 (Option B), 2026-08-29 |
 | 2b — Email policy | ADR-003 approved | **PASS** | D-02 (policy a), 2026-08-29 |
-| 3 — Hosting validated | 20-row checklist fully evidenced | **BLOCKED** | 0/20 rows evidenced; gathering authorized (D-09) |
+| 3 — Hosting validated | 20-row checklist fully evidenced | **BLOCKED** | 0/20 rows evidenced; gathering authorized (D-09). Attempt 2026-08-31 stopped: candidate host not identified, no access — see `docs/evidence/BLOCKED-REPORT-2026-08-31.md` |
 | 4 — Parity date | Concrete owner-committed date | **PASS** | D-07 = **2027-03-31** (owner decision, recorded verbatim) |
 | 5 — Kill criterion | Written stall-termination condition | **PASS** | D-08 accepted 2026-08-29 (text below) |
 | — Phase 1 authorization | Explicit owner authorization | **NOT AUTHORIZED** | D-10 |
