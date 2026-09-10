@@ -75,6 +75,23 @@ export class TradeRepository {
   private static idCounter = 1;
   private static exitIdCounter = 1;
 
+  private static memoryExitLock = Promise.resolve();
+
+  private static async withMemoryLock<T>(fn: () => Promise<T> | T): Promise<T> {
+    let release: () => void = () => {};
+    const lock = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const prev = TradeRepository.memoryExitLock;
+    TradeRepository.memoryExitLock = prev.then(() => lock);
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+
   public static clearMemoryStore(): void {
     TradeRepository.memoryTrades = [];
     TradeRepository.memoryExits = [];
@@ -84,6 +101,7 @@ export class TradeRepository {
     ];
     TradeRepository.idCounter = 1;
     TradeRepository.exitIdCounter = 1;
+    TradeRepository.memoryExitLock = Promise.resolve();
   }
 
   public async findOwned(id: number, userId: number): Promise<MemoryTradeRecord | null> {
@@ -393,93 +411,173 @@ export class TradeRepository {
     userId: number,
     input: CreateTradeExitInput,
   ): Promise<number> {
-    const parentTrade = await this.requireOwned(tradeId, userId);
-
-    const existingExits = await this.listExitsByTrade(tradeId, userId);
-    let cumulativeVolume = new Decimal(0);
-    for (const exit of existingExits) {
-      cumulativeVolume = cumulativeVolume.plus(new Decimal(exit.volume));
-    }
-
-    const newExitVolume = new Decimal(input.volume);
-    const totalVolume = cumulativeVolume.plus(newExitVolume);
-    const parentVolume = new Decimal(parentTrade.volume);
-
-    if (totalVolume.greaterThan(parentVolume)) {
-      throw new ApiError(
-        'Cumulative exit volume exceeds the trade volume.',
-        422,
-        'VALIDATION_FAILED',
-        { volume: 'EXIT_VOLUME_EXCEEDED' },
-        'errors.validation.range',
-      );
-    }
-
-    const exitedAtTime = new Date(input.exitedAt).getTime();
-    const openTime = new Date(parentTrade.openTime).getTime();
-    const closeTime = new Date(parentTrade.closeTime).getTime();
-
-    if (exitedAtTime < openTime || exitedAtTime > closeTime) {
-      throw new ApiError(
-        'Exit timestamp must be within trade open and close times.',
-        422,
-        'VALIDATION_FAILED',
-        { field: 'exitedAt' },
-        'errors.validation.datetime',
-      );
-    }
-
-    const ratio = newExitVolume.dividedBy(parentVolume);
-    const allocatedCommission = new Decimal(parentTrade.commission).times(ratio).toFixed(8);
-    const allocatedSwap = new Decimal(parentTrade.swap).times(ratio).toFixed(8);
-
-    const calcResult = PnlCalculator.calculate({
-      entryPrice: parentTrade.entryPrice,
-      exitPrice: input.exitPrice,
-      volume: input.volume,
-      direction: parentTrade.direction,
-      commission: allocatedCommission,
-      swap: allocatedSwap,
-      contractSize: parentTrade.contractSize,
-    });
-
-    const exitPnl = calcResult.netPnl;
-
     try {
-      const created = await prisma.tradeExit.create({
-        data: {
-          tradeId: BigInt(tradeId),
-          exitType: input.exitType,
+      return await prisma.$transaction(async (tx) => {
+        const trade = await tx.trade.findFirst({
+          where: {
+            id: BigInt(tradeId),
+            userId: BigInt(userId),
+          },
+        });
+
+        if (!trade) {
+          throw new ApiError('Trade not found.', 404, 'NOT_FOUND', null, 'errors.trades.notFound');
+        }
+
+        const parentTrade = this.mapDbToRecord(trade);
+
+        const existingExits = await tx.tradeExit.findMany({
+          where: {
+            tradeId: BigInt(tradeId),
+          },
+        });
+
+        let cumulativeVolume = new Decimal(0);
+        for (const exit of existingExits) {
+          cumulativeVolume = cumulativeVolume.plus(new Decimal(exit.volume.toString()));
+        }
+
+        const newExitVolume = new Decimal(input.volume);
+        const totalVolume = cumulativeVolume.plus(newExitVolume);
+        const parentVolume = new Decimal(parentTrade.volume);
+
+        if (totalVolume.greaterThan(parentVolume)) {
+          throw new ApiError(
+            'Cumulative exit volume exceeds the trade volume.',
+            422,
+            'VALIDATION_FAILED',
+            { volume: 'EXIT_VOLUME_EXCEEDED' },
+            'errors.validation.range',
+          );
+        }
+
+        const exitedAtTime = new Date(input.exitedAt).getTime();
+        const openTime = new Date(parentTrade.openTime).getTime();
+        const closeTime = new Date(parentTrade.closeTime).getTime();
+
+        if (exitedAtTime < openTime || exitedAtTime > closeTime) {
+          throw new ApiError(
+            'Exit timestamp must be within trade open and close times.',
+            422,
+            'VALIDATION_FAILED',
+            { field: 'exitedAt' },
+            'errors.validation.datetime',
+          );
+        }
+
+        const ratio = newExitVolume.dividedBy(parentVolume);
+        const allocatedCommission = new Decimal(parentTrade.commission).times(ratio).toFixed(8);
+        const allocatedSwap = new Decimal(parentTrade.swap).times(ratio).toFixed(8);
+
+        const calcResult = PnlCalculator.calculate({
+          entryPrice: parentTrade.entryPrice,
           exitPrice: input.exitPrice,
           volume: input.volume,
-          pnl: exitPnl,
-          exitTime: new Date(input.exitedAt),
-        },
-      });
+          direction: parentTrade.direction,
+          commission: allocatedCommission,
+          swap: allocatedSwap,
+          contractSize: parentTrade.contractSize,
+        });
 
-      return Number(created.id);
+        const exitPnl = calcResult.netPnl;
+
+        const created = await tx.tradeExit.create({
+          data: {
+            tradeId: BigInt(tradeId),
+            exitType: input.exitType,
+            exitPrice: input.exitPrice,
+            volume: input.volume,
+            pnl: exitPnl,
+            exitTime: new Date(input.exitedAt),
+          },
+        });
+
+        return Number(created.id);
+      });
     } catch (err) {
       if (err instanceof ApiError) throw err;
       if (!this.isTestEnvironment()) {
         throw new ApiError('Service unavailable.', 503, 'SERVICE_UNAVAILABLE');
       }
 
-      const id = TradeRepository.exitIdCounter++;
-      const record: MemoryTradeExitRecord = {
-        id,
-        tradeId,
-        userId,
-        exitType: input.exitType,
-        exitPrice: input.exitPrice,
-        volume: input.volume,
-        pnl: exitPnl,
-        exitedAt: input.exitedAt,
-        notes: input.notes ?? null,
-        createdAt: new Date(),
-      };
+      return TradeRepository.withMemoryLock(async () => {
+        const parentTrade = TradeRepository.memoryTrades.find(
+          (t) => t.id === tradeId && t.userId === userId,
+        );
+        if (!parentTrade) {
+          throw new ApiError('Trade not found.', 404, 'NOT_FOUND', null, 'errors.trades.notFound');
+        }
 
-      TradeRepository.memoryExits.push(record);
-      return id;
+        const existingExits = TradeRepository.memoryExits.filter(
+          (e) => e.tradeId === tradeId && e.userId === userId,
+        );
+
+        let cumulativeVolume = new Decimal(0);
+        for (const exit of existingExits) {
+          cumulativeVolume = cumulativeVolume.plus(new Decimal(exit.volume));
+        }
+
+        const newExitVolume = new Decimal(input.volume);
+        const totalVolume = cumulativeVolume.plus(newExitVolume);
+        const parentVolume = new Decimal(parentTrade.volume);
+
+        if (totalVolume.greaterThan(parentVolume)) {
+          throw new ApiError(
+            'Cumulative exit volume exceeds the trade volume.',
+            422,
+            'VALIDATION_FAILED',
+            { volume: 'EXIT_VOLUME_EXCEEDED' },
+            'errors.validation.range',
+          );
+        }
+
+        const exitedAtTime = new Date(input.exitedAt).getTime();
+        const openTime = new Date(parentTrade.openTime).getTime();
+        const closeTime = new Date(parentTrade.closeTime).getTime();
+
+        if (exitedAtTime < openTime || exitedAtTime > closeTime) {
+          throw new ApiError(
+            'Exit timestamp must be within trade open and close times.',
+            422,
+            'VALIDATION_FAILED',
+            { field: 'exitedAt' },
+            'errors.validation.datetime',
+          );
+        }
+
+        const ratio = newExitVolume.dividedBy(parentVolume);
+        const allocatedCommission = new Decimal(parentTrade.commission).times(ratio).toFixed(8);
+        const allocatedSwap = new Decimal(parentTrade.swap).times(ratio).toFixed(8);
+
+        const calcResult = PnlCalculator.calculate({
+          entryPrice: parentTrade.entryPrice,
+          exitPrice: input.exitPrice,
+          volume: input.volume,
+          direction: parentTrade.direction,
+          commission: allocatedCommission,
+          swap: allocatedSwap,
+          contractSize: parentTrade.contractSize,
+        });
+
+        const exitPnl = calcResult.netPnl;
+
+        const id = TradeRepository.exitIdCounter++;
+        const record: MemoryTradeExitRecord = {
+          id,
+          tradeId,
+          userId,
+          exitType: input.exitType,
+          exitPrice: input.exitPrice,
+          volume: input.volume,
+          pnl: exitPnl,
+          exitedAt: input.exitedAt,
+          notes: input.notes ?? null,
+          createdAt: new Date(),
+        };
+
+        TradeRepository.memoryExits.push(record);
+        return id;
+      });
     }
   }
 

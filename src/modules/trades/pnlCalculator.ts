@@ -21,6 +21,15 @@ export interface PnlCalculationResult {
 }
 
 export class PnlCalculator {
+  private static readonly SCALE = 8;
+
+  /**
+   * Truncate Decimal to 8 fraction digits toward zero (BCMath scale=8 equivalence).
+   */
+  public static scale8(val: Decimal): Decimal {
+    return val.toDP(PnlCalculator.SCALE, Decimal.ROUND_DOWN);
+  }
+
   /**
    * Compute gross PnL in account currency for a closed trade.
    * Buy:  (exitPrice - entryPrice) * volume * contractSize
@@ -38,8 +47,10 @@ export class PnlCalculator {
     const vol = new Decimal(volume);
     const size = new Decimal(contractSize);
 
-    const delta = direction === 'buy' ? exit.minus(entry) : entry.minus(exit);
-    return delta.times(vol).times(size);
+    const delta =
+      direction === 'buy' ? this.scale8(exit.minus(entry)) : this.scale8(entry.minus(exit));
+    const volSize = this.scale8(vol.times(size));
+    return this.scale8(delta.times(volSize));
   }
 
   /**
@@ -62,13 +73,14 @@ export class PnlCalculator {
     const vol = new Decimal(volume);
     const size = new Decimal(contractSize);
 
-    const delta = direction === 'buy' ? entry.minus(sl) : sl.minus(entry);
+    const delta = direction === 'buy' ? this.scale8(entry.minus(sl)) : this.scale8(sl.minus(entry));
 
     if (delta.lessThanOrEqualTo(0)) {
       return null; // SL on wrong side
     }
 
-    return delta.times(vol).times(size);
+    const volSize = this.scale8(vol.times(size));
+    return this.scale8(delta.times(volSize));
   }
 
   /**
@@ -92,7 +104,8 @@ export class PnlCalculator {
     const commission = new Decimal(commissionStr);
     const swap = new Decimal(swapStr);
 
-    const net = gross.minus(commission).minus(swap);
+    const netStep1 = this.scale8(gross.minus(commission));
+    const net = this.scale8(netStep1.minus(swap));
 
     const risk = this.riskAmount(
       input.entryPrice,
@@ -104,7 +117,7 @@ export class PnlCalculator {
 
     let rMultiple: Decimal | null = null;
     if (risk !== null && risk.greaterThan(0)) {
-      rMultiple = net.dividedBy(risk);
+      rMultiple = this.scale8(net.dividedBy(risk));
     }
 
     this.assertFits(net, 'profitLoss', 16, 8);

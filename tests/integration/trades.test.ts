@@ -320,5 +320,66 @@ describe('Core Trading & Journaling Engine Integration Tests', () => {
       expect(listRes.json().data.items).toHaveLength(1);
       expect(listRes.json().data.items[0].volume).toBe('0.5');
     });
+
+    it('should reject concurrent partial exits that exceed total parent trade volume (atomicity check)', async () => {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/trades',
+        headers: { authorization: `Bearer ${user1Token}` },
+        payload: {
+          symbol: 'EURUSD',
+          direction: 'buy',
+          entryPrice: '1.1000',
+          exitPrice: '1.1050',
+          volume: '1.0', // Total trade volume = 1.0
+          commission: '10.00',
+          openTime: '2026-09-10 10:00:00',
+          closeTime: '2026-09-10 14:00:00',
+        },
+      });
+      const tradeId = createRes.json().data.id;
+
+      // Send 2 concurrent requests, each attempting volume = 0.6 (0.6 + 0.6 = 1.2 > 1.0)
+      const [res1, res2] = await Promise.all([
+        app.inject({
+          method: 'POST',
+          url: `/api/v1/trades/${tradeId}/exits`,
+          headers: { authorization: `Bearer ${user1Token}` },
+          payload: {
+            exitType: 'tp',
+            exitPrice: '1.1030',
+            volume: '0.6',
+            exitedAt: '2026-09-10 11:00:00',
+            notes: 'Concurrent exit A',
+          },
+        }),
+        app.inject({
+          method: 'POST',
+          url: `/api/v1/trades/${tradeId}/exits`,
+          headers: { authorization: `Bearer ${user1Token}` },
+          payload: {
+            exitType: 'tp',
+            exitPrice: '1.1040',
+            volume: '0.6',
+            exitedAt: '2026-09-10 11:30:00',
+            notes: 'Concurrent exit B',
+          },
+        }),
+      ]);
+
+      const statusCodes = [res1.statusCode, res2.statusCode].sort();
+      expect(statusCodes).toEqual([201, 422]);
+
+      // List exits to verify exactly one exit was stored with volume 0.6
+      const listRes = await app.inject({
+        method: 'GET',
+        url: `/api/v1/trades/${tradeId}/exits`,
+        headers: { authorization: `Bearer ${user1Token}` },
+      });
+
+      expect(listRes.statusCode).toBe(200);
+      expect(listRes.json().data.items).toHaveLength(1);
+      expect(listRes.json().data.items[0].volume).toBe('0.6');
+    });
   });
 });
