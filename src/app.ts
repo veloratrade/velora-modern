@@ -6,6 +6,7 @@ import { env } from './config/env.js';
 import { logger } from './core/logger.js';
 import { requestIdPlugin } from './core/plugins/requestId.js';
 import { errorHandler } from './core/errors/errorHandler.js';
+import { authRoutes } from './modules/auth/auth.routes.js';
 
 export function buildApp() {
   const app = Fastify({
@@ -21,8 +22,9 @@ export function buildApp() {
 
   app.register(cors, {
     origin: env.NODE_ENV === 'production' ? false : true,
+    credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-request-id'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-request-id', 'Cookie'],
   });
 
   app.register(sensible);
@@ -40,21 +42,24 @@ export function buildApp() {
     });
   });
 
-  // GET /health Endpoint
+  // Operational /health Endpoint
   app.get('/health', async () => {
     return {
       status: 'ok',
       service: 'velora-modern',
-      version: '0.2.0',
+      version: '0.4.0',
       environment: env.NODE_ENV,
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
       dependencies: {
-        database: env.DATABASE_URL ? 'configured' : 'not_configured_phase2',
-        redis: env.REDIS_URL ? 'configured' : 'not_configured_phase2',
+        database: env.DATABASE_URL ? 'configured' : 'not_configured',
+        redis: env.REDIS_URL ? 'configured' : 'not_configured',
       },
     };
   });
+
+  // Domain Module Routes
+  app.register(authRoutes, { prefix: '/api/v1/auth' });
 
   return app;
 }

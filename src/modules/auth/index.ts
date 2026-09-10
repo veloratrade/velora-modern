@@ -1,3 +1,6 @@
-// Auth Module Structural Placeholder (Phase 2 Scaffolding)
-// Business implementation (Login, Register, JWT, Sessions) planned for Phase 4.
-export const AUTH_MODULE_VERSION = '0.2.0';
+export * from './types.js';
+export * from './roles.js';
+export * from './jwt.js';
+export * from './password.js';
+export * from './auth.service.js';
+export * from './auth.routes.js';

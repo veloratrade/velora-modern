@@ -10,12 +10,50 @@ export interface ApiErrorResponse {
   details?: Record<string, unknown>;
 }
 
+export class ApiError extends Error {
+  public readonly statusCode: number;
+  public readonly code: string;
+  public readonly details?: Record<string, unknown>;
+
+  constructor(
+    message: string,
+    statusCode = 400,
+    code = 'BAD_REQUEST',
+    details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+    this.statusCode = statusCode;
+    this.code = code;
+    this.details = details;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
 export function errorHandler(
   error: FastifyError | Error,
   request: FastifyRequest,
   reply: FastifyReply,
 ): void {
   const requestId = request.id;
+
+  // Custom ApiError
+  if (error instanceof ApiError) {
+    const response: ApiErrorResponse = {
+      success: false,
+      error: error.message,
+      code: error.code,
+      statusCode: error.statusCode,
+      details: error.details,
+    };
+    if (error.statusCode >= 500) {
+      request.log.error({ requestId, err: error }, 'Server error encountered');
+    } else {
+      request.log.info({ requestId, err: error }, 'Client error encountered');
+    }
+    reply.status(error.statusCode).send(response);
+    return;
+  }
 
   // Zod Validation Errors
   if (error instanceof ZodError) {
