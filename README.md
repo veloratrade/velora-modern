@@ -15,6 +15,7 @@ This repository contains the future modern Node.js/TypeScript implementation of 
 
 * [Railway Infrastructure Baseline](docs/infrastructure/railway-baseline.md)
 * [Migration Principles](docs/architecture/migration-principles.md)
+* [Domain & DNS Strategy](docs/infrastructure/domain-strategy.md)
 
 ## Next Phase
 
