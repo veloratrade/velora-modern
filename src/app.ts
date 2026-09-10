@@ -7,6 +7,7 @@ import { logger } from './core/logger.js';
 import { requestIdPlugin } from './core/plugins/requestId.js';
 import { errorHandler } from './core/errors/errorHandler.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
+import { tradeRoutes } from './modules/trades/trades.routes.js';
 
 export function buildApp() {
   const app = Fastify({
@@ -53,7 +54,7 @@ export function buildApp() {
     return {
       status: 'ok',
       service: 'velora-modern',
-      version: '0.4.0',
+      version: '0.5.0',
       environment: env.NODE_ENV,
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
@@ -66,6 +67,7 @@ export function buildApp() {
 
   // Domain Module Routes
   app.register(authRoutes, { prefix: '/api/v1/auth' });
+  app.register(tradeRoutes, { prefix: '/api/v1/trades' });
 
   return app;
 }

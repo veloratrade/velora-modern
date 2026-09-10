@@ -23,7 +23,7 @@ describe('Fastify Application Scaffolding', () => {
     const body = JSON.parse(response.payload);
     expect(body.status).toBe('ok');
     expect(body.service).toBe('velora-modern');
-    expect(body.version).toBe('0.4.0');
+    expect(body.version).toBe('0.5.0');
     expect(body.environment).toBeDefined();
     expect(body.timestamp).toBeDefined();
     expect(body.uptime).toBeTypeOf('number');

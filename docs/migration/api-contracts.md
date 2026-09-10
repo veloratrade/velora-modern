@@ -72,3 +72,90 @@ All API endpoints return standard JSON responses conforming to the following env
   - `HttpOnly`
   - `SameSite=Strict`
   - `Max-Age=604800` (7 days)
+
+---
+
+## 4. Trading & Journaling Engine API Contracts
+
+All endpoints below require standard Bearer Authentication (`Authorization: Bearer <token>`).
+
+### 4.1 Search Trades (`GET /api/v1/trades`)
+- **Query Parameters**:
+  - `symbol`: Filter by trade symbol substring (e.g. `EURUSD`).
+  - `direction`: Filter by direction (`buy` | `sell`).
+  - `startDate`: Filter by openTime >= startDate (`YYYY-MM-DD`).
+  - `endDate`: Filter by closeTime <= endDate (`YYYY-MM-DD`).
+  - `page`: Page number (default `1`).
+  - `limit`: Items per page (default `20`, max `100`).
+- **Response `data`**:
+  ```json
+  {
+    "items": [ TradeObject ],
+    "pagination": {
+      "page": 1,
+      "limit": 20,
+      "total": 42,
+      "totalPages": 3
+    }
+  }
+  ```
+
+### 4.2 Get Trade by ID (`GET /api/v1/trades/:id`)
+- **Path Parameter**: `id` (integer)
+- **Response `data`**: `TradeObject`
+- **Security**: Ownership isolation enforced (`404` if trade does not exist or belongs to another user).
+
+### 4.3 Create Manual Trade (`POST /api/v1/trades`)
+- **Request Body**:
+  ```json
+  {
+    "symbol": "EURUSD",
+    "direction": "buy",
+    "entryPrice": "1.1000",
+    "exitPrice": "1.1050",
+    "volume": "1.0",
+    "contractSize": "100000",
+    "commission": "5.00",
+    "swap": "1.50",
+    "stopLoss": "1.0970",
+    "takeProfit": "1.1150",
+    "accountId": 1,
+    "openTime": "2026-09-10 10:00:00",
+    "closeTime": "2026-09-10 12:00:00",
+    "strategyTag": "Breakout",
+    "emotionalScore": 4,
+    "notes": "H1 clean breakout"
+  }
+  ```
+- **Response**: `201 Created` with `TradeObject`. Financial metrics (`profitLoss`, `rMultiple`) calculated automatically.
+
+### 4.4 Update Trade (`PUT /api/v1/trades/:id`)
+- **Path Parameter**: `id` (integer)
+- **Request Body**: Partial update fields (`symbol`, `direction`, `entryPrice`, `exitPrice`, `volume`, `commission`, `swap`, `stopLoss`, `takeProfit`, `openTime`, `closeTime`, `strategyTag`, `emotionalScore`, `notes`).
+- **Response**: `200 OK` with updated `TradeObject`. Recalculates `profitLoss` and `rMultiple`.
+
+### 4.5 Delete Trade (`DELETE /api/v1/trades/:id`)
+- **Path Parameter**: `id` (integer)
+- **Response**: `200 OK` with `{ "messageKey": "trades.deleted" }`.
+
+### 4.6 List Trade Exits (`GET /api/v1/trades/:id/exits`)
+- **Path Parameter**: `id` (integer)
+- **Response `data`**: `{ "items": [ TradeExitObject ] }`.
+
+### 4.7 Create Partial Exit (`POST /api/v1/trades/:id/exits`)
+- **Path Parameter**: `id` (integer)
+- **Request Body**:
+  ```json
+  {
+    "exitType": "tp",
+    "exitPrice": "1.1030",
+    "volume": "0.5",
+    "exitedAt": "2026-09-10 11:00:00",
+    "notes": "TP1 partial close"
+  }
+  ```
+- **Response**: `201 Created` with exit ID. Validates cumulative volume limit and chronology (`openTime <= exitedAt <= closeTime`).
+
+### 4.8 Delete Partial Exit (`DELETE /api/v1/trades/exits/:exitId`)
+- **Path Parameter**: `exitId` (integer)
+- **Response**: `200 OK` with `{ "messageKey": "trades.exitDeleted" }`.
