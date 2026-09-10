@@ -57,7 +57,11 @@ export class RateLimiter {
         throw err;
       }
 
-      // 2. Memory fallback for local testing or when DB is not ready
+      // Memory fallback is strictly allowed ONLY in test environment
+      if (process.env.NODE_ENV !== 'test') {
+        throw new ApiError('Service unavailable.', 503, 'SERVICE_UNAVAILABLE');
+      }
+
       const record = this.memoryStore.get(bucketKey);
       const currentTime = Date.now();
 

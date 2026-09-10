@@ -33,12 +33,18 @@ export function buildApp() {
   // Register Error Handlers
   app.setErrorHandler(errorHandler);
 
-  app.setNotFoundHandler((request, reply) => {
+  app.setNotFoundHandler((_request, reply) => {
     reply.status(404).send({
-      success: false,
-      error: `Route ${request.method}:${request.url} not found`,
-      code: 'NOT_FOUND',
-      statusCode: 404,
+      status: 'error',
+      data: null,
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Resource not found.',
+        messageKey: 'errors.notFound',
+        params: {},
+        details: null,
+      },
+      timestamp: new Date().toISOString(),
     });
   });
 

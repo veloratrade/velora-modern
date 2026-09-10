@@ -26,7 +26,7 @@ describe('Error Handling Scaffolding', () => {
     await app.close();
   });
 
-  it('404 for unknown routes should return structured JSON error envelope', async () => {
+  it('404 for unknown routes should return structured PHP-compatible JSON error envelope', async () => {
     const response = await app.inject({
       method: 'GET',
       url: '/non-existent-route',
@@ -35,13 +35,16 @@ describe('Error Handling Scaffolding', () => {
     expect(response.statusCode).toBe(404);
     const body = JSON.parse(response.payload);
 
-    expect(body.success).toBe(false);
-    expect(body.statusCode).toBe(404);
-    expect(body.code).toBeDefined();
+    expect(body.status).toBe('error');
+    expect(body.data).toBeNull();
     expect(body.error).toBeDefined();
+    expect(body.error.code).toBeDefined();
+    expect(body.error.message).toBeDefined();
+    expect(body.error.messageKey).toBeDefined();
+    expect(body.timestamp).toBeDefined();
   });
 
-  it('known application errors should return custom status code and code', async () => {
+  it('known application errors should return PHP-compatible error envelope', async () => {
     const response = await app.inject({
       method: 'GET',
       url: '/test-error',
@@ -50,9 +53,11 @@ describe('Error Handling Scaffolding', () => {
     expect(response.statusCode).toBe(400);
     const body = JSON.parse(response.payload);
 
-    expect(body.success).toBe(false);
-    expect(body.statusCode).toBe(400);
-    expect(body.code).toBe('TEST_BAD_REQUEST');
-    expect(body.error).toBe('Test application error');
+    expect(body.status).toBe('error');
+    expect(body.data).toBeNull();
+    expect(body.error.code).toBe('TEST_BAD_REQUEST');
+    expect(body.error.message).toBe('Test application error');
+    expect(body.error.messageKey).toBeDefined();
+    expect(body.timestamp).toBeDefined();
   });
 });

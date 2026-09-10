@@ -82,7 +82,9 @@ describe('Auth Module Integration Tests', () => {
 
     expect(res.statusCode).toBe(409);
     const body = JSON.parse(res.payload);
-    expect(body.code).toBe('EMAIL_ALREADY_REGISTERED');
+    expect(body.status).toBe('error');
+    expect(body.error.code).toBe('EMAIL_ALREADY_REGISTERED');
+    expect(body.error.messageKey).toBe('errors.auth.emailAlreadyRegistered');
   });
 
   it('POST /api/v1/auth/verify-email should handle invalid verification token', async () => {
@@ -94,7 +96,9 @@ describe('Auth Module Integration Tests', () => {
 
     expect(resInvalid.statusCode).toBe(401);
     const body = JSON.parse(resInvalid.payload);
-    expect(body.code).toBe('VERIFICATION_LINK_INVALID');
+    expect(body.status).toBe('error');
+    expect(body.error.code).toBe('VERIFICATION_LINK_INVALID');
+    expect(body.error.messageKey).toBe('errors.auth.verificationLinkInvalid');
   });
 
   it('POST /api/v1/auth/login should reject unverified email', async () => {
@@ -118,7 +122,9 @@ describe('Auth Module Integration Tests', () => {
 
     expect(res.statusCode).toBe(401);
     const body = JSON.parse(res.payload);
-    expect(body.code).toBe('EMAIL_NOT_VERIFIED');
+    expect(body.status).toBe('error');
+    expect(body.error.code).toBe('EMAIL_NOT_VERIFIED');
+    expect(body.error.messageKey).toBe('errors.auth.emailNotVerified');
   });
 
   it('POST /api/v1/auth/login should reject invalid credentials', async () => {
@@ -133,7 +139,9 @@ describe('Auth Module Integration Tests', () => {
 
     expect(res.statusCode).toBe(401);
     const body = JSON.parse(res.payload);
-    expect(body.code).toBe('INVALID_CREDENTIALS');
+    expect(body.status).toBe('error');
+    expect(body.error.code).toBe('INVALID_CREDENTIALS');
+    expect(body.error.messageKey).toBe('errors.auth.invalidCredentials');
   });
 
   it('POST /api/v1/auth/forgot-password & reset-password flow', async () => {
@@ -159,7 +167,8 @@ describe('Auth Module Integration Tests', () => {
 
     expect(resetRes.statusCode).toBe(400);
     const body = JSON.parse(resetRes.payload);
-    expect(body.code).toBe('VALIDATION_FAILED');
+    expect(body.status).toBe('error');
+    expect(body.error.code).toBe('VALIDATION_FAILED');
   });
 
   it('GET /api/v1/auth/me should return 401 when token is missing', async () => {
@@ -170,6 +179,8 @@ describe('Auth Module Integration Tests', () => {
 
     expect(res.statusCode).toBe(401);
     const body = JSON.parse(res.payload);
-    expect(body.code).toBe('ACCESS_TOKEN_MISSING');
+    expect(body.status).toBe('error');
+    expect(body.error.code).toBe('ACCESS_TOKEN_MISSING');
+    expect(body.error.messageKey).toBe('errors.auth.accessTokenMissing');
   });
 });

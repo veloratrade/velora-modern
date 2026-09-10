@@ -104,6 +104,10 @@ export class AuthService {
     }
   }
 
+  private static isTestEnvironment(): boolean {
+    return process.env.NODE_ENV === 'test';
+  }
+
   static toPublicUser(user: {
     id: bigint | number;
     email: string;
@@ -233,6 +237,9 @@ export class AuthService {
       return { verificationRequired: true, email };
     } catch (err) {
       if (err instanceof ApiError) throw err;
+      if (!AuthService.isTestEnvironment()) {
+        throw new ApiError('Service unavailable.', 503, 'SERVICE_UNAVAILABLE');
+      }
 
       // 2. Memory Store Fallback for test environment without DB
       const existing = MemoryStore.users.find((u) => u.email === email);
@@ -350,6 +357,9 @@ export class AuthService {
       return false;
     } catch (err) {
       if (err instanceof ApiError) throw err;
+      if (!AuthService.isTestEnvironment()) {
+        throw new ApiError('Service unavailable.', 503, 'SERVICE_UNAVAILABLE');
+      }
 
       // Memory Store Fallback
       const record = MemoryStore.verifications.find((v) => v.tokenHash === tokenHash);
@@ -428,7 +438,11 @@ export class AuthService {
           updatedAt: dbUser.updatedAt,
         };
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      if (!AuthService.isTestEnvironment()) {
+        throw new ApiError('Service unavailable.', 503, 'SERVICE_UNAVAILABLE');
+      }
       user = MemoryStore.users.find((u) => u.email === email) || null;
     }
 
@@ -501,7 +515,11 @@ export class AuthService {
           updatedAt: u.updatedAt,
         };
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      if (!AuthService.isTestEnvironment()) {
+        throw new ApiError('Service unavailable.', 503, 'SERVICE_UNAVAILABLE');
+      }
       const memSession = MemoryStore.sessions.find((s) => s.refreshTokenHash === refreshTokenHash);
       if (memSession) {
         session = memSession;
@@ -536,7 +554,11 @@ export class AuthService {
         where: { refreshTokenHash, revokedAt: null },
         data: { revokedAt: new Date() },
       });
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      if (!AuthService.isTestEnvironment()) {
+        throw new ApiError('Service unavailable.', 503, 'SERVICE_UNAVAILABLE');
+      }
       const s = MemoryStore.sessions.find((sess) => sess.refreshTokenHash === refreshTokenHash);
       if (s) {
         s.revokedAt = new Date();
@@ -595,7 +617,11 @@ export class AuthService {
         });
         if (dbSession) sessionValid = true;
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      if (!AuthService.isTestEnvironment()) {
+        throw new ApiError('Service unavailable.', 503, 'SERVICE_UNAVAILABLE');
+      }
       const memUser = MemoryStore.users.find((u) => u.id === userId);
       if (memUser) {
         user = memUser;
@@ -651,7 +677,11 @@ export class AuthService {
           updatedAt: dbUser.updatedAt,
         };
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      if (!AuthService.isTestEnvironment()) {
+        throw new ApiError('Service unavailable.', 503, 'SERVICE_UNAVAILABLE');
+      }
       user = MemoryStore.users.find((u) => u.id === BigInt(userId)) || null;
     }
 
@@ -694,7 +724,11 @@ export class AuthService {
         where: { userId: BigInt(userId), revokedAt: null },
         data: { revokedAt: new Date() },
       });
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      if (!AuthService.isTestEnvironment()) {
+        throw new ApiError('Service unavailable.', 503, 'SERVICE_UNAVAILABLE');
+      }
       user.passwordHash = newPasswordHash;
       MemoryStore.sessions.forEach((s) => {
         if (s.userId === BigInt(userId)) s.revokedAt = new Date();
@@ -720,7 +754,11 @@ export class AuthService {
     try {
       const dbUser = await prisma.user.findUnique({ where: { email } });
       if (dbUser) user = dbUser as unknown as MemoryUser;
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      if (!AuthService.isTestEnvironment()) {
+        throw new ApiError('Service unavailable.', 503, 'SERVICE_UNAVAILABLE');
+      }
       user = MemoryStore.users.find((u) => u.email === email) || null;
     }
 
@@ -741,7 +779,11 @@ export class AuthService {
       await prisma.passwordReset.create({
         data: { userId: user.id, tokenHash, expiresAt },
       });
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      if (!AuthService.isTestEnvironment()) {
+        throw new ApiError('Service unavailable.', 503, 'SERVICE_UNAVAILABLE');
+      }
       MemoryStore.resets = MemoryStore.resets.filter((r) => r.userId !== user!.id);
       MemoryStore.resets.push({
         id: MemoryStore.idCounter++,
@@ -805,7 +847,11 @@ export class AuthService {
           updatedAt: u.updatedAt,
         };
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      if (!AuthService.isTestEnvironment()) {
+        throw new ApiError('Service unavailable.', 503, 'SERVICE_UNAVAILABLE');
+      }
       const memReset = MemoryStore.resets.find((r) => r.tokenHash === tokenHash);
       if (memReset) {
         resetRecord = memReset;
@@ -853,7 +899,11 @@ export class AuthService {
         where: { userId: user.id, revokedAt: null },
         data: { revokedAt: new Date() },
       });
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      if (!AuthService.isTestEnvironment()) {
+        throw new ApiError('Service unavailable.', 503, 'SERVICE_UNAVAILABLE');
+      }
       resetRecord.usedAt = new Date();
       user.passwordHash = newPasswordHash;
       MemoryStore.resets = MemoryStore.resets.filter((r) => r.userId !== user!.id);
@@ -885,7 +935,11 @@ export class AuthService {
         weekly_report: pref ? pref.weeklyReport : true,
         marketing_emails: pref ? pref.marketingEmails : false,
       };
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      if (!AuthService.isTestEnvironment()) {
+        throw new ApiError('Service unavailable.', 503, 'SERVICE_UNAVAILABLE');
+      }
       const pref = MemoryStore.emailPrefs.find((p) => p.userId === BigInt(userId));
       return {
         welcome_email: pref ? pref.welcomeEmail : true,
@@ -923,7 +977,11 @@ export class AuthService {
           marketingEmails: updated.marketing_emails,
         },
       });
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      if (!AuthService.isTestEnvironment()) {
+        throw new ApiError('Service unavailable.', 503, 'SERVICE_UNAVAILABLE');
+      }
       const existing = MemoryStore.emailPrefs.find((p) => p.userId === BigInt(userId));
       if (existing) {
         existing.welcomeEmail = updated.welcome_email;
@@ -963,7 +1021,11 @@ export class AuthService {
     try {
       const dbUser = await prisma.user.findUnique({ where: { id: BigInt(userId) } });
       if (dbUser) user = dbUser as unknown as MemoryUser;
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      if (!AuthService.isTestEnvironment()) {
+        throw new ApiError('Service unavailable.', 503, 'SERVICE_UNAVAILABLE');
+      }
       user = MemoryStore.users.find((u) => u.id === BigInt(userId)) || null;
     }
 
@@ -1000,7 +1062,11 @@ export class AuthService {
         ai_consent: Boolean(updatedUser.aiConsentAt),
         ai_consent_at: updatedUser.aiConsentAt ? updatedUser.aiConsentAt.toISOString() : null,
       };
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      if (!AuthService.isTestEnvironment()) {
+        throw new ApiError('Service unavailable.', 503, 'SERVICE_UNAVAILABLE');
+      }
       if (data.locale !== undefined) {
         user.locale = data.locale;
         user.localeSource = 'user';
@@ -1064,7 +1130,11 @@ export class AuthService {
           },
         });
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      if (!AuthService.isTestEnvironment()) {
+        throw new ApiError('Service unavailable.', 503, 'SERVICE_UNAVAILABLE');
+      }
       if (existingSessionId) {
         const s = MemoryStore.sessions.find((sess) => sess.id === BigInt(existingSessionId));
         if (s) {
