@@ -83,7 +83,7 @@ This specification records all shared business rules governing the Velora platfo
 - **Free User Account Quota**: Users on the `free` subscription plan are entitled to a maximum of **1 Trading Account** (`MT4`, `MT5`, or `MANUAL`).
 - **Pro User Account Quota**: Users on the `pro` or `enterprise` subscription plan are entitled to **unlimited Trading Accounts**.
 - **Scope Restriction**: This quota applies strictly to Trading Accounts (`MT4`, `MT5`, `MANUAL`). It does NOT apply to Projects or trade journaling volume.
-- **Undecided Capabilities**: Entitlement policy for AI features, OCR image parsing, backtesting, reports, and webhook automations remains UNDECIDED until explicitly approved by product governance.
+- **Commercial Entitlement Rule**: Projects are explicitly EXCLUDED from trading account quota restrictions. Do not invent additional commercial restrictions.
 - **Centralized Enforcement**: Entitlement checks must be performed via a centralized Entitlement Service (`EntitlementService`), preserving clean isolation from core business logic.
 
 ---
@@ -100,3 +100,14 @@ This specification records all shared business rules governing the Velora platfo
 
 ### 4.3 Numeric Display Invariant
 - **ASCII/Latin Digits**: Numeric values, trade volumes, prices, dates, and calculated metrics across all locales (including Persian `fa`) MUST use ASCII/Latin digits (`0-9`). Eastern Arabic digits (`۰-۹`) are strictly prohibited in data and API responses.
+
+---
+
+## 5. Governance & Integration Cross-References
+
+- **Security Requirements**: See `docs/security/SECURITY_REQUIREMENTS.md` for the complete 34 security controls baseline.
+- **Trade Screenshot PII Scrubbing**: See `docs/security/IMAGE_ANONYMIZER_SPEC.md` for chart screenshot EXIF stripping and header redaction rules.
+- **Admin Suite Contracts**: See `docs/admin/ADMIN_SUITE_CONTRACTS.md` for User 360, Health Diagnostics, AI Config, Feature Flags, and Audit Logs contracts.
+- **MetaAPI Integration**: See `docs/integrations/METAAPI_SPECIFICATION.md` for cloud account connection, server auto-detect, and webhook deal ingestion.
+- **AI Provider Routing**: See `docs/integrations/AI_PROVIDER_ROUTING.md` for multi-provider Gemini/OpenAI routing and chart OCR vision integration.
+- **Transactional Notifications**: See `docs/integrations/EMAIL_NOTIFICATION_CONTRACT.md` for Resend email API integration and notification preferences.

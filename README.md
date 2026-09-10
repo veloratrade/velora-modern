@@ -51,13 +51,32 @@ curl http://localhost:8080/health
 
 ## Documentation Architecture
 
+### Governance
+* [Agent Operating Contract](docs/governance/AGENTS.md)
+* [Quality & Parity Gates](docs/governance/QUALITY_GATES.md)
+
+### Security
+* [Security Baseline & Requirements](docs/security/SECURITY_REQUIREMENTS.md)
+* [ImageAnonymizer & PII Scrubbing Specification](docs/security/IMAGE_ANONYMIZER_SPEC.md)
+
+### Admin Suite
+* [Admin Suite API Contracts](docs/admin/ADMIN_SUITE_CONTRACTS.md)
+
+### Integrations
+* [MetaAPI Cloud Bridge Specification](docs/integrations/METAAPI_SPECIFICATION.md)
+* [AI Provider Routing & OCR Specification](docs/integrations/AI_PROVIDER_ROUTING.md)
+* [Email & Transactional Notifications](docs/integrations/EMAIL_NOTIFICATION_CONTRACT.md)
+
+### Migration & Architecture
 * [Canonical Migration Roadmap](docs/migration/ROADMAP.md)
 * [Migration Principles](docs/architecture/migration-principles.md)
 * [Capability Parity Matrix](docs/migration/capability-parity-matrix.md)
 * [Business Rules Specification](docs/migration/business-rules.md)
 * [API Contracts Specification](docs/migration/api-contracts.md)
-* [Quality & Parity Gates](docs/migration/parity-gates.md)
+* [Quality & Parity Gates Matrix](docs/migration/parity-gates.md)
 * [Migration Changelog](docs/migration/migration-changelog.md)
+
+### Phase Reports & Infrastructure
 * [Phase 2 Engineering Scaffolding Report](docs/VELORA_MODERN_PHASE_2_SCAFFOLDING.md)
 * [Phase 3 Database Schema Report](docs/VELORA_MODERN_PHASE_3_DATABASE_PARITY.md)
 * [Phase 4 Auth & Identity Report](docs/VELORA_MODERN_PHASE_4_AUTH_IDENTITY.md)
