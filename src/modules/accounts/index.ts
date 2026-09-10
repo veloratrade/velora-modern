@@ -1,2 +1,10 @@
-// Accounts Module Structural Placeholder (Phase 2 Scaffolding)
-export const ACCOUNTS_MODULE_VERSION = '0.2.0';
+import { FastifyPluginAsync } from 'fastify';
+import { accountRoutes } from './accounts.routes.js';
+
+export const accountsPlugin: FastifyPluginAsync = async (fastify) => {
+  await fastify.register(accountRoutes, { prefix: '/api/v1/accounts' });
+};
+
+export * from './accounts.types.js';
+export * from './accounts.repository.js';
+export * from './accounts.service.js';
