@@ -1,5 +1,6 @@
-// Velora Modern Prisma Schema Foundation (Phase 2 Scaffolding)
-// Database table definitions (38 active tables) will be defined in Phase 3.
+// Velora Modern — Canonical Database Schema (Phase 3 Foundation)
+// Source-of-truth parity with PHP reference repository (`veloratrade/veloratrade`)
+// Total active canonical tables: 38
 
 generator client {
   provider = "prisma-client-js"
@@ -8,4 +9,973 @@ generator client {
 datasource db {
   provider = "mysql"
   url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS (Parity with MySQL ENUM columns)
+// ============================================================================
+
+enum UserRole {
+  user
+  admin
+  super_admin
+}
+
+enum UserPlan {
+  free
+  pro
+}
+
+enum SubscriptionStatus {
+  none
+  active
+  past_due
+  grace
+  expired
+  cancelled
+}
+
+enum UserStatus {
+  active
+  inactive
+  suspended
+}
+
+enum EmailNotificationStatus {
+  pending
+  sent
+  failed
+}
+
+enum TradingProvider {
+  MT4
+  MT5
+  MANUAL
+}
+
+enum TradingPlatform {
+  MT4
+  MT5
+  MANUAL
+}
+
+enum TradingSyncStatus {
+  DISCONNECTED
+  CONNECTING
+  SYNCING
+  CONNECTED
+  ERROR
+}
+
+enum TradingAccountStatus {
+  active
+  archived
+}
+
+enum TradeDirection {
+  buy
+  sell
+}
+
+enum TradeSource {
+  manual
+  metaapi
+  import
+}
+
+enum TradeExitType {
+  tp
+  sl
+  manual
+  partial
+}
+
+enum MetaapiOperationStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum SyncJobType {
+  HISTORICAL
+  INCREMENTAL
+  WEBHOOK
+}
+
+enum SyncJobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  DEAD_LETTER
+}
+
+enum WebhookStatus {
+  PENDING
+  PROCESSED
+  FAILED
+}
+
+enum TranslationJobStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
+enum AiExtractionStatus {
+  pending
+  completed
+  corrected
+  failed
+}
+
+enum AiProviderLogStatus {
+  success
+  failed
+  quota_exhausted
+  timeout
+}
+
+enum AiRequestStatus {
+  pending
+  completed
+  failed
+  quota_exceeded
+}
+
+enum AiAuditAction {
+  logged
+  redacted
+  blocked
+}
+
+enum AiFeedbackType {
+  correction
+  rating
+  comment
+}
+
+enum AiJobStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
+enum FillType {
+  buy
+  sell
+}
+
+enum FillEntryType {
+  in
+  out
+  inout
+}
+
+enum FillPlatform {
+  MT4
+  MT5
+}
+
+enum SupportConversationStatus {
+  open
+  pending
+  closed
+  archived
+}
+
+enum SupportWaitingFor {
+  admin
+  user
+  none
+}
+
+enum SupportPriority {
+  low
+  normal
+  high
+  urgent
+}
+
+enum SupportSenderType {
+  user
+  admin
+  system
+}
+
+// ============================================================================
+// MODELS (38 Active Canonical Tables)
+// ============================================================================
+
+model User {
+  id                  BigInt             @id @default(autoincrement()) @db.UnsignedBigInt
+  email               String             @unique(map: "users_email_unique") @db.VarChar(255)
+  passwordHash        String             @map("password_hash") @db.VarChar(255)
+  fullName            String             @default("") @map("full_name") @db.VarChar(120)
+  role                UserRole           @default(user)
+  timezone            String             @default("UTC") @db.VarChar(64)
+  locale              String             @default("fa") @db.VarChar(35)
+  localeSource        String             @default("default") @map("locale_source") @db.VarChar(16)
+  localeUpdatedAt     DateTime?          @map("locale_updated_at") @db.DateTime(0)
+  aiConsentAt         DateTime?          @map("ai_consent_at") @db.DateTime(0)
+  plan                UserPlan           @default(free)
+  subscriptionStatus  SubscriptionStatus @default(none) @map("subscription_status")
+  planStartedAt       DateTime?          @map("plan_started_at") @db.DateTime(0)
+  planExpiresAt       DateTime?          @map("plan_expires_at") @db.DateTime(0)
+  planUpdatedAt       DateTime?          @map("plan_updated_at") @db.DateTime(0)
+  status              UserStatus         @default(active)
+  emailVerifiedAt     DateTime?          @map("email_verified_at") @db.DateTime(0)
+  createdAt           DateTime           @default(now()) @map("created_at") @db.DateTime(0)
+  updatedAt           DateTime           @default(now()) @updatedAt @map("updated_at") @db.DateTime(0)
+
+  // Relations
+  userSessions         UserSession[]
+  authEvents           AuthEvent[]
+  passwordResets       PasswordReset[]
+  emailVerifications   EmailVerification[]
+  emailNotifications   EmailNotification[]
+  emailPreference      EmailPreference?
+  userAchievements     UserAchievement[]
+  userDevices          UserDevice[]
+  tradingAccounts      TradingAccount[]
+  trades               Trade[]
+  metaapiOperations    MetaapiOperation[]
+  syncJobs             SyncJob[]
+  aiExtractions        AiExtraction[]
+  aiRequests           AiRequest[]
+  aiAuditLogs          AiAuditLog[]
+  aiFeedback           AiFeedback[]
+  aiJobs               AiJob[]
+  aiReports            AiReport[]
+  aiAnalysis           AiAnalysis[]
+  adminAuditLogs       AdminAuditLog[]
+  systemLogs           SystemLog[]
+  metaapiFills         MetaapiFill[]
+  supportConversations SupportConversation[]
+  sentSupportMessages  SupportMessage[]      @relation("SentMessages")
+
+  @@map("users")
+}
+
+model UserSession {
+  id                BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  userId            BigInt    @map("user_id") @db.UnsignedBigInt
+  refreshTokenHash  String    @unique(map: "uq_user_sessions_refresh") @map("refresh_token_hash") @db.Char(64)
+  accessTokenHash   String    @map("access_token_hash") @db.Char(64)
+  ipAddress         String?   @map("ip_address") @db.VarChar(45)
+  userAgent         String?   @map("user_agent") @db.VarChar(250)
+  deviceFingerprint String?   @map("device_fingerprint") @db.Char(64)
+  expiresAt         DateTime  @map("expires_at") @db.DateTime(0)
+  revokedAt         DateTime? @map("revoked_at") @db.DateTime(0)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.DateTime(0)
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at") @db.DateTime(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId], map: "idx_user_sessions_user")
+  @@index([expiresAt], map: "idx_user_sessions_expires")
+  @@map("user_sessions")
+}
+
+model AuthEvent {
+  id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  userId    BigInt?  @map("user_id") @db.UnsignedBigInt
+  eventType String   @default("login") @map("event_type") @db.VarChar(32)
+  result    String   @db.VarChar(16)
+  reason    String?  @db.VarChar(64)
+  ipAddress String?  @map("ip_address") @db.VarChar(45)
+  userAgent String?  @map("user_agent") @db.VarChar(250)
+  createdAt DateTime @default(now()) @map("created_at") @db.DateTime(0)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([userId], map: "idx_auth_events_user")
+  @@index([ipAddress], map: "idx_auth_events_ip")
+  @@index([eventType, createdAt], map: "idx_auth_events_type_created")
+  @@map("auth_events")
+}
+
+model PasswordReset {
+  id        BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  userId    BigInt    @map("user_id") @db.UnsignedBigInt
+  tokenHash String    @unique(map: "password_resets_token_hash_unique") @map("token_hash") @db.Char(64)
+  expiresAt DateTime  @map("expires_at") @db.DateTime(0)
+  usedAt    DateTime? @map("used_at") @db.DateTime(0)
+  createdAt DateTime  @default(now()) @map("created_at") @db.DateTime(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId], map: "idx_password_resets_user")
+  @@index([tokenHash], map: "idx_password_resets_token")
+  @@map("password_resets")
+}
+
+model EmailVerification {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  userId     BigInt    @map("user_id") @db.UnsignedBigInt
+  tokenHash  String    @unique(map: "email_verifications_token_hash_unique") @map("token_hash") @db.Char(64)
+  expiresAt  DateTime  @map("expires_at") @db.DateTime(0)
+  verifiedAt DateTime? @map("verified_at") @db.DateTime(0)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.DateTime(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId], map: "idx_email_verifications_user")
+  @@index([tokenHash], map: "idx_email_verifications_token")
+  @@map("email_verifications")
+}
+
+model EmailNotification {
+  id             BigInt                  @id @default(autoincrement()) @db.UnsignedBigInt
+  userId         BigInt                  @map("user_id") @db.UnsignedBigInt
+  eventType      String                  @map("event_type") @db.VarChar(50)
+  recipientEmail String                  @map("recipient_email") @db.VarChar(255)
+  subject        String                  @db.VarChar(255)
+  status         EmailNotificationStatus @default(pending)
+  errorMessage   String?                 @map("error_message") @db.Text
+  sentAt         DateTime?               @map("sent_at") @db.DateTime(0)
+  createdAt      DateTime                @default(now()) @map("created_at") @db.DateTime(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId], map: "idx_email_notif_user")
+  @@index([status], map: "idx_email_notif_status")
+  @@map("email_notifications")
+}
+
+model EmailPreference {
+  userId             BigInt   @id @map("user_id") @db.UnsignedBigInt
+  welcomeEmail       Boolean  @default(true) @map("welcome_email")
+  securityAlerts     Boolean  @default(true) @map("security_alerts")
+  tradeNotifications Boolean  @default(true) @map("trade_notifications")
+  weeklyReport       Boolean  @default(true) @map("weekly_report")
+  marketingEmails    Boolean  @default(false) @map("marketing_emails")
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at") @db.DateTime(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("email_preferences")
+}
+
+model UserAchievement {
+  id             BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  userId         BigInt   @map("user_id") @db.UnsignedBigInt
+  achievementKey String   @map("achievement_key") @db.VarChar(80)
+  achievedAt     DateTime @default(now()) @map("achieved_at") @db.DateTime(0)
+  metadataJson   String?  @map("metadata_json") @db.LongText
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([userId, achievementKey], map: "uq_user_achievement")
+  @@map("user_achievements")
+}
+
+model UserDevice {
+  id           BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  userId       BigInt   @map("user_id") @db.UnsignedBigInt
+  fingerprint  String   @db.Char(64)
+  ipAddress    String?  @map("ip_address") @db.VarChar(45)
+  userAgent    String?  @map("user_agent") @db.VarChar(250)
+  deviceName   String?  @map("device_name") @db.VarChar(100)
+  isTrusted    Boolean  @default(false) @map("is_trusted")
+  lastActiveAt DateTime @default(now()) @map("last_active_at") @db.DateTime(0)
+  createdAt    DateTime @default(now()) @map("created_at") @db.DateTime(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([userId, fingerprint], map: "uq_user_device")
+  @@map("user_devices")
+}
+
+model RateLimit {
+  bucket      String   @id @db.VarChar(255)
+  hits        Int      @default(1) @db.UnsignedInt
+  windowStart DateTime @map("window_start") @db.DateTime(0)
+
+  @@index([windowStart], map: "idx_rate_limits_window")
+  @@map("rate_limits")
+}
+
+model TradingAccount {
+  id                               BigInt               @id @default(autoincrement()) @db.UnsignedBigInt
+  userId                           BigInt               @map("user_id") @db.UnsignedBigInt
+  provider                         TradingProvider      @default(MANUAL)
+  platform                         TradingPlatform      @default(MANUAL)
+  broker                           String?              @db.VarChar(100)
+  server                           String?              @db.VarChar(100)
+  timezone                         String?              @db.VarChar(64)
+  timezoneSource                   String               @default("unknown") @map("timezone_source") @db.VarChar(20)
+  mtLogin                          String?              @map("mt_login") @db.VarChar(50)
+  accountType                      String               @default("STANDARD") @map("account_type") @db.VarChar(20)
+  metaapiAccountId                 String?              @map("metaapi_account_id") @db.VarChar(64)
+  syncStatus                       TradingSyncStatus    @default(DISCONNECTED) @map("sync_status")
+  lastSyncedAt                     DateTime?            @map("last_synced_at") @db.DateTime(0)
+  connectionCredentialsEncrypted   Bytes?               @map("connection_credentials_encrypted") @db.VarBinary(2048)
+  connectedAt                      DateTime?            @map("connected_at") @db.DateTime(0)
+  disconnectedAt                   DateTime?            @map("disconnected_at") @db.DateTime(0)
+  autoSyncEnabled                  Boolean              @default(true) @map("auto_sync_enabled")
+  lastIncrementalAt                DateTime?            @map("last_incremental_at") @db.DateTime(0)
+  connectionCheckedAt              DateTime?            @map("connection_checked_at") @db.DateTime(0)
+  consecutiveErrors                Int                  @default(0) @map("consecutive_errors") @db.UnsignedSmallInt
+  lastError                        String?              @map("last_error") @db.VarChar(500)
+  devForceError                    Boolean              @default(false) @map("dev_force_error")
+  startingBalance                  Decimal              @default(0.00) @map("starting_balance") @db.Decimal(18, 2)
+  currentBalance                   Decimal              @default(0.00) @map("current_balance") @db.Decimal(18, 2)
+  label                            String               @default("Main Account") @db.VarChar(100)
+  accountNumberMasked              String?              @map("account_number_masked") @db.VarChar(30)
+  currency                         String               @default("USD") @db.VarChar(10)
+  leverage                         Int                  @default(100) @db.UnsignedInt
+  status                           TradingAccountStatus @default(active)
+  balance                          Decimal              @default(0.00) @db.Decimal(18, 2)
+  equity                           Decimal              @default(0.00) @db.Decimal(18, 2)
+  createdAt                        DateTime             @default(now()) @map("created_at") @db.DateTime(0)
+  updatedAt                        DateTime             @default(now()) @updatedAt @map("updated_at") @db.DateTime(0)
+
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  trades            Trade[]
+  metaapiOperations MetaapiOperation[]
+  syncJobs          SyncJob[]
+  webhookEvents     WebhookEvent[]
+  metaapiFills      MetaapiFill[]
+
+  @@unique([metaapiAccountId], map: "uq_accounts_metaapi")
+  @@unique([userId, platform, server, mtLogin], map: "uq_accounts_connection")
+  @@index([userId], map: "idx_trading_accounts_user")
+  @@index([userId, syncStatus], map: "idx_accounts_user_sync")
+  @@map("trading_accounts")
+}
+
+model Trade {
+  id                   BigInt         @id @default(autoincrement()) @db.UnsignedBigInt
+  userId               BigInt         @map("user_id") @db.UnsignedBigInt
+  accountId            BigInt?        @map("account_id") @db.UnsignedBigInt
+  externalDealId       String?        @map("external_deal_id") @db.VarChar(64)
+  symbol               String         @db.VarChar(32)
+  direction            TradeDirection
+  entryPrice           Decimal        @map("entry_price") @db.Decimal(18, 8)
+  exitPrice            Decimal?       @map("exit_price") @db.Decimal(18, 8)
+  volume               Decimal        @db.Decimal(18, 8)
+  contractSize         Decimal        @default(1.00000000) @map("contract_size") @db.Decimal(18, 8)
+  commission           Decimal        @default(0.00000000) @db.Decimal(18, 8)
+  swap                 Decimal        @default(0.00000000) @db.Decimal(18, 8)
+  profitLoss           Decimal?       @map("profit_loss") @db.Decimal(18, 8)
+  rMultiple            Decimal?       @map("r_multiple") @db.Decimal(10, 4)
+  stopLoss             Decimal?       @map("stop_loss") @db.Decimal(18, 8)
+  takeProfit           Decimal?       @map("take_profit") @db.Decimal(18, 8)
+  openTime             DateTime       @map("open_time") @db.DateTime(0)
+  closeTime            DateTime?      @map("close_time") @db.DateTime(0)
+  occurredOpenAtUtc    DateTime?      @map("occurred_open_at_utc") @db.DateTime(0)
+  occurredCloseAtUtc   DateTime?      @map("occurred_close_at_utc") @db.DateTime(0)
+  timeStatus           String         @default("unresolved") @map("time_status") @db.VarChar(16)
+  sourceTimezone       String?        @map("source_timezone") @db.VarChar(64)
+  sourceTimezoneSource String         @default("unknown") @map("source_timezone_source") @db.VarChar(20)
+  sourceCalendar       String         @default("unknown") @map("source_calendar") @db.VarChar(16)
+  rawOpenText          String?        @map("raw_open_text") @db.VarChar(64)
+  rawCloseText         String?        @map("raw_close_text") @db.VarChar(64)
+  strategyTag          String?        @map("strategy_tag") @db.VarChar(50)
+  emotionalScore       Int?           @map("emotional_score") @db.UnsignedTinyInt
+  notes                String?        @db.Text
+  source               TradeSource    @default(manual)
+  createdAt            DateTime       @default(now()) @map("created_at") @db.DateTime(0)
+  updatedAt            DateTime       @default(now()) @updatedAt @map("updated_at") @db.DateTime(0)
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  tradingAccount TradingAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  tradeExits     TradeExit[]
+
+  @@unique([accountId, externalDealId], map: "uq_trades_external_deal")
+  @@index([userId], map: "idx_trades_user")
+  @@index([accountId], map: "idx_trades_account")
+  @@index([symbol], map: "idx_trades_symbol")
+  @@index([openTime], map: "idx_trades_open_time")
+  @@index([userId, accountId, closeTime], map: "idx_user_account_time")
+  @@index([userId, occurredOpenAtUtc], map: "idx_trades_occurred_open")
+  @@index([timeStatus], map: "idx_trades_time_status")
+  @@map("trades")
+}
+
+model TradeExit {
+  id        BigInt        @id @default(autoincrement()) @db.UnsignedBigInt
+  tradeId   BigInt        @map("trade_id") @db.UnsignedBigInt
+  exitType  TradeExitType @default(manual) @map("exit_type")
+  exitPrice Decimal       @map("exit_price") @db.Decimal(18, 8)
+  volume    Decimal       @db.Decimal(18, 8)
+  pnl       Decimal       @default(0.00000000) @db.Decimal(24, 8)
+  exitTime  DateTime      @default(now()) @map("exit_time") @db.DateTime(0)
+  createdAt DateTime      @default(now()) @map("created_at") @db.DateTime(0)
+
+  trade Trade @relation(fields: [tradeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([tradeId], map: "idx_trade_exits_trade")
+  @@map("trade_exits")
+}
+
+model MetaapiOperation {
+  id                 BigInt                 @id @default(autoincrement()) @db.UnsignedBigInt
+  operationKey       String                 @unique(map: "uq_metaapi_operation_key") @map("operation_key") @db.Char(64)
+  providerMarker     String                 @unique(map: "uq_metaapi_provider_marker") @map("provider_marker") @db.VarChar(64)
+  requestFingerprint String                 @unique(map: "uq_metaapi_request_fingerprint") @map("request_fingerprint") @db.Char(64)
+  userId             BigInt                 @map("user_id") @db.UnsignedBigInt
+  accountId          BigInt?                @map("account_id") @db.UnsignedBigInt
+  operationType      String                 @map("operation_type") @db.VarChar(50)
+  status             MetaapiOperationStatus @default(PENDING)
+  attempts           Int                    @default(0) @db.UnsignedInt
+  lastError          String?                @map("last_error") @db.Text
+  payload            Json?
+  responseData       Json?                  @map("response_data")
+  createdAt          DateTime               @default(now()) @map("created_at") @db.DateTime(0)
+  updatedAt          DateTime               @default(now()) @updatedAt @map("updated_at") @db.DateTime(0)
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  tradingAccount TradingAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([accountId], map: "idx_metaapi_operation_account")
+  @@index([userId, status], map: "idx_metaapi_operation_user_status")
+  @@map("metaapi_operations")
+}
+
+model SyncJob {
+  id             BigInt        @id @default(autoincrement()) @db.UnsignedBigInt
+  accountId      BigInt        @map("account_id") @db.UnsignedBigInt
+  userId         BigInt        @map("user_id") @db.UnsignedBigInt
+  type           SyncJobType   @default(HISTORICAL)
+  status         SyncJobStatus @default(PENDING)
+  payload        Json?
+  maxAttempts    Int           @default(5) @map("max_attempts") @db.UnsignedSmallInt
+  attempts       Int           @default(0) @db.UnsignedSmallInt
+  lastError      String?       @map("last_error") @db.Text
+  availableAt    DateTime      @default(now()) @map("available_at") @db.DateTime(0)
+  lockedAt       DateTime?     @map("locked_at") @db.DateTime(0)
+  lockedBy       String?       @map("locked_by") @db.VarChar(96)
+  leaseToken     String?       @unique(map: "uq_sync_lease") @map("lease_token") @db.Char(64)
+  dedupeKey      String?       @unique(map: "uq_sync_dedupe") @map("dedupe_key") @db.VarChar(191)
+  rangeFrom      DateTime?     @map("range_from") @db.DateTime(0)
+  rangeTo        DateTime?     @map("range_to") @db.DateTime(0)
+  startedAt      DateTime?     @map("started_at") @db.DateTime(0)
+  completedAt    DateTime?     @map("completed_at") @db.DateTime(0)
+  deadLetteredAt DateTime?     @map("dead_lettered_at") @db.DateTime(0)
+  createdAt      DateTime      @default(now()) @map("created_at") @db.DateTime(0)
+  updatedAt      DateTime      @default(now()) @updatedAt @map("updated_at") @db.DateTime(0)
+
+  tradingAccount TradingAccount @relation(fields: [accountId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([status, availableAt, id], map: "idx_sync_claim")
+  @@index([status, lockedAt], map: "idx_sync_stale")
+  @@index([accountId, createdAt], map: "idx_sync_account_created")
+  @@map("sync_jobs")
+}
+
+model WebhookEvent {
+  id                   BigInt        @id @default(autoincrement()) @db.UnsignedBigInt
+  eventKey             String        @unique(map: "uq_webhook_event_key") @map("event_key") @db.Char(64)
+  accountId            BigInt?       @map("account_id") @db.UnsignedBigInt
+  metaapiAccountId     String?       @map("metaapi_account_id") @db.VarChar(64)
+  eventType            String        @map("event_type") @db.VarChar(50)
+  payload              Json
+  hmacVerified         Boolean       @default(false) @map("hmac_verified")
+  status               WebhookStatus @default(PENDING)
+  processingToken      String?       @unique(map: "uq_webhook_processing_token") @map("processing_token") @db.Char(64)
+  processingStartedAt  DateTime?     @map("processing_started_at") @db.DateTime(0)
+  attempts             Int           @default(0) @db.UnsignedInt
+  lastError            String?       @map("last_error") @db.VarChar(64)
+  processedAt          DateTime?     @map("processed_at") @db.DateTime(0)
+  createdAt            DateTime      @default(now()) @map("created_at") @db.DateTime(0)
+
+  tradingAccount TradingAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([accountId], map: "idx_webhook_account")
+  @@index([eventType], map: "idx_webhook_type")
+  @@index([createdAt], map: "idx_webhook_created")
+  @@map("webhook_events")
+}
+
+model ContentTranslationCache {
+  id             BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  contentType    String   @map("content_type") @db.VarChar(64)
+  contentId      String   @map("content_id") @db.VarChar(191)
+  sourceLocale   String   @map("source_locale") @db.VarChar(35)
+  targetLocale   String   @map("target_locale") @db.VarChar(35)
+  fieldName      String   @map("field_name") @db.VarChar(64)
+  translatedText String   @map("translated_text") @db.LongText
+  modelUsed      String   @default("system") @map("model_used") @db.VarChar(64)
+  createdAt      DateTime @default(now()) @map("created_at") @db.DateTime(0)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.DateTime(0)
+
+  @@unique([contentType, contentId, targetLocale, fieldName], map: "uq_content_trans_cache")
+  @@index([contentType, contentId, targetLocale], map: "idx_ctc_lookup")
+  @@index([targetLocale], map: "idx_ctc_target")
+  @@map("content_translation_cache")
+}
+
+model ContentTranslationJob {
+  id           BigInt               @id @default(autoincrement()) @db.UnsignedBigInt
+  contentType  String               @map("content_type") @db.VarChar(64)
+  contentId    String               @map("content_id") @db.VarChar(191)
+  sourceLocale String               @map("source_locale") @db.VarChar(35)
+  targetLocale String               @map("target_locale") @db.VarChar(35)
+  status       TranslationJobStatus @default(pending)
+  attempts     Int                  @default(0) @db.UnsignedInt
+  lastError    String?              @map("last_error") @db.Text
+  createdAt    DateTime             @default(now()) @map("created_at") @db.DateTime(0)
+  updatedAt    DateTime             @default(now()) @updatedAt @map("updated_at") @db.DateTime(0)
+
+  @@index([contentType, contentId, targetLocale], map: "idx_ctj_lookup")
+  @@index([status], map: "idx_ctj_status")
+  @@map("content_translation_jobs")
+}
+
+model AiExtraction {
+  id              BigInt             @id @default(autoincrement()) @db.UnsignedBigInt
+  userId          BigInt             @map("user_id") @db.UnsignedBigInt
+  provider        String             @default("gemini") @db.VarChar(32)
+  imageHash       String             @map("image_hash") @db.Char(64)
+  originalResult  Json?              @map("original_result")
+  correctedResult Json?              @map("corrected_result")
+  status          AiExtractionStatus @default(pending)
+  createdAt       DateTime           @default(now()) @map("created_at") @db.DateTime(0)
+  updatedAt       DateTime           @default(now()) @updatedAt @map("updated_at") @db.DateTime(0)
+
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  aiFeedback AiFeedback[]
+
+  @@index([userId], map: "idx_ai_ext_user")
+  @@index([imageHash], map: "idx_ai_ext_hash")
+  @@map("ai_extractions")
+}
+
+model AiProviderQuota {
+  provider   String   @id @db.VarChar(32)
+  dailyUsed  Int      @default(0) @map("daily_used") @db.UnsignedInt
+  quotaLimit Int      @default(1500) @map("quota_limit") @db.UnsignedInt
+  resetAt    DateTime @default(now()) @map("reset_at") @db.DateTime(0)
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.DateTime(0)
+
+  @@map("ai_provider_quotas")
+}
+
+model AiProviderLog {
+  id            BigInt              @id @default(autoincrement()) @db.UnsignedBigInt
+  provider      String              @db.VarChar(32)
+  status        AiProviderLogStatus
+  latencyMs     Int                 @default(0) @map("latency_ms") @db.UnsignedInt
+  errorCode     String?             @map("error_code") @db.VarChar(64)
+  feature       String?             @db.VarChar(64)
+  model         String?             @db.VarChar(64)
+  route         String?             @db.VarChar(16)
+  fallbackIndex Int?                @map("fallback_index") @db.UnsignedTinyInt
+  createdAt     DateTime            @default(now()) @map("created_at") @db.DateTime(0)
+
+  @@index([provider], map: "idx_ai_prov_logs_prov")
+  @@index([status], map: "idx_ai_prov_logs_status")
+  @@index([createdAt], map: "idx_ai_prov_logs_created")
+  @@map("ai_provider_logs")
+}
+
+model AiRequest {
+  id                BigInt          @id @default(autoincrement()) @db.UnsignedBigInt
+  userId            BigInt          @map("user_id") @db.UnsignedBigInt
+  feature           String          @default("extraction") @db.VarChar(32)
+  provider          String          @default("gemini") @db.VarChar(32)
+  model             String          @default("gemini-1.5-flash") @db.VarChar(64)
+  status            AiRequestStatus @default(pending)
+  latencyMs         Int             @default(0) @map("latency_ms") @db.UnsignedInt
+  promptTokens      Int             @default(0) @map("prompt_tokens") @db.UnsignedInt
+  completionTokens  Int             @default(0) @map("completion_tokens") @db.UnsignedInt
+  estimatedCostUsd  Decimal         @default(0.000000) @map("estimated_cost_usd") @db.Decimal(10, 6)
+  errorMessage      String?         @map("error_message") @db.Text
+  createdAt         DateTime        @default(now()) @map("created_at") @db.DateTime(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId], map: "idx_ai_req_user")
+  @@index([feature], map: "idx_ai_req_feature")
+  @@index([provider], map: "idx_ai_req_provider")
+  @@index([createdAt], map: "idx_ai_req_created")
+  @@map("ai_requests")
+}
+
+model AiFeatureFlag {
+  featureName       String   @id @map("feature_name") @db.VarChar(64)
+  enabled           Boolean  @default(false)
+  rolloutPercentage Int      @default(0) @map("rollout_percentage") @db.UnsignedTinyInt
+  updatedBy         BigInt?  @map("updated_by") @db.UnsignedBigInt
+  createdAt         DateTime @default(now()) @map("created_at") @db.DateTime(0)
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.DateTime(0)
+
+  @@map("ai_feature_flags")
+}
+
+model AiAuditLog {
+  id           BigInt         @id @default(autoincrement()) @db.UnsignedBigInt
+  userId       BigInt         @map("user_id") @db.UnsignedBigInt
+  feature      String         @default("extraction") @db.VarChar(32)
+  provider     String         @default("gemini") @db.VarChar(32)
+  imageHash    String         @map("image_hash") @db.Char(64)
+  piiDetected  Boolean        @default(false) @map("pii_detected")
+  piiRedacted  Boolean        @default(false) @map("pii_redacted")
+  actionTaken  AiAuditAction  @default(logged) @map("action_taken")
+  createdAt    DateTime       @default(now()) @map("created_at") @db.DateTime(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId], map: "idx_ai_audit_user")
+  @@index([feature], map: "idx_ai_audit_feature")
+  @@index([createdAt], map: "idx_ai_audit_created")
+  @@map("ai_audit_logs")
+}
+
+model AiFeedback {
+  id              BigInt         @id @default(autoincrement()) @db.UnsignedBigInt
+  userId          BigInt         @map("user_id") @db.UnsignedBigInt
+  extractionId    BigInt?        @map("extraction_id") @db.UnsignedBigInt
+  originalResult  Json?          @map("original_result")
+  correctedResult Json?          @map("corrected_result")
+  feedbackType    AiFeedbackType @default(correction) @map("feedback_type")
+  rating          Int?           @db.UnsignedTinyInt
+  comments        String?        @db.Text
+  createdAt       DateTime       @default(now()) @map("created_at") @db.DateTime(0)
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  aiExtraction AiExtraction? @relation(fields: [extractionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([userId], map: "idx_ai_fb_user")
+  @@index([extractionId], map: "idx_ai_fb_ext")
+  @@map("ai_feedback")
+}
+
+model AiJob {
+  id        BigInt      @id @default(autoincrement()) @db.UnsignedBigInt
+  userId    BigInt      @map("user_id") @db.UnsignedBigInt
+  jobType   String      @map("job_type") @db.VarChar(32)
+  payload   Json
+  status    AiJobStatus @default(pending)
+  attempts  Int         @default(0) @db.UnsignedInt
+  lastError String?     @map("last_error") @db.Text
+  createdAt DateTime    @default(now()) @map("created_at") @db.DateTime(0)
+  updatedAt DateTime    @default(now()) @updatedAt @map("updated_at") @db.DateTime(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId], map: "idx_ai_jobs_user")
+  @@index([status], map: "idx_ai_jobs_status")
+  @@index([jobType], map: "idx_ai_jobs_type")
+  @@map("ai_jobs")
+}
+
+model AiReport {
+  id          BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  userId      BigInt   @map("user_id") @db.UnsignedBigInt
+  periodStart DateTime @map("period_start") @db.Date
+  periodEnd   DateTime @map("period_end") @db.Date
+  locale      String   @default("en") @db.VarChar(10)
+  contentMd   String   @map("content_md") @db.LongText
+  contentJson Json     @map("content_json")
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId], map: "idx_ai_reports_user")
+  @@index([userId, periodStart, periodEnd], map: "idx_ai_reports_period")
+  @@map("ai_reports")
+}
+
+model AiAnalysis {
+  id         BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  userId     BigInt   @map("user_id") @db.UnsignedBigInt
+  provider   String   @default("gemini") @db.VarChar(32)
+  model      String   @default("gemini-1.5-flash") @db.VarChar(64)
+  resultJson Json     @map("result_json")
+  summaryMd  String   @map("summary_md") @db.Text
+  createdAt  DateTime @default(now()) @map("created_at") @db.DateTime(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId], map: "idx_ai_analysis_user")
+  @@map("ai_analysis")
+}
+
+model AiFeatureProvider {
+  id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  feature   String   @db.VarChar(64)
+  provider  String   @db.VarChar(32)
+  model     String?  @db.VarChar(64)
+  priority  Int      @default(1) @db.UnsignedSmallInt
+  enabled   Boolean  @default(true)
+  route     String?  @db.VarChar(16)
+  createdAt DateTime @default(now()) @map("created_at") @db.DateTime(0)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.DateTime(0)
+
+  @@unique([feature, provider], map: "uq_afp_feature_provider")
+  @@index([feature, enabled, priority], map: "idx_afp_lookup")
+  @@map("ai_feature_providers")
+}
+
+model AiGlobalSetting {
+  settingKey   String   @id @map("setting_key") @db.VarChar(64)
+  settingValue String?  @map("setting_value") @db.VarChar(64)
+  updatedBy    BigInt?  @map("updated_by") @db.UnsignedBigInt
+  createdAt    DateTime @default(now()) @map("created_at") @db.DateTime(0)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.DateTime(0)
+
+  @@map("ai_global_settings")
+}
+
+model AiProviderCredential {
+  provider         String    @id @db.VarChar(32)
+  status           String    @default("UNVERIFIED") @db.VarChar(32)
+  verified         Boolean   @default(false)
+  fingerprint      String?   @db.VarChar(128)
+  authType         String    @default("NONE") @map("auth_type") @db.VarChar(32)
+  lastVerifiedAt   DateTime? @map("last_verified_at") @db.DateTime(0)
+  lastErrorCode    String?   @map("last_error_code") @db.VarChar(64)
+  lastErrorMessage String?   @map("last_error_message") @db.VarChar(500)
+  updatedByUserId  BigInt    @default(0) @map("updated_by_user_id") @db.UnsignedBigInt
+  createdAt        DateTime  @default(now()) @map("created_at") @db.DateTime(0)
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.DateTime(0)
+
+  @@map("ai_provider_credentials")
+}
+
+model AdminAuditLog {
+  id           BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  actorUserId  BigInt   @map("actor_user_id") @db.UnsignedBigInt
+  actorRole    String   @default("admin") @map("actor_role") @db.VarChar(32)
+  action       String   @db.VarChar(64)
+  targetType   String   @default("user") @map("target_type") @db.VarChar(32)
+  targetId     String?  @map("target_id") @db.VarChar(128)
+  reason       String?  @db.VarChar(255)
+  ipAddress    String?  @map("ip_address") @db.VarChar(45)
+  payloadBefore Json?    @map("payload_before")
+  payloadAfter  Json?    @map("payload_after")
+  createdAt    DateTime @default(now()) @map("created_at") @db.DateTime(0)
+
+  actorUser User? @relation(fields: [actorUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([actorUserId], map: "idx_admin_audit_actor")
+  @@index([action], map: "idx_admin_audit_action")
+  @@index([targetType, targetId], map: "idx_admin_audit_target")
+  @@index([createdAt], map: "idx_admin_audit_created")
+  @@map("admin_audit_logs")
+}
+
+model SystemLog {
+  id          BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  severity    String   @default("INFO") @db.VarChar(8)
+  source      String   @db.VarChar(64)
+  message     String?  @db.VarChar(1000)
+  requestId   String?  @map("request_id") @db.VarChar(64)
+  userId      BigInt?  @map("user_id") @db.UnsignedBigInt
+  contextJson Json?    @map("context_json")
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(0)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([severity], map: "idx_system_logs_severity")
+  @@index([source], map: "idx_system_logs_source")
+  @@index([userId], map: "idx_system_logs_user")
+  @@index([requestId], map: "idx_system_logs_req")
+  @@index([createdAt], map: "idx_system_logs_created")
+  @@map("system_logs")
+}
+
+model IntegrationHealth {
+  integration   String   @id @db.VarChar(32)
+  status        String   @db.VarChar(32)
+  latencyMs     Int?     @map("latency_ms") @db.UnsignedInt
+  errorCode     String?  @map("error_code") @db.VarChar(64)
+  message       String?  @db.VarChar(500)
+  lastCheckedAt DateTime @default(now()) @map("last_checked_at") @db.DateTime(0)
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.DateTime(0)
+
+  @@map("integration_health")
+}
+
+model MetaapiFill {
+  id             BigInt        @id @default(autoincrement()) @db.UnsignedBigInt
+  accountId      BigInt        @map("account_id") @db.UnsignedBigInt
+  userId         BigInt        @map("user_id") @db.UnsignedBigInt
+  externalDealId String        @map("external_deal_id") @db.VarChar(64)
+  positionId     String?       @map("position_id") @db.VarChar(64)
+  symbol         String        @db.VarChar(32)
+  type           FillType
+  entryType      FillEntryType @default(in) @map("entry_type")
+  volume         Decimal       @db.Decimal(18, 8)
+  price          Decimal       @db.Decimal(18, 8)
+  profit         Decimal       @default(0.00000000) @db.Decimal(18, 8)
+  commission     Decimal       @default(0.00000000) @db.Decimal(18, 8)
+  swap           Decimal       @default(0.00000000) @db.Decimal(18, 8)
+  fillTime       DateTime      @map("fill_time") @db.DateTime(0)
+  platform       FillPlatform  @default(MT5)
+  rawPayload     Json?         @map("raw_payload")
+  createdAt      DateTime      @default(now()) @map("created_at") @db.DateTime(0)
+
+  tradingAccount TradingAccount @relation(fields: [accountId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([accountId, externalDealId], map: "uq_metaapi_fills_account_deal")
+  @@index([userId], map: "idx_metaapi_fills_user")
+  @@index([fillTime], map: "idx_metaapi_fills_time")
+  @@map("metaapi_fills")
+}
+
+model SupportConversation {
+  id                BigInt                    @id @default(autoincrement()) @db.UnsignedBigInt
+  userId            BigInt                    @map("user_id") @db.UnsignedBigInt
+  subject           String                    @db.VarChar(200)
+  status            SupportConversationStatus @default(open)
+  waitingFor        SupportWaitingFor         @default(admin) @map("waiting_for")
+  priority          SupportPriority           @default(normal)
+  lastMessageAt     DateTime                  @default(now()) @map("last_message_at") @db.DateTime(0)
+  unreadAdminCount Int                       @default(0) @map("unread_admin_count") @db.UnsignedInt
+  unreadUserCount  Int                       @default(0) @map("unread_user_count") @db.UnsignedInt
+  createdAt         DateTime                  @default(now()) @map("created_at") @db.DateTime(0)
+  updatedAt         DateTime                  @default(now()) @updatedAt @map("updated_at") @db.DateTime(0)
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  supportMessages SupportMessage[]
+
+  @@index([userId], map: "idx_sc_user")
+  @@index([status], map: "idx_sc_status")
+  @@index([waitingFor], map: "idx_sc_waiting")
+  @@index([lastMessageAt], map: "idx_sc_last_msg")
+  @@map("support_conversations")
+}
+
+model SupportMessage {
+  id                  BigInt            @id @default(autoincrement()) @db.UnsignedBigInt
+  conversationId      BigInt            @map("conversation_id") @db.UnsignedBigInt
+  senderType          SupportSenderType @map("sender_type")
+  senderUserId        BigInt?           @map("sender_user_id") @db.UnsignedBigInt
+  body                String            @db.Text
+  bodySourceLanguage  String            @default("fa") @map("body_source_language") @db.VarChar(8)
+  readAt              DateTime?         @map("read_at") @db.DateTime(0)
+  createdAt           DateTime          @default(now()) @map("created_at") @db.DateTime(0)
+
+  conversation               SupportConversation          @relation(fields: [conversationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  senderUser                 User?                        @relation("SentMessages", fields: [senderUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  supportMessageTranslations SupportMessageTranslation[]
+
+  @@index([conversationId], map: "idx_sm_conv")
+  @@index([senderUserId], map: "idx_sm_sender")
+  @@index([createdAt], map: "idx_sm_created")
+  @@map("support_messages")
+}
+
+model SupportMessageTranslation {
+  id             BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  messageId      BigInt   @map("message_id") @db.UnsignedBigInt
+  sourceLanguage String   @map("source_language") @db.VarChar(8)
+  targetLanguage String   @map("target_language") @db.VarChar(8)
+  translatedBody String   @map("translated_body") @db.Text
+  translatedAt   DateTime @default(now()) @map("translated_at") @db.DateTime(0)
+
+  supportMessage SupportMessage @relation(fields: [messageId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([messageId, targetLanguage], map: "uq_smt_msg_lang")
+  @@index([messageId], map: "idx_smt_msg")
+  @@map("support_message_translations")
 }
