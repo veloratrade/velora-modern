@@ -104,6 +104,11 @@ export class AuthService {
     }
   }
 
+  public static getUserPlanInMemory(userId: number): string | null {
+    const user = MemoryStore.users.find((u) => u.id === BigInt(userId));
+    return user ? user.plan : null;
+  }
+
   static verifyUserForTest(email: string): void {
     const user = MemoryStore.users.find((u) => u.email === email.trim().toLowerCase());
     if (user) {

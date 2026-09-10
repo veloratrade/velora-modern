@@ -69,6 +69,20 @@ describe('Commercial Entitlements Engine — Unit Tests', () => {
         isUnlimited: true,
       });
     });
+
+    it('should SAFE-FAIL CLOSED to Free plan (1 account limit) for any unknown/unsupported plan string', () => {
+      expect(entitlementService.getPlanQuota('unknown_plan_x')).toEqual({
+        plan: 'free',
+        maxTradingAccounts: 1,
+        isUnlimited: false,
+      });
+
+      expect(entitlementService.getPlanQuota('vip_gold_plan')).toEqual({
+        plan: 'free',
+        maxTradingAccounts: 1,
+        isUnlimited: false,
+      });
+    });
   });
 
   describe('checkTradingAccountEntitlement', () => {
@@ -114,6 +128,28 @@ describe('Commercial Entitlements Engine — Unit Tests', () => {
     it('should ALLOW Enterprise user with multiple existing accounts to create more accounts', async () => {
       const res = await entitlementService.checkTradingAccountEntitlement(103, 5, 'enterprise');
       expect(res.allowed).toBe(true);
+    });
+  });
+
+  describe('Database Fail-Closed Invariant (Blocker A)', () => {
+    it('should verify fail-closed 503 SERVICE_UNAVAILABLE contract when DB throws in production/dev', async () => {
+      const originalEnv = process.env.NODE_ENV;
+      try {
+        process.env.NODE_ENV = 'production';
+        // Calling getUserPlan for a non-existent or failing DB in production mode MUST throw 503
+        await expect(entitlementService.getUserPlan(999999)).rejects.toThrow(ApiError);
+
+        try {
+          await entitlementService.getUserPlan(999999);
+        } catch (err) {
+          expect(err).toBeInstanceOf(ApiError);
+          const apiErr = err as ApiError;
+          expect(apiErr.statusCode).toBe(503);
+          expect(apiErr.code).toBe('SERVICE_UNAVAILABLE');
+        }
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
     });
   });
 

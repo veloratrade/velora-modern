@@ -29,10 +29,6 @@ export class AccountService {
     input: CreateAccountInput,
     userPlan?: string,
   ): Promise<TradingAccountRecord> {
-    const count = await this.repository.countByUser(userId);
-    const plan = userPlan ?? (await this.entitlementService.getUserPlan(userId));
-    await this.entitlementService.checkTradingAccountEntitlement(userId, count, plan);
-
     const provider = input.provider ?? 'MANUAL';
     if (!['MT4', 'MT5', 'MANUAL'].includes(provider)) {
       throw new ApiError('Invalid provider.', 400, 'VALIDATION_FAILED', {
@@ -72,7 +68,13 @@ export class AccountService {
       }
     }
 
-    return this.repository.create(userId, input);
+    // Atomic creation with entitlement check inside database row lock / transaction
+    return this.repository.createWithEntitlementCheck(
+      userId,
+      input,
+      userPlan,
+      this.entitlementService,
+    );
   }
 
   public detectServer(mtLoginRaw?: string): DetectServerResult {

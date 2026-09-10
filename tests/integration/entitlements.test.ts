@@ -34,7 +34,6 @@ describe('Commercial Entitlements Module — Integration Tests', () => {
 
     // Clear initial default memory accounts for clean state in tests
     AccountRepository.clearMemoryStore();
-    // Clear out user 1 default account so test user starts from 0 accounts
     const existingAccounts = await new AccountRepository().listByUser(freeUserId);
     for (const acc of existingAccounts) {
       await new AccountRepository().delete(acc.id, freeUserId);
@@ -60,6 +59,44 @@ describe('Commercial Entitlements Module — Integration Tests', () => {
 
   afterEach(async () => {
     await app.close();
+  });
+
+  describe('Blocker B — Atomic Concurrency Quota Safety', () => {
+    it('should safely serialize concurrent account creation requests and enforce exactly 1 account limit', async () => {
+      // Free user starts with 0 accounts
+      const initialAccounts = await new AccountRepository().listByUser(freeUserId);
+      expect(initialAccounts.length).toBe(0);
+
+      // Launch two simultaneous account-creation requests concurrently
+      const [res1, res2] = await Promise.all([
+        app.inject({
+          method: 'POST',
+          url: '/api/v1/accounts',
+          headers: { authorization: `Bearer ${freeUserToken}` },
+          payload: { provider: 'MANUAL', label: 'Concurrent Account A', currency: 'USD' },
+        }),
+        app.inject({
+          method: 'POST',
+          url: '/api/v1/accounts',
+          headers: { authorization: `Bearer ${freeUserToken}` },
+          payload: { provider: 'MT4', label: 'Concurrent Account B', currency: 'USD' },
+        }),
+      ]);
+
+      const statusCodes = [res1.statusCode, res2.statusCode].sort();
+      // Exactly ONE request must succeed (201 Created) and the other MUST fail with HTTP 429 (ACCOUNT_QUOTA_EXCEEDED)
+      expect(statusCodes).toEqual([201, 429]);
+
+      const failedRes = res1.statusCode === 429 ? res1 : res2;
+      const failedBody = failedRes.json();
+      expect(failedBody.status).toBe('error');
+      expect(failedBody.error.code).toBe('ACCOUNT_QUOTA_EXCEEDED');
+      expect(failedBody.error.messageKey).toBe('errors.accounts.quotaExceeded');
+
+      // Verify database / store state: EXACTLY 1 trading account exists for the Free user
+      const finalAccounts = await new AccountRepository().listByUser(freeUserId);
+      expect(finalAccounts.length).toBe(1);
+    });
   });
 
   describe('Free Plan Quota Enforcement (Exactly 1 Trading Account)', () => {
@@ -143,17 +180,28 @@ describe('Commercial Entitlements Module — Integration Tests', () => {
     });
   });
 
-  describe('Platform Bypass Prevention', () => {
-    it('should enforce limit regardless of platform (MT4, MT5, MANUAL all counted)', async () => {
-      // Free user creates MANUAL account
-      await app.inject({
+  describe('Provider Quota & Platform Bypass Prevention (MANUAL, MT4, MT5)', () => {
+    it('should enforce limit across all platforms: MANUAL succeeds, then MT4 & MT5 fail with 429', async () => {
+      // 1. Free creates MANUAL -> succeeds
+      const manualRes = await app.inject({
         method: 'POST',
         url: '/api/v1/accounts',
         headers: { authorization: `Bearer ${freeUserToken}` },
         payload: { provider: 'MANUAL', label: 'Manual Account' },
       });
+      expect(manualRes.statusCode).toBe(201);
 
-      // Trying MT5 should be blocked
+      // 2. Free attempts MT4 -> fails with 429
+      const mt4Res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/accounts',
+        headers: { authorization: `Bearer ${freeUserToken}` },
+        payload: { provider: 'MT4', label: 'MT4 Bypass Attempt' },
+      });
+      expect(mt4Res.statusCode).toBe(429);
+      expect(mt4Res.json().error.code).toBe('ACCOUNT_QUOTA_EXCEEDED');
+
+      // 3. Free attempts MT5 -> fails with 429
       const mt5Res = await app.inject({
         method: 'POST',
         url: '/api/v1/accounts',

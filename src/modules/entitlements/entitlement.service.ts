@@ -1,5 +1,6 @@
 import { prisma } from '../../core/db.js';
 import { ApiError } from '../../core/errors/errorHandler.js';
+import { AuthService } from '../auth/auth.service.js';
 
 export interface PlanQuota {
   plan: string;
@@ -33,6 +34,8 @@ export class EntitlementService {
 
   /**
    * Retrieves the user's plan from the database or memory store fallback.
+   * Fail-Closed Security Invariant: Database errors MUST throw 503 SERVICE_UNAVAILABLE
+   * in non-test environments and never silently fall back to 'free'.
    */
   public async getUserPlan(userId: number): Promise<string> {
     try {
@@ -42,13 +45,21 @@ export class EntitlementService {
       });
 
       if (user && user.plan) {
-        return String(user.plan).toLowerCase();
+        return String(user.plan).toLowerCase().trim();
       }
-    } catch {
-      // DB unavailable or in test environment fallback
-    }
+      return 'free';
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      if (!this.isTestEnvironment()) {
+        throw new ApiError('Service unavailable.', 503, 'SERVICE_UNAVAILABLE');
+      }
 
-    return 'free';
+      const memPlan = AuthService.getUserPlanInMemory(userId);
+      if (memPlan) {
+        return memPlan.toLowerCase().trim();
+      }
+      return 'free';
+    }
   }
 
   /**
@@ -85,5 +96,9 @@ export class EntitlementService {
       limit: quota.maxTradingAccounts,
       currentCount: currentAccountCount,
     };
+  }
+
+  private isTestEnvironment(): boolean {
+    return process.env.NODE_ENV === 'test';
   }
 }
