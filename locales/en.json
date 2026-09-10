@@ -1,0 +1,64 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "update": "Update",
+    "submit": "Submit",
+    "confirm": "Confirm",
+    "close": "Close",
+    "back": "Back",
+    "next": "Next"
+  },
+  "auth": {
+    "login": "Sign In",
+    "register": "Create Account",
+    "logout": "Sign Out",
+    "email": "Email Address",
+    "password": "Password",
+    "forgotPassword": "Forgot Password?",
+    "resetPassword": "Reset Password",
+    "verifyEmail": "Verify Email",
+    "tokenExpired": "Session expired. Please sign in again.",
+    "invalidCredentials": "Invalid email or password."
+  },
+  "errors": {
+    "unauthorized": "Authentication required.",
+    "forbidden": "Access denied.",
+    "notFound": "Resource not found.",
+    "conflict": "Request conflict.",
+    "validation": "Validation failed.",
+    "rateLimited": "Too many requests. Please try again later.",
+    "http": {
+      "400": "Invalid request.",
+      "404": "Resource not found.",
+      "500": "Internal server error.",
+      "503": "Service unavailable."
+    }
+  },
+  "trades": {
+    "entryPrice": "Entry Price",
+    "exitPrice": "Exit Price",
+    "volume": "Volume (Lots)",
+    "direction": "Direction",
+    "stopLoss": "Stop Loss",
+    "takeProfit": "Take Profit",
+    "grossPnl": "Gross P&L",
+    "netPnl": "Net P&L",
+    "rMultiple": "R-Multiple",
+    "commission": "Commission",
+    "swap": "Swap"
+  },
+  "brand": {
+    "name": "VELORA",
+    "platform": "VELORA Trading Engine",
+    "metaapi": "MetaAPI"
+  },
+  "locale": {
+    "name": "English",
+    "direction": "ltr",
+    "code": "en"
+  }
+}

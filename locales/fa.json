@@ -1,0 +1,64 @@
+{
+  "common": {
+    "save": "ذخیره",
+    "cancel": "انصراف",
+    "delete": "حذف",
+    "edit": "ویرایش",
+    "create": "ایجاد",
+    "update": "به‌روزرسانی",
+    "submit": "ارسال",
+    "confirm": "تایید",
+    "close": "بستن",
+    "back": "بازگشت",
+    "next": "بعدی"
+  },
+  "auth": {
+    "login": "ورود به حساب",
+    "register": "ایجاد حساب کاربری",
+    "logout": "خروج",
+    "email": "آدرس ایمیل",
+    "password": "رمز عبور",
+    "forgotPassword": "فراموشی رمز عبور؟",
+    "resetPassword": "بازنشانی رمز عبور",
+    "verifyEmail": "تایید ایمیل",
+    "tokenExpired": "نشست شما منقضی شده است. لطفا دوباره وارد شوید.",
+    "invalidCredentials": "ایمیل یا رمز عبور اشتباه است."
+  },
+  "errors": {
+    "unauthorized": "احراز هویت لازم است.",
+    "forbidden": "دسترسی غیرمجاز.",
+    "notFound": "منبع مورد نظر یافت نشد.",
+    "conflict": "تداخل در درخواست.",
+    "validation": "اعتبارسنجی ناموفق بود.",
+    "rateLimited": "تعداد درخواست‌ها بیش از حد مجاز است. لطفا کمی صبر کنید.",
+    "http": {
+      "400": "درخواست نامعتبر.",
+      "404": "منبع یافت نشد.",
+      "500": "خطای داخلی سرور.",
+      "503": "سرویس در دسترس نیست."
+    }
+  },
+  "trades": {
+    "entryPrice": "قیمت ورود",
+    "exitPrice": "قیمت خروج",
+    "volume": "حجم (لات)",
+    "direction": "جهت معامله",
+    "stopLoss": "حد ضرر",
+    "takeProfit": "حد سود",
+    "grossPnl": "سود/زیان ناخالص",
+    "netPnl": "سود/زیان خالص",
+    "rMultiple": "ضریب R",
+    "commission": "کمیسیون",
+    "swap": "سواپ"
+  },
+  "brand": {
+    "name": "VELORA",
+    "platform": "موتور معاملاتی VELORA",
+    "metaapi": "MetaAPI"
+  },
+  "locale": {
+    "name": "فارسی",
+    "direction": "rtl",
+    "code": "fa"
+  }
+}
