@@ -1,0 +1,11 @@
+// Velora Modern Prisma Schema Foundation (Phase 2 Scaffolding)
+// Database table definitions (38 active tables) will be defined in Phase 3.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
