@@ -1,5 +1,27 @@
 # Velora Modern Migration Changelog
 
+## [0.6.0] - 2026-09-10 (Phase 6: Trading Accounts & Dashboard Performance Analytics Migration)
+
+### Added
+- **Trading Accounts Management Module** (`src/modules/accounts/`):
+  - DTO types (`accounts.types.ts`), Prisma repository access layer (`accounts.repository.ts`), service layer with broker auto-detect logic (`accounts.service.ts`), Fastify REST routes (`accounts.routes.ts`), and plugin exports.
+  - CRUD operations under `/api/v1/accounts` (`GET /`, `GET /:id`, `POST /`, `PUT /:id`, `DELETE /:id`, `POST /:id/sync`).
+  - Server auto-detection mapping broker server strings (e.g. `MetaQuotes-Demo`, `ICMarkets-Demo`) to standard broker metadata.
+  - Sync status lifecycle enum (`PENDING_SYNC`, `CONNECTING`, `SYNCED`, `SYNC_FAILED`).
+  - User-scoped trading account ownership verification (`user_id -> account_id`).
+- **Dashboard Performance Analytics Module** (`src/modules/dashboard/`):
+  - DTO types (`dashboard.types.ts`), repository query layer (`dashboard.repository.ts`), service metrics computation engine (`dashboard.service.ts`), Fastify REST routes (`dashboard.routes.ts`), and plugin exports.
+  - Key performance metrics summary (`GET /api/v1/dashboard/summary`): Net PnL, win rate, total trades, profit factor, average win/loss, max drawdown, and balance/equity curve.
+  - Equity curve time-series endpoint (`GET /api/v1/dashboard/equity-curve`): Daily and trade-by-trade cumulative PnL aggregation.
+  - Strategy performance breakdown endpoint (`GET /api/v1/dashboard/strategies`): Grouped analytics per strategy tag.
+- **Integration Test Suite**:
+  - `tests/integration/accounts.test.ts`: Fastify HTTP integration tests covering trading account creation, server auto-detect, updates, deletion, and ownership authorization boundary checks.
+  - `tests/integration/dashboard.test.ts`: Fastify HTTP integration tests verifying summary analytics, win rate calculations, profit factor, drawdown metrics, equity curve aggregation, and strategy breakdowns.
+- **Migration Documentation**:
+  - Created `docs/VELORA_MODERN_PHASE_6_CAPABILITY_MIGRATION_REPORT.md` documenting Phase 6 capability migration completion.
+
+---
+
 ## [0.5.0] - 2026-09-10 (Phase 5: Core Trading & Journaling Engine Migration)
 
 ### Added

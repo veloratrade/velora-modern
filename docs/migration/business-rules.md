@@ -79,6 +79,13 @@ This specification records all shared business rules governing the Velora platfo
 - **Rule**: DB errors during authentication, rate limiting, session verification, or trading operations MUST fail closed in `development` and `production` environments by throwing HTTP 503 `SERVICE_UNAVAILABLE`.
 - **Test Environment Exception**: In-memory repository fallback (`MemoryStore`) is strictly prohibited in dev/prod and permitted ONLY when `NODE_ENV === 'test'`.
 
+### 3.4 Plan & Trading Account Entitlement Policy
+- **Free User Account Quota**: Users on the `free` subscription plan are entitled to a maximum of **1 Trading Account** (`MT4`, `MT5`, or `MANUAL`).
+- **Pro User Account Quota**: Users on the `pro` or `enterprise` subscription plan are entitled to **unlimited Trading Accounts**.
+- **Scope Restriction**: This quota applies strictly to Trading Accounts (`MT4`, `MT5`, `MANUAL`). It does NOT apply to Projects or trade journaling volume.
+- **Undecided Capabilities**: Entitlement policy for AI features, OCR image parsing, backtesting, reports, and webhook automations remains UNDECIDED until explicitly approved by product governance.
+- **Centralized Enforcement**: Entitlement checks must be performed via a centralized Entitlement Service (`EntitlementService`), preserving clean isolation from core business logic.
+
 ---
 
 ## 4. Localization & i18n Invariants

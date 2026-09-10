@@ -1,18 +1,18 @@
 # Velora Modern
 
-Velora Modern is the future modern Node.js/TypeScript application for **Velora Trade** — an intelligent trading journal and MetaApi execution engine.
+Velora Modern is the modern Node.js/TypeScript application for **Velora Trade** — an intelligent trading journal, performance analytics platform, and MetaApi execution engine.
 
 ## Current Status
 
-* **Stage**: Phase 2 — Repository Scaffolding & Engineering Foundation
-* **Current Reference Implementation**: [`veloratrade/veloratrade`](https://github.com/veloratrade/veloratrade) (PHP 8.2+ / MySQL)
+* **Stage**: Phase 6 — Trading Accounts & Dashboard Performance Analytics (`v0.6.0`)
+* **Current Operational Reference**: [`veloratrade/veloratrade`](https://github.com/veloratrade/veloratrade) (PHP 8.2+ / MySQL)
 * **Hosting Platform**: Railway (Project: `Velora`)
-  * Environment `production` (Scaffolded - Deployment trigger: `main`)
-  * Environment `staging` (Scaffolded - Deployment trigger: `staging`)
-* **Infrastructure Provisioning**:
-  * MySQL: Planned for Phase 3 (Not currently provisioned)
-  * Redis: Planned for Phase 6 (Not currently provisioned)
-  * Primary Domain (`veloratrade.ir`): Unchanged on PHP production
+  * Environment `production` (Deployment trigger: `main`)
+  * Environment `staging` (Deployment trigger: `staging`)
+* **Infrastructure & Database Status**:
+  * MySQL: Canonical schema defined in `prisma/schema.prisma` (mapping 38 MySQL tables) and baseline SQL migration in `prisma/migrations/0_init/`. Staging database runtime instance provisioning deferred to staging deployment phase.
+  * Redis: BullMQ background queue worker architecture planned for Phase 7 (MetaAPI Sync). Redis instance not yet provisioned.
+  * Primary Domain (`veloratrade.ir`): Unchanged on PHP production.
 
 ## Local Development Instructions
 
@@ -47,16 +47,27 @@ curl http://localhost:8080/health
 * `npm run lint`: Run ESLint check
 * `npm run format`: Format code with Prettier
 * `npm run format:check`: Verify formatting with Prettier
+* `npm run i18n:check`: Validate translation key parity, brand policy, and ASCII digit invariants
 
 ## Documentation Architecture
 
-* [Phase 0.1-R Evidence Verification](docs/VELORA_MODERN_PHASE_0_1_R_CORRECTION.md)
-* [Phase 1 Architecture Decision Record](VELORA_MODERN_PHASE_1_ARCHITECTURE_DECISION.md)
-* [Phase 2 Engineering Scaffolding Report](docs/VELORA_MODERN_PHASE_2_SCAFFOLDING.md)
-* [Railway Infrastructure Baseline](docs/infrastructure/railway-baseline.md)
+* [Canonical Migration Roadmap](docs/migration/ROADMAP.md)
 * [Migration Principles](docs/architecture/migration-principles.md)
+* [Capability Parity Matrix](docs/migration/capability-parity-matrix.md)
+* [Business Rules Specification](docs/migration/business-rules.md)
+* [API Contracts Specification](docs/migration/api-contracts.md)
+* [Quality & Parity Gates](docs/migration/parity-gates.md)
+* [Migration Changelog](docs/migration/migration-changelog.md)
+* [Phase 2 Engineering Scaffolding Report](docs/VELORA_MODERN_PHASE_2_SCAFFOLDING.md)
+* [Phase 3 Database Schema Report](docs/VELORA_MODERN_PHASE_3_DATABASE_PARITY.md)
+* [Phase 4 Auth & Identity Report](docs/VELORA_MODERN_PHASE_4_AUTH_IDENTITY.md)
+* [Phase 4.5 Parity Governance Report](docs/VELORA_MODERN_PHASE_4_5_PARITY_GOVERNANCE_REPORT.md)
+* [Phase 5 Core Trading Report](docs/VELORA_MODERN_PHASE_5_CORE_TRADING_JOURNAL_REPORT.md)
+* [Phase 5 Blocker Resolution Report](docs/VELORA_MODERN_PHASE_5_BLOCKER_RESOLUTION_REPORT.md)
+* [Phase 6 Trading Accounts & Dashboard Report](docs/VELORA_MODERN_PHASE_6_CAPABILITY_MIGRATION_REPORT.md)
+* [Railway Infrastructure Baseline](docs/infrastructure/railway-baseline.md)
 * [Domain & DNS Strategy](docs/infrastructure/domain-strategy.md)
 
 ## Next Phase
 
-`NEXT: Phase 3 — Database Schema & Migration Foundation`
+`NEXT: Phase 6.5 — Plan / Subscription / Entitlement Foundation`
