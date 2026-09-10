@@ -29,6 +29,7 @@ describe('Accounts Module Integration Tests', () => {
       '127.0.0.1',
     );
     user1Token = login1.accessToken;
+    AuthService.setUserPlanInMemory(login1.user.id, 'pro');
 
     // Register & Login User 2
     await authService.register({

@@ -36,6 +36,10 @@
       "404": "Resource not found.",
       "500": "Internal server error.",
       "503": "Service unavailable."
+    },
+    "accounts": {
+      "quotaExceeded": "Trading account limit reached for your plan. Please upgrade to Pro for unlimited accounts.",
+      "notFound": "Trading account not found."
     }
   },
   "trades": {

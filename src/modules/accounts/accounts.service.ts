@@ -1,13 +1,15 @@
 import { ApiError } from '../../core/errors/errorHandler.js';
+import { EntitlementService } from '../entitlements/entitlement.service.js';
 import { AccountRepository } from './accounts.repository.js';
 import { TradingAccountRecord, CreateAccountInput, DetectServerResult } from './accounts.types.js';
 
 export class AccountService {
   private repository: AccountRepository;
-  private static readonly MAX_ACCOUNTS_PER_USER = 10;
+  private entitlementService: EntitlementService;
 
-  constructor(repository = new AccountRepository()) {
+  constructor(repository = new AccountRepository(), entitlementService = new EntitlementService()) {
     this.repository = repository;
+    this.entitlementService = entitlementService;
   }
 
   public async listAccounts(userId: number): Promise<TradingAccountRecord[]> {
@@ -25,17 +27,11 @@ export class AccountService {
   public async createAccount(
     userId: number,
     input: CreateAccountInput,
+    userPlan?: string,
   ): Promise<TradingAccountRecord> {
     const count = await this.repository.countByUser(userId);
-    if (count >= AccountService.MAX_ACCOUNTS_PER_USER) {
-      throw new ApiError(
-        'Account quota exceeded.',
-        429,
-        'ACCOUNT_QUOTA_EXCEEDED',
-        null,
-        'errors.accounts.quotaExceeded',
-      );
-    }
+    const plan = userPlan ?? (await this.entitlementService.getUserPlan(userId));
+    await this.entitlementService.checkTradingAccountEntitlement(userId, count, plan);
 
     const provider = input.provider ?? 'MANUAL';
     if (!['MT4', 'MT5', 'MANUAL'].includes(provider)) {

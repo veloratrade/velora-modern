@@ -31,17 +31,22 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
     },
     async (request, reply) => {
       const userId = request.userId!;
+      const userPlan = request.userPlan || request.user?.plan;
       const body = request.body || {};
 
-      const account = await service.createAccount(userId, {
-        provider: body.provider as AccountProvider,
-        label: body.label,
-        accountNumber: body.accountNumber,
-        currency: body.currency,
-        leverage: body.leverage,
-        status: body.status as AccountStatus,
-        timezone: body.timezone,
-      });
+      const account = await service.createAccount(
+        userId,
+        {
+          provider: body.provider as AccountProvider,
+          label: body.label,
+          accountNumber: body.accountNumber,
+          currency: body.currency,
+          leverage: body.leverage,
+          status: body.status as AccountStatus,
+          timezone: body.timezone,
+        },
+        userPlan,
+      );
 
       return reply.status(201).send({
         status: 'success',

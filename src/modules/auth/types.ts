@@ -3,6 +3,7 @@ export interface PublicUserDto {
   email: string;
   fullName: string;
   role: string;
+  plan: string;
   timezone: string;
   locale: string;
   createdAt: string;

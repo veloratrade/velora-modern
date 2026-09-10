@@ -97,6 +97,13 @@ export class AuthService {
     MemoryStore.clear();
   }
 
+  public static setUserPlanInMemory(userId: number, plan: string): void {
+    const user = MemoryStore.users.find((u) => u.id === BigInt(userId));
+    if (user) {
+      user.plan = plan;
+    }
+  }
+
   static verifyUserForTest(email: string): void {
     const user = MemoryStore.users.find((u) => u.email === email.trim().toLowerCase());
     if (user) {
@@ -113,6 +120,7 @@ export class AuthService {
     email: string;
     fullName: string;
     role: string;
+    plan?: string;
     timezone: string;
     locale: string;
     createdAt: Date;
@@ -123,6 +131,7 @@ export class AuthService {
       email: user.email,
       fullName: user.fullName || '',
       role: user.role,
+      plan: user.plan || 'free',
       timezone: user.timezone || 'UTC',
       locale: user.locale || 'fa',
       createdAt: user.createdAt ? user.createdAt.toISOString() : new Date().toISOString(),

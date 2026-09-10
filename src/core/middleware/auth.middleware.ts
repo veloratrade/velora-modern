@@ -9,6 +9,7 @@ declare module 'fastify' {
     user?: PublicUserDto;
     userId?: number;
     userRole?: string;
+    userPlan?: string;
   }
 }
 
@@ -35,6 +36,7 @@ export class AuthMiddleware {
     request.user = publicUser;
     request.userId = publicUser.id;
     request.userRole = publicUser.role;
+    request.userPlan = publicUser.plan || 'free';
   }
 
   /**
