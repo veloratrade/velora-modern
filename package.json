@@ -18,7 +18,9 @@
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.ts\"",
     "i18n:check": "tsx scripts/validate-i18n.ts",
-    "structure:check": "tsx scripts/validate-structure.ts"
+    "structure:check": "tsx scripts/validate-structure.ts",
+    "github:cost:check": "tsx scripts/validate-github-cost.ts",
+    "frontend:url:check": "tsx scripts/validate-frontend-url.ts"
   },
   "keywords": [
     "trading-journal",
