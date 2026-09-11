@@ -42,6 +42,7 @@
     "docs/infrastructure",
     "docs/integrations",
     "docs/migration",
+    "docs/ops",
     "docs/security",
     "prisma/migrations",
     "src/config",
