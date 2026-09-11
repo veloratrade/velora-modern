@@ -17,7 +17,8 @@
     "lint": "eslint . --ext .ts",
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.ts\"",
-    "i18n:check": "tsx scripts/validate-i18n.ts"
+    "i18n:check": "tsx scripts/validate-i18n.ts",
+    "structure:check": "tsx scripts/validate-structure.ts"
   },
   "keywords": [
     "trading-journal",
