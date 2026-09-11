@@ -1,0 +1,38 @@
+# Velora Health Check (staging) — manual + reusable staging smoke.
+#
+# Port of PHP `healthcheck-staging.yml`: manual dispatch, guard probes ON by
+# default on staging (side-effect-free by construction). Target origin comes
+# from the `STAGING_APP_URL` GitHub variable (non-secret); an unset variable
+# fails the suite closed (empty base_url is rejected).
+name: Health Check (staging)
+
+on:
+  workflow_dispatch:
+    inputs:
+      guard_probes:
+        description: 'Run guard probes (401 + 400 boundaries, no side effects)'
+        required: false
+        default: true
+        type: boolean
+  workflow_call:
+    inputs:
+      guard_probes:
+        required: false
+        default: true
+        type: boolean
+    outputs:
+      reported_version:
+        description: 'Version string reported by GET /health'
+        value: ${{ jobs.staging_smoke.outputs.reported_version }}
+
+permissions:
+  contents: read
+
+jobs:
+  staging_smoke:
+    name: Staging smoke
+    uses: ./.github/workflows/healthcheck-suite.yml
+    with:
+      base_url: ${{ vars.STAGING_APP_URL }}
+      environment_name: staging
+      guard_probes: ${{ inputs.guard_probes }}

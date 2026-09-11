@@ -1,6 +1,6 @@
 {
   "name": "velora-modern",
-  "version": "0.2.0",
+  "version": "0.6.0",
   "description": "Velora Modern - Modern Node.js/TypeScript Trading Journal & Intelligence Engine",
   "main": "dist/server.js",
   "type": "module",
@@ -20,7 +20,10 @@
     "i18n:check": "tsx scripts/validate-i18n.ts",
     "structure:check": "tsx scripts/validate-structure.ts",
     "github:cost:check": "tsx scripts/validate-github-cost.ts",
-    "frontend:url:check": "tsx scripts/validate-frontend-url.ts"
+    "frontend:url:check": "tsx scripts/validate-frontend-url.ts",
+    "backup:evidence:check": "tsx scripts/validate-backup-evidence.ts",
+    "secret:scan": "tsx scripts/secret-scan.ts",
+    "ops:status": "tsx scripts/ops-status.ts"
   },
   "keywords": [
     "trading-journal",

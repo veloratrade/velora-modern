@@ -1,0 +1,66 @@
+# Velora Health Check (production) — manual + reusable production smoke.
+#
+# Port of PHP `healthcheck-production.yml`: read-only smoke by default; guard
+# probes against production are locked behind the exact confirm phrase AND the
+# `production` GitHub environment (required reviewers). The suite itself
+# re-validates the phrase (defense in depth — the phrase is checked in two places).
+name: Health Check (production)
+
+on:
+  workflow_dispatch:
+    inputs:
+      guard_probes:
+        description: 'Run guard probes against production (requires confirm phrase)'
+        required: false
+        default: false
+        type: boolean
+      confirm_production_probes:
+        description: 'To probe production guards, type exactly: GUARD-PROBES-PRODUCTION'
+        required: false
+        default: ''
+        type: string
+  workflow_call:
+    inputs:
+      guard_probes:
+        required: false
+        default: false
+        type: boolean
+      confirm_production_probes:
+        required: false
+        default: ''
+        type: string
+    outputs:
+      reported_version:
+        description: 'Version string reported by GET /health'
+        value: ${{ jobs.production_smoke.outputs.reported_version }}
+
+permissions:
+  contents: read
+
+jobs:
+  precheck:
+    name: Production probe precheck
+    if: ${{ inputs.guard_probes }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - name: Verify confirm phrase (first of two checks)
+        run: |
+          if [ "${{ inputs.confirm_production_probes }}" != "GUARD-PROBES-PRODUCTION" ]; then
+            echo "::error::guard probes against production require the exact confirm phrase."
+            exit 1
+          fi
+          echo "Production probe confirm accepted."
+
+  production_smoke:
+    name: Production smoke
+    needs: [precheck]
+    # Skip the needs gate when guard probes are off (precheck is skipped then).
+    if: ${{ !cancelled() && (needs.precheck.result == 'success' || needs.precheck.result == 'skipped') }}
+    uses: ./.github/workflows/healthcheck-suite.yml
+    with:
+      base_url: ${{ vars.PROD_APP_URL }}
+      environment_name: production
+      guard_probes: ${{ inputs.guard_probes }}
+      confirm_production_probes: ${{ inputs.confirm_production_probes }}

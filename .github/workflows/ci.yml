@@ -2,14 +2,18 @@ name: Velora Modern CI Pipeline
 
 on:
   push:
-    branches: [ main, staging ]
+    branches: [main, staging]
   pull_request:
-    branches: [ main, staging ]
+    branches: [main, staging]
+
+permissions:
+  contents: read
 
 jobs:
   validate:
-    name: Lint, Typecheck, Test, i18n Gate & Build
+    name: Lint, Typecheck, Guards, Test, i18n Gate & Build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
@@ -36,8 +40,18 @@ jobs:
       - name: Localization Quality Gate
         run: npm run i18n:check
 
+      - name: Structure Guard
+        run: npm run structure:check
+
+      - name: GitHub Cost Policy Guard
+        run: npm run github:cost:check
+
       - name: Run Vitest Suite
         run: npm run test
 
       - name: Build TypeScript Project
         run: npm run build
+
+  secret_scan:
+    name: Secret scan
+    uses: ./.github/workflows/secret-scan.yml

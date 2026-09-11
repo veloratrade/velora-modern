@@ -40,7 +40,11 @@ export function parseEnvFile(filePath: string): Record<string, string> {
     const key = line.substring(0, eqIdx).trim();
     let value = line.substring(eqIdx + 1).trim();
 
-    if (value.length >= 2 && value[0] === value[value.length - 1] && (value[0] === "'" || value[0] === '"')) {
+    if (
+      value.length >= 2 &&
+      value[0] === value[value.length - 1] &&
+      (value[0] === "'" || value[0] === '"')
+    ) {
       value = value.substring(1, value.length - 1);
     }
 
@@ -221,7 +225,7 @@ export function main(args: string[] = process.argv.slice(2)): number {
         return 2;
       }
     } else if (arg === '--from-env') {
-      envData = { ...process.env as Record<string, string> };
+      envData = { ...(process.env as Record<string, string>) };
       sourceSpecified = true;
     } else if (arg === '--app-env' && i + 1 < args.length) {
       appEnvOverride = args[++i];
@@ -234,7 +238,9 @@ export function main(args: string[] = process.argv.slice(2)): number {
 
   // Require mandatory source selection (--from-env OR --env-file <path>) matching PHP contract
   if (!sourceSpecified || !envData) {
-    console.error('ERROR: Either --from-env or --env-file <path> must be specified as input source.');
+    console.error(
+      'ERROR: Either --from-env or --env-file <path> must be specified as input source.',
+    );
     return 2;
   }
 
@@ -242,7 +248,9 @@ export function main(args: string[] = process.argv.slice(2)): number {
 
   console.log('VELORA FRONTEND_URL guard');
   console.log(`  APP_ENV        : ${res.appEnv}`);
-  console.log(`  mode           : ${res.isProduction ? 'production (advisory)' : 'non-production (blocking)'}`);
+  console.log(
+    `  mode           : ${res.isProduction ? 'production (advisory)' : 'non-production (blocking)'}`,
+  );
   console.log(`  expected origin: ${res.expectedOrigin}`);
   console.log('  note           : variable values are never printed.\n');
 

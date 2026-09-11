@@ -1,3 +1,4 @@
+import { readFileSync } from 'fs';
 import Fastify from 'fastify';
 import helmet from '@fastify/helmet';
 import cors from '@fastify/cors';
@@ -11,6 +12,17 @@ import { tradeRoutes } from './modules/trades/trades.routes.js';
 import { accountsPlugin } from './modules/accounts/index.js';
 import { dashboardPlugin } from './modules/dashboard/index.js';
 
+// Single source of truth for the application version: package.json "version"
+// (authoritative value per migration changelog + README). Read at runtime so
+// src (tsx/vitest) and dist (node) always agree — no hardcoded duplicate.
+// Path holds in both layouts: src/app.ts -> ../package.json and
+// dist/app.js -> ../package.json.
+const APP_VERSION: string = (
+  JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf-8')) as {
+    version: string;
+  }
+).version;
+
 export function buildApp() {
   const app = Fastify({
     logger,
@@ -21,6 +33,18 @@ export function buildApp() {
   // Register Security Plugins
   app.register(helmet, {
     contentSecurityPolicy: env.NODE_ENV === 'production',
+    // D16 owner-approved values — explicit configuration, never framework
+    // defaults. Unrelated Helmet headers keep their existing behavior.
+    frameguard: { action: 'deny' }, // X-Frame-Options: DENY
+    hsts: { maxAge: 31536000, includeSubDomains: true },
+  });
+
+  // D16 owner-approved: Cache-Control is not a Helmet header, so it is
+  // enforced here. onSend runs for every reply (including errors), so the
+  // policy holds on all responses.
+  app.addHook('onSend', async (_request, reply, payload) => {
+    reply.header('cache-control', 'no-store, max-age=0, private');
+    return payload;
   });
 
   app.register(cors, {
@@ -56,7 +80,7 @@ export function buildApp() {
     return {
       status: 'ok',
       service: 'velora-modern',
-      version: '0.6.0',
+      version: APP_VERSION,
       environment: env.NODE_ENV,
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),

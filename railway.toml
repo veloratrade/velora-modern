@@ -1,0 +1,21 @@
+# Velora Modern — Railway service configuration (repo-side, environment-agnostic).
+#
+# This file declares HOW to build and start the service. It does NOT provision
+# anything: environments, variables, secrets, volumes, and databases are owned
+# by the Railway project (see docs/infrastructure/railway-baseline.md) and the
+# provisioning runbook (docs/ops/PROVISIONING_RUNBOOK.md).
+#
+# Database note: the build runs `prisma generate` (pure client codegen from
+# prisma/schema.prisma — no database contact). NO migration is applied here;
+# database migration/execution is deferred to the final database phase.
+
+[build]
+builder = "NIXPACKS"
+buildCommand = "npm ci && npx prisma generate && npm run build"
+
+[deploy]
+startCommand = "npm start"
+healthcheckPath = "/health"
+healthcheckTimeout = 100
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

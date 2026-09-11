@@ -47,3 +47,15 @@ At the start of every session, the agent MUST execute the following read-only in
 | **Agent Operational Directives** | `AGENTS.md` (Root) | `SHARED_ADAPTED` | `docs/governance/AGENTS.md` | `TRANSFER_COMPLETED` |
 | **Silent Bootstrap Protocol** | `AGENTS.md` Section 2 | `SHARED_ADAPTED` | `docs/governance/AGENTS.md` | `TRANSFER_COMPLETED` |
 | **Remote Publication Requirement** | Audit Findings | `MODERN_SPECIFIC` | `docs/governance/AGENTS.md` | `TRANSFER_COMPLETED` |
+
+---
+
+## 5. Operational Governance (ported behavioral contract)
+
+The full agent behavioral contract — evidence-first reporting, no-secret-output
+rule, production change control, BACKUP GATE law, GitHub cost constraints,
+minimal-footprint principles, verification requirements, fail-closed behavior,
+owner-approval boundaries — lives in `docs/governance/OPERATIONAL_CONTRACT.md`
+and is MANDATORY for all agents and contributors. Operations handbook:
+`docs/ops/README.md`. Merge expectations:
+`docs/governance/MERGE_REVIEW_POLICY.md`.

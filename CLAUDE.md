@@ -26,8 +26,15 @@ npm run format:check      # Prettier formatting verification
 # Quality & Localization Gate
 npm run i18n:check        # tsx scripts/validate-i18n.ts
 
+# Operational Guards (see docs/ops/README.md)
+npm run structure:check   # tsx scripts/validate-structure.ts
+npm run github:cost:check # tsx scripts/validate-github-cost.ts
+npm run secret:scan       # tsx scripts/secret-scan.ts
+npm run backup:evidence:check # + EXPECTED_ENV + evidence env vars
+npm run ops:status        # read-only repo + ops posture snapshot
+
 # Test Suite Execution
-npm test                  # vitest run (16 test files / 87+ tests)
+npm test                  # vitest run (21 test files / 141 tests)
 
 # Build & Validation
 npm run build             # tsc build to dist/

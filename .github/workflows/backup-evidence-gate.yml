@@ -1,0 +1,130 @@
+# Velora Backup Evidence Gate (reusable) — machine-enforced backup law.
+#
+# Port of the PHP BACKUP GATE law (AGENTS.md §14, `backup_gate.py`): no deploy
+# or data migration proceeds without successfully created AND verified backup
+# evidence. The EVIDENCE CONTRACT is unchanged (same 6 fields, same formats);
+# only the transport changed (Python -> TypeScript validator).
+#
+# Two mutually exclusive paths (XOR enforced, no silent bypass):
+#  1. EVIDENCE path (the law): all six evidence inputs supplied; the validator
+#     must PASS or the calling workflow stops. Used once the final-phase backup
+#     producer emits evidence.
+#  2. BOOTSTRAP path (empty-target attestation): the caller attests the target
+#     environment holds NO data yet (0 deploys, unprovisioned) via the exact
+#     phrase `EMPTY-TARGET-BOOTSTRAP`. The attestation is recorded loudly in
+#     the deployment report. This path exists ONLY because the owner sequenced
+#     database work as the FINAL phase: it must never be used against a
+#     data-bearing target, and it disappears from procedure once backup
+#     evidence exists. See docs/ops/BACKUP_POLICY.md.
+name: Backup Evidence Gate (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      expected_env:
+        description: 'staging | production'
+        required: true
+        type: string
+      backup_id:
+        required: false
+        default: ''
+        type: string
+      release_tag:
+        required: false
+        default: ''
+        type: string
+      sha256:
+        required: false
+        default: ''
+        type: string
+      source_commit_sha:
+        required: false
+        default: ''
+        type: string
+      verification_status:
+        required: false
+        default: ''
+        type: string
+      environment:
+        required: false
+        default: ''
+        type: string
+      bootstrap_ack:
+        description: 'Exact phrase EMPTY-TARGET-BOOTSTRAP when (and only when) the target provably holds no data'
+        required: false
+        default: ''
+        type: string
+    outputs:
+      path_taken:
+        description: 'evidence | bootstrap'
+        value: ${{ jobs.gate.outputs.path_taken }}
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Backup evidence gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      path_taken: ${{ steps.decide.outputs.path_taken }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Decide path (XOR, fail-closed)
+        id: decide
+        run: |
+          if [ -n "${{ inputs.bootstrap_ack }}" ]; then
+            if [ "${{ inputs.bootstrap_ack }}" != "EMPTY-TARGET-BOOTSTRAP" ]; then
+              echo "::error::bootstrap_ack is set but is not the exact attestation phrase."
+              exit 1
+            fi
+            if [ -n "${{ inputs.backup_id }}${{ inputs.release_tag }}${{ inputs.sha256 }}${{ inputs.source_commit_sha }}${{ inputs.verification_status }}${{ inputs.environment }}" ]; then
+              echo "::error::evidence inputs AND bootstrap_ack were both supplied — exactly one path is allowed."
+              exit 1
+            fi
+            echo "path_taken=bootstrap" >> "$GITHUB_OUTPUT"
+          else
+            echo "path_taken=evidence" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate backup evidence (the law)
+        if: steps.decide.outputs.path_taken == 'evidence'
+        env:
+          EXPECTED_ENV: ${{ inputs.expected_env }}
+          BACKUP_ID: ${{ inputs.backup_id }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SHA256: ${{ inputs.sha256 }}
+          SOURCE_COMMIT_SHA: ${{ inputs.source_commit_sha }}
+          VERIFICATION_STATUS: ${{ inputs.verification_status }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          # D5 store-free binding: the evidence MUST name this deployment's
+          # commit. Hardwired (never an input) so it cannot be forgotten or
+          # spoofed by the caller — fail-closed by construction. The
+          # independent store re-read stays deferred to the final DB phase.
+          EXPECTED_COMMIT_SHA: ${{ github.sha }}
+        run: npx tsx scripts/validate-backup-evidence.ts
+
+      - name: Record bootstrap attestation (empty target only)
+        if: steps.decide.outputs.path_taken == 'bootstrap'
+        run: |
+          {
+            echo "## BACKUP GATE: BOOTSTRAP PATH"
+            echo ""
+            echo "No backup evidence was validated. The operator attested that the"
+            echo "\`${{ inputs.expected_env }}\` target provably holds NO data"
+            echo "(attestation phrase \`EMPTY-TARGET-BOOTSTRAP\`)."
+            echo ""
+            echo "This path MUST NOT be used against a data-bearing target."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning::BACKUP GATE took the BOOTSTRAP path (no evidence validated) for ${{ inputs.expected_env }}"

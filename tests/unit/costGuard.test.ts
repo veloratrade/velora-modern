@@ -77,8 +77,16 @@ jobs:
     try {
       const result = validateWorkflows(fixtureDir, fixtureDir);
       expect(result.passed).toBe(false);
-      expect(result.errors.some((e) => e.includes('job `no_timeout` has runs-on but no timeout-minutes'))).toBe(true);
-      expect(result.errors.some((e) => e.includes('job `excessive_timeout` timeout 45m exceeds maximum allowed 30m'))).toBe(true);
+      expect(
+        result.errors.some((e) =>
+          e.includes('job `no_timeout` has runs-on but no timeout-minutes'),
+        ),
+      ).toBe(true);
+      expect(
+        result.errors.some((e) =>
+          e.includes('job `excessive_timeout` timeout 45m exceeds maximum allowed 30m'),
+        ),
+      ).toBe(true);
       expect(result.errors.some((e) => e.includes('reusable_exempt'))).toBe(false);
     } finally {
       fs.rmSync(fixtureDir, { recursive: true, force: true });
@@ -154,11 +162,21 @@ jobs:
     try {
       const result = validateWorkflows(fixtureDir, fixtureDir);
       expect(result.passed).toBe(false);
-      expect(result.errors.some((e) => e.includes('scheduled workflows are prohibited'))).toBe(true);
-      expect(result.errors.some((e) => e.includes('repository_dispatch trigger is prohibited'))).toBe(true);
-      expect(result.errors.some((e) => e.includes('workflow_run trigger is prohibited'))).toBe(true);
-      expect(result.errors.some((e) => e.includes('Actions cache requires explicit storage review'))).toBe(true);
-      expect(result.errors.some((e) => e.includes('package publishing (packages: write)'))).toBe(true);
+      expect(result.errors.some((e) => e.includes('scheduled workflows are prohibited'))).toBe(
+        true,
+      );
+      expect(
+        result.errors.some((e) => e.includes('repository_dispatch trigger is prohibited')),
+      ).toBe(true);
+      expect(result.errors.some((e) => e.includes('workflow_run trigger is prohibited'))).toBe(
+        true,
+      );
+      expect(
+        result.errors.some((e) => e.includes('Actions cache requires explicit storage review')),
+      ).toBe(true);
+      expect(result.errors.some((e) => e.includes('package publishing (packages: write)'))).toBe(
+        true,
+      );
       expect(result.errors.some((e) => e.includes('docker/build-push-action'))).toBe(true);
       expect(result.errors.some((e) => e.includes('ghcr.io'))).toBe(true);
       expect(result.errors.some((e) => e.includes('npm publish'))).toBe(true);

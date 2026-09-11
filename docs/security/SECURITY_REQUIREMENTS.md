@@ -67,6 +67,14 @@ This document specifies the 34 mandatory security controls for **Velora Modern**
   - `Cache-Control: no-store, max-age=0, private`
   - `Strict-Transport-Security: max-age=31536000; includeSubDomains`
 
+> **Owner decision implemented (D16 — 2026-09-12):** the owner approved
+> option (a) — implementation aligned to §13. Enforced explicitly in
+> `src/app.ts` (Helmet `frameguard: deny` + `hsts: maxAge 31536000,
+> includeSubDomains` + `onSend` Cache-Control hook, all responses incl.
+> errors) and locked by the committed headers test
+> (`tests/integration/app.test.ts`) plus the smoke-suite assertion.
+> Do not change either side without the other.
+
 ### 14. HTTPS & TLS Enforcement
 - All network communications MUST be encrypted via HTTPS / TLS 1.2+.
 - Unencrypted HTTP requests MUST be redirected to HTTPS.

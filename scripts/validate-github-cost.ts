@@ -44,13 +44,18 @@ export function validateRunnerLabel(relPath: string, rawLabel: string, errors: s
   const value = rawLabel.trim();
 
   if (value.includes('${{')) {
-    errors.push(`${relPath}: dynamic/expression runner \`${value}\` cannot be verified; pin an approved standard Linux label`);
+    errors.push(
+      `${relPath}: dynamic/expression runner \`${value}\` cannot be verified; pin an approved standard Linux label`,
+    );
     return 1;
   }
 
   if (value.startsWith('[') || value.startsWith('{')) {
     const inner = value.replace(/^\[|\{|\]|\}$/g, '').trim();
-    const parts = inner.split(',').map((p) => p.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
+    const parts = inner
+      .split(',')
+      .map((p) => p.trim().replace(/^['"]|['"]$/g, ''))
+      .filter(Boolean);
     const low = parts.join(' ').toLowerCase();
 
     if (low.includes('self-hosted')) {
@@ -60,7 +65,9 @@ export function validateRunnerLabel(relPath: string, rawLabel: string, errors: s
 
     for (const p of parts) {
       if (p && !ALLOWED_RUNNERS.has(p)) {
-        errors.push(`${relPath}: runner array element \`${p}\` in \`${value}\` is not an approved standard Linux runner`);
+        errors.push(
+          `${relPath}: runner array element \`${p}\` in \`${value}\` is not an approved standard Linux runner`,
+        );
       }
     }
     return 1;
@@ -84,7 +91,10 @@ export function validateRunnerLabel(relPath: string, rawLabel: string, errors: s
   return 1;
 }
 
-export function validateWorkflows(workflowsDir: string = WORKFLOWS_DIR, rootDir: string = ROOT): CostGuardResult {
+export function validateWorkflows(
+  workflowsDir: string = WORKFLOWS_DIR,
+  rootDir: string = ROOT,
+): CostGuardResult {
   const errors: string[] = [];
   let runnerCount = 0;
   let artifactCount = 0;
@@ -102,7 +112,9 @@ export function validateWorkflows(workflowsDir: string = WORKFLOWS_DIR, rootDir:
     };
   }
 
-  const files = fs.readdirSync(workflowsDir).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'));
+  const files = fs
+    .readdirSync(workflowsDir)
+    .filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'));
   workflowCount = files.length;
 
   for (const file of files) {
@@ -121,13 +133,15 @@ export function validateWorkflows(workflowsDir: string = WORKFLOWS_DIR, rootDir:
     }
 
     // 2. Prohibited triggers
-    if (/^\s*schedule:\s*$|^\s*-\s*cron:\s*/mi.test(source)) {
-      errors.push(`${relPath}: scheduled workflows are prohibited; use explicit manual/push policy`);
+    if (/^\s*schedule:\s*$|^\s*-\s*cron:\s*/im.test(source)) {
+      errors.push(
+        `${relPath}: scheduled workflows are prohibited; use explicit manual/push policy`,
+      );
     }
-    if (/^\s*repository_dispatch:\s*/mi.test(source)) {
+    if (/^\s*repository_dispatch:\s*/im.test(source)) {
       errors.push(`${relPath}: repository_dispatch trigger is prohibited`);
     }
-    if (/^\s*workflow_run:\s*/mi.test(source)) {
+    if (/^\s*workflow_run:\s*/im.test(source)) {
       errors.push(`${relPath}: workflow_run trigger is prohibited`);
     }
 
@@ -137,11 +151,15 @@ export function validateWorkflows(workflowsDir: string = WORKFLOWS_DIR, rootDir:
     }
 
     // 4. Packages / publishing / registry
-    if (/^\s*packages:\s*write\s*$/mi.test(source)) {
-      errors.push(`${relPath}: package publishing (packages: write) requires explicit billing review`);
+    if (/^\s*packages:\s*write\s*$/im.test(source)) {
+      errors.push(
+        `${relPath}: package publishing (packages: write) requires explicit billing review`,
+      );
     }
     if (/docker\/build-push-action/i.test(source)) {
-      errors.push(`${relPath}: docker/build-push-action (image publishing) requires explicit review`);
+      errors.push(
+        `${relPath}: docker/build-push-action (image publishing) requires explicit review`,
+      );
     }
     if (/docker\/login-action/i.test(source)) {
       errors.push(`${relPath}: docker/login-action (registry login) requires explicit review`);
@@ -154,10 +172,10 @@ export function validateWorkflows(workflowsDir: string = WORKFLOWS_DIR, rootDir:
     }
 
     // 5. Permissions
-    if (/^\s*id-token:\s*write\s*$/mi.test(source)) {
+    if (/^\s*id-token:\s*write\s*$/im.test(source)) {
       errors.push(`${relPath}: id-token: write (OIDC) requires explicit review`);
     }
-    const writePermMatches = Array.from(source.matchAll(/^\s*([a-z-]+):\s*write\s*$/gmi));
+    const writePermMatches = Array.from(source.matchAll(/^\s*([a-z-]+):\s*write\s*$/gim));
     for (const pmatch of writePermMatches) {
       const key = pmatch[1].toLowerCase();
       if (key === 'packages' || key === 'id-token') continue;
@@ -179,11 +197,15 @@ export function validateWorkflows(workflowsDir: string = WORKFLOWS_DIR, rootDir:
 
         const retMatch = stepBlock.match(/^\s*retention-days:\s*(\d+)/m);
         if (!retMatch) {
-          errors.push(`${relPath}: upload-artifact step present but missing retention-days setting (must be <= ${MAX_ARTIFACT_RETENTION_DAYS})`);
+          errors.push(
+            `${relPath}: upload-artifact step present but missing retention-days setting (must be <= ${MAX_ARTIFACT_RETENTION_DAYS})`,
+          );
         } else {
           const days = parseInt(retMatch[1], 10);
           if (days > MAX_ARTIFACT_RETENTION_DAYS) {
-            errors.push(`${relPath}: artifact retention ${days}d exceeds maximum allowed ${MAX_ARTIFACT_RETENTION_DAYS}d`);
+            errors.push(
+              `${relPath}: artifact retention ${days}d exceeds maximum allowed ${MAX_ARTIFACT_RETENTION_DAYS}d`,
+            );
           }
         }
       }
@@ -196,7 +218,9 @@ export function validateWorkflows(workflowsDir: string = WORKFLOWS_DIR, rootDir:
         artifactCount++;
         const days = parseInt(match[1], 10);
         if (days > MAX_ARTIFACT_RETENTION_DAYS) {
-          errors.push(`${relPath}: artifact retention ${days}d exceeds maximum allowed ${MAX_ARTIFACT_RETENTION_DAYS}d`);
+          errors.push(
+            `${relPath}: artifact retention ${days}d exceeds maximum allowed ${MAX_ARTIFACT_RETENTION_DAYS}d`,
+          );
         }
       }
     }
@@ -216,7 +240,9 @@ export function validateWorkflows(workflowsDir: string = WORKFLOWS_DIR, rootDir:
         } else {
           const timeoutVal = parseInt(timeoutMatch[1], 10);
           if (timeoutVal > 30) {
-            errors.push(`${relPath}: job \`${job.name}\` timeout ${timeoutVal}m exceeds maximum allowed 30m`);
+            errors.push(
+              `${relPath}: job \`${job.name}\` timeout ${timeoutVal}m exceeds maximum allowed 30m`,
+            );
           }
         }
       }

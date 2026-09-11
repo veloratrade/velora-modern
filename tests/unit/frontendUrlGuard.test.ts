@@ -34,21 +34,41 @@ describe('Frontend URL Guard Validator (Phase 6.6C)', () => {
   });
 
   it('FU-002: rejects non-https scheme outside local dev', () => {
-    const findings = evaluateFrontendUrl('http://staging-modern.veloratrade.ir', DEFAULT_EXPECTED_STAGING, false);
+    const findings = evaluateFrontendUrl(
+      'http://staging-modern.veloratrade.ir',
+      DEFAULT_EXPECTED_STAGING,
+      false,
+    );
     expect(findings.some((f) => f.code === 'FU-002')).toBe(true);
   });
 
   it('FU-003: rejects URL with path suffix, query string, fragment, or credentials', () => {
-    const findingsPath = evaluateFrontendUrl('https://staging-modern.veloratrade.ir/path', DEFAULT_EXPECTED_STAGING, false);
+    const findingsPath = evaluateFrontendUrl(
+      'https://staging-modern.veloratrade.ir/path',
+      DEFAULT_EXPECTED_STAGING,
+      false,
+    );
     expect(findingsPath.some((f) => f.code === 'FU-003')).toBe(true);
 
-    const findingsQuery = evaluateFrontendUrl('https://staging-modern.veloratrade.ir?token=secret', DEFAULT_EXPECTED_STAGING, false);
+    const findingsQuery = evaluateFrontendUrl(
+      'https://staging-modern.veloratrade.ir?token=secret',
+      DEFAULT_EXPECTED_STAGING,
+      false,
+    );
     expect(findingsQuery.some((f) => f.code === 'FU-003')).toBe(true);
 
-    const findingsHash = evaluateFrontendUrl('https://staging-modern.veloratrade.ir#anchor', DEFAULT_EXPECTED_STAGING, false);
+    const findingsHash = evaluateFrontendUrl(
+      'https://staging-modern.veloratrade.ir#anchor',
+      DEFAULT_EXPECTED_STAGING,
+      false,
+    );
     expect(findingsHash.some((f) => f.code === 'FU-003')).toBe(true);
 
-    const findingsCreds = evaluateFrontendUrl('https://user:pass@staging-modern.veloratrade.ir', DEFAULT_EXPECTED_STAGING, false);
+    const findingsCreds = evaluateFrontendUrl(
+      'https://user:pass@staging-modern.veloratrade.ir',
+      DEFAULT_EXPECTED_STAGING,
+      false,
+    );
     expect(findingsCreds.some((f) => f.code === 'FU-003')).toBe(true);
   });
 
@@ -58,12 +78,20 @@ describe('Frontend URL Guard Validator (Phase 6.6C)', () => {
   });
 
   it('FU-005: finding if staging environment does not match expected staging origin', () => {
-    const findings = evaluateFrontendUrl('https://wrong-staging-domain.com', DEFAULT_EXPECTED_STAGING, false);
+    const findings = evaluateFrontendUrl(
+      'https://wrong-staging-domain.com',
+      DEFAULT_EXPECTED_STAGING,
+      false,
+    );
     expect(findings.some((f) => f.code === 'FU-005')).toBe(true);
   });
 
   it('FU-006: rejects non-default port in non-localhost URLs', () => {
-    const findings = evaluateFrontendUrl('https://staging-modern.veloratrade.ir:8443', DEFAULT_EXPECTED_STAGING, false);
+    const findings = evaluateFrontendUrl(
+      'https://staging-modern.veloratrade.ir:8443',
+      DEFAULT_EXPECTED_STAGING,
+      false,
+    );
     expect(findings.some((f) => f.code === 'FU-006')).toBe(true);
   });
 

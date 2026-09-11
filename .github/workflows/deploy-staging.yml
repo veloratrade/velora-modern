@@ -1,0 +1,204 @@
+# Deploy Staging — manual Railway release with preflight, backup law, and verify.
+#
+# Semantic port of PHP `deploy-staging.yml` (FTP -> Railway `railway up`).
+# Preserved: manual-only trigger, dry-run default, preflight guards (FRONTEND_URL
+# origin contract + cost policy), BACKUP GATE law (evidence or empty-target
+# bootstrap attestation, XOR), release battery, post-deploy live verify,
+# provenance report. Dropped with reason: DB backup/verify jobs (deferred to the
+# final database phase), critical-file transfer (no FTP/shared host), .htaccess/
+# robots packaging (N/A on Railway), trade-migration opt-in (DB execution).
+name: Deploy Staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run — gates and plan only, nothing is deployed (default true)'
+        required: false
+        default: true
+        type: boolean
+      bootstrap_ack:
+        description: 'Only if staging provably holds no data, type exactly: EMPTY-TARGET-BOOTSTRAP'
+        required: false
+        default: ''
+        type: string
+      backup_id:
+        description: 'Backup evidence (once the final-phase backup producer exists)'
+        required: false
+        default: ''
+        type: string
+      release_tag:
+        required: false
+        default: ''
+        type: string
+      sha256:
+        required: false
+        default: ''
+        type: string
+      source_commit_sha:
+        required: false
+        default: ''
+        type: string
+      verification_status:
+        required: false
+        default: ''
+        type: string
+      environment:
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false # an interrupted deploy is worse than a queued one
+
+env:
+  # PINNED Railway identity (C-2 equivalent): hardcoded, never parameterized,
+  # never taken from dispatch inputs. Values are non-secret (see
+  # docs/infrastructure/railway-baseline.md).
+  RAILWAY_PROJECT_ID: 56d1762e-79d3-4518-b788-5eda1d93dd22
+  RAILWAY_SERVICE: velora-modern
+  RAILWAY_ENVIRONMENT: staging
+  STAGING_EXPECTED_ORIGIN: https://staging-modern.veloratrade.ir
+
+jobs:
+  preflight:
+    name: Preflight guards (URL contract + cost policy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: FRONTEND_URL staging-origin guard (fail-closed)
+        env:
+          FRONTEND_URL: ${{ vars.STAGING_FRONTEND_URL }}
+          APP_ENV: staging
+        run: npx tsx scripts/validate-frontend-url.ts --from-env --expect "$STAGING_EXPECTED_ORIGIN" --app-env staging
+
+      - name: GitHub Cost Policy Guard
+        run: npm run github:cost:check
+
+  backup_gate:
+    name: Backup evidence gate
+    needs: [preflight]
+    uses: ./.github/workflows/backup-evidence-gate.yml
+    with:
+      expected_env: staging
+      backup_id: ${{ inputs.backup_id }}
+      release_tag: ${{ inputs.release_tag }}
+      sha256: ${{ inputs.sha256 }}
+      source_commit_sha: ${{ inputs.source_commit_sha }}
+      verification_status: ${{ inputs.verification_status }}
+      environment: ${{ inputs.environment }}
+      bootstrap_ack: ${{ inputs.bootstrap_ack }}
+
+  quality:
+    name: Release battery
+    needs: [preflight, backup_gate]
+    uses: ./.github/workflows/quality-gate.yml
+
+  deploy:
+    name: Railway deploy (staging)
+    needs: [preflight, backup_gate, quality]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: staging
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Dry-run plan (no deploy)
+        if: ${{ inputs.dry_run }}
+        run: |
+          {
+            echo "## DRY RUN — staging deploy plan (nothing was deployed)"
+            echo ""
+            echo "- commit: \`${{ github.sha }}\`"
+            echo "- project: \`${{ env.RAILWAY_PROJECT_ID }}\` (pinned)"
+            echo "- service: \`${{ env.RAILWAY_SERVICE }}\` (pinned)"
+            echo "- environment: \`${{ env.RAILWAY_ENVIRONMENT }}\` (pinned)"
+            echo "- backup path: \`${{ needs.backup_gate.outputs.path_taken }}\`"
+            echo "- quality battery: passed"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install Railway CLI
+        if: ${{ !inputs.dry_run }}
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway staging
+        if: ${{ !inputs.dry_run }}
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::error::RAILWAY_TOKEN is not set on the staging environment."
+            exit 1
+          fi
+          railway link --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service "$RAILWAY_SERVICE"
+          railway up
+
+  verify:
+    name: Post-deploy live verify (staging)
+    needs: [deploy]
+    if: ${{ !inputs.dry_run }}
+    uses: ./.github/workflows/healthcheck-staging.yml
+    with:
+      guard_probes: true
+
+  deployment_report:
+    name: Deployment report + provenance
+    needs: [deploy, verify, backup_gate]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Write provenance record
+        run: |
+          mkdir -p provenance
+          cat > provenance/staging-deploy.json <<'JSON'
+          {
+            "workflow": "deploy-staging",
+            "repository": "${{ github.repository }}",
+            "ref": "${{ github.ref }}",
+            "commit": "${{ github.sha }}",
+            "actor": "${{ github.actor }}",
+            "run_id": "${{ github.run_id }}",
+            "dry_run": ${{ inputs.dry_run }},
+            "railway_project": "${{ env.RAILWAY_PROJECT_ID }}",
+            "railway_service": "${{ env.RAILWAY_SERVICE }}",
+            "railway_environment": "${{ env.RAILWAY_ENVIRONMENT }}",
+            "backup_path": "${{ needs.backup_gate.outputs.path_taken }}",
+            "deploy_result": "${{ needs.deploy.result }}",
+            "verify_result": "${{ needs.verify.result }}",
+            "reported_version": "${{ needs.verify.outputs.reported_version }}"
+          }
+          JSON
+          {
+            echo "## Staging deployment report"
+            echo ""
+            echo "- commit: \`${{ github.sha }}\` by \`${{ github.actor }}\`"
+            echo "- dry run: \`${{ inputs.dry_run }}\`"
+            echo "- backup path: \`${{ needs.backup_gate.outputs.path_taken }}\`"
+            echo "- deploy: \`${{ needs.deploy.result }}\` · verify: \`${{ needs.verify.result }}\`"
+            echo "- live version: \`${{ needs.verify.outputs.reported_version }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload provenance artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-deploy-provenance
+          path: provenance/staging-deploy.json
+          retention-days: 14

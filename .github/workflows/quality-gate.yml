@@ -1,0 +1,71 @@
+# Velora Quality Gate — single release-blocking verification battery.
+#
+# Semantic port of the PHP `quality-gate.yml` aggregator responsibility: one
+# check that must be green before any release. Both deploy workflows call this
+# workflow; branch protection SHOULD also require it on `main` (see
+# docs/governance/MERGE_REVIEW_POLICY.md).
+#
+# Enforcement split (deliberate, no silent loss):
+# - Per-push/PR fast feedback: `ci.yml` (format/lint/typecheck/guards/test/build).
+# - Release authority: THIS workflow (full battery + secret scan), always run
+#   against the exact ref being released.
+# PHP gates with no Modern subject yet (browser E2E, email pins, AI regression,
+# archive-read) are NOT silently dropped: they are listed as pending in
+# docs/governance/QUALITY_GATES.md and bound to their future phases.
+name: Quality Gate
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  secret_scan:
+    name: Secret scan
+    uses: ./.github/workflows/secret-scan.yml
+
+  battery:
+    name: Release verification battery
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Localization Quality Gate
+        run: npm run i18n:check
+
+      - name: Structure Guard
+        run: npm run structure:check
+
+      - name: GitHub Cost Policy Guard
+        run: npm run github:cost:check
+
+      - name: Run Vitest Suite
+        run: npm run test
+
+      - name: Build TypeScript Project
+        run: npm run build
+
+      - name: Record battery verdict
+        run: |
+          echo "QUALITY GATE PASS — commit \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"

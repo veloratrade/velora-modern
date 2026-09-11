@@ -1,0 +1,179 @@
+# Velora Rollback — redeploy a last-known-good commit to staging|production.
+#
+# Code-rollback responsibility (PHP: docroot pre-deploy backup + redeploy).
+# Mechanism replaced for Railway immutable deployments: check out the
+# last-known-good SHA, rebuild from it, `railway up`, then live-verify.
+# Database restore is EXPLICITLY OUT OF SCOPE here (deferred to the final
+# database phase — see docs/ops/ROLLBACK.md): this workflow never touches a
+# database. Rolling back code while the database has moved forward can break
+# the app; the runbook requires the operator to confirm schema compatibility
+# before dispatching (recorded in the report).
+name: Rollback (redeploy last-known-good)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: 'Target: staging | production'
+        required: true
+        default: 'staging'
+        type: choice
+        options: [staging, production]
+      last_good_sha:
+        description: 'Full commit SHA of the last-known-good release (from a provenance record)'
+        required: true
+        type: string
+      confirm_rollback:
+        description: 'Type exactly: ROLLBACK-APPROVED (schema compatibility confirmed per runbook)'
+        required: true
+        default: ''
+        type: string
+      dry_run:
+        description: 'Dry run — plan only, nothing is deployed (default true)'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rollback-${{ inputs.target_environment }}
+  cancel-in-progress: false
+
+env:
+  RAILWAY_PROJECT_ID: 56d1762e-79d3-4518-b788-5eda1d93dd22
+  RAILWAY_SERVICE: velora-modern
+
+jobs:
+  gate:
+    name: Rollback confirm gate
+    if: github.repository == 'veloratrade/velora-modern'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: ${{ inputs.target_environment }}
+    steps:
+      - name: Verify inputs
+        run: |
+          if [ "${{ inputs.confirm_rollback }}" != "ROLLBACK-APPROVED" ]; then
+            echo "::error::wrong confirm phrase — rollback stopped."
+            exit 1
+          fi
+          if ! echo "${{ inputs.last_good_sha }}" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::last_good_sha must be a full 40-hex commit SHA."
+            exit 1
+          fi
+          if [ "${{ inputs.target_environment }}" != "staging" ] && [ "${{ inputs.target_environment }}" != "production" ]; then
+            echo "::error::target_environment must be staging|production."
+            exit 1
+          fi
+          echo "Rollback approved for \`${{ inputs.target_environment }}\` @ \`${{ inputs.last_good_sha }}\`."
+
+  rebuild:
+    name: Rebuild last-known-good SHA
+    needs: [gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout last-known-good SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.last_good_sha }}
+
+      - name: Setup Node.js 20 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck + build at rollback SHA
+        run: |
+          npm run typecheck
+          npm run build
+
+  redeploy:
+    name: Railway redeploy (rollback)
+    needs: [gate, rebuild]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ${{ inputs.target_environment }}
+    steps:
+      - name: Checkout last-known-good SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.last_good_sha }}
+
+      - name: Dry-run plan (no deploy)
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "DRY RUN — would redeploy \`${{ inputs.last_good_sha }}\` to \`${{ inputs.target_environment }}\`." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install Railway CLI
+        if: ${{ !inputs.dry_run }}
+        run: npm install -g @railway/cli
+
+      - name: Redeploy to Railway
+        if: ${{ !inputs.dry_run }}
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::error::RAILWAY_TOKEN is not set on the ${{ inputs.target_environment }} environment."
+            exit 1
+          fi
+          railway link --project "$RAILWAY_PROJECT_ID" --environment "${{ inputs.target_environment }}" --service "$RAILWAY_SERVICE"
+          railway up
+
+  verify:
+    name: Post-rollback live verify
+    needs: [redeploy]
+    if: ${{ !inputs.dry_run }}
+    uses: ./.github/workflows/healthcheck-suite.yml
+    with:
+      base_url: ${{ inputs.target_environment == 'production' && vars.PROD_APP_URL || vars.STAGING_APP_URL }}
+      environment_name: ${{ inputs.target_environment }}
+      guard_probes: false
+
+  rollback_report:
+    name: Rollback report + provenance
+    needs: [redeploy, verify]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Write rollback record
+        run: |
+          mkdir -p provenance
+          cat > provenance/rollback.json <<'JSON'
+          {
+            "workflow": "rollback",
+            "repository": "${{ github.repository }}",
+            "actor": "${{ github.actor }}",
+            "run_id": "${{ github.run_id }}",
+            "target_environment": "${{ inputs.target_environment }}",
+            "last_good_sha": "${{ inputs.last_good_sha }}",
+            "dry_run": ${{ inputs.dry_run }},
+            "redeploy_result": "${{ needs.redeploy.result }}",
+            "verify_result": "${{ needs.verify.result }}",
+            "reported_version": "${{ needs.verify.outputs.reported_version }}",
+            "database_restore": "DEFERRED — code rollback only"
+          }
+          JSON
+          {
+            echo "## Rollback report (code only — database restore DEFERRED)"
+            echo ""
+            echo "- target: \`${{ inputs.target_environment }}\` @ \`${{ inputs.last_good_sha }}\`"
+            echo "- dry run: \`${{ inputs.dry_run }}\`"
+            echo "- redeploy: \`${{ needs.redeploy.result }}\` · verify: \`${{ needs.verify.result }}\`"
+            echo "- live version: \`${{ needs.verify.outputs.reported_version }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload rollback record
+        uses: actions/upload-artifact@v4
+        with:
+          name: rollback-provenance
+          path: provenance/rollback.json
+          retention-days: 14

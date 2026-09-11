@@ -44,7 +44,8 @@ export function getTrackedFiles(root: string = ROOT): string[] {
     const walk = (dir: string, rel: string) => {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
-        if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist') continue;
+        if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist')
+          continue;
         const entryRel = rel ? `${rel}/${entry.name}` : entry.name;
         if (entry.isDirectory()) {
           walk(path.join(dir, entry.name), entryRel);
@@ -162,10 +163,7 @@ export function evaluateStructureDrift(
 /**
  * Update the baseline Markdown file with live structure.
  */
-export function writeBaseline(
-  baselinePath: string,
-  newBaselineData: StructureBaseline,
-): void {
+export function writeBaseline(baselinePath: string, newBaselineData: StructureBaseline): void {
   const content = fs.readFileSync(baselinePath, 'utf-8');
   const beginIdx = content.indexOf(BEGIN_MARKER);
   const endIdx = content.indexOf(END_MARKER);
@@ -176,9 +174,7 @@ export function writeBaseline(
 
   const newJsonBlock = `\n\`\`\`json\n${JSON.stringify(newBaselineData, null, 2)}\n\`\`\`\n`;
   const updatedContent =
-    content.substring(0, beginIdx + BEGIN_MARKER.length) +
-    newJsonBlock +
-    content.substring(endIdx);
+    content.substring(0, beginIdx + BEGIN_MARKER.length) + newJsonBlock + content.substring(endIdx);
 
   fs.writeFileSync(baselinePath, updatedContent, 'utf-8');
 }
@@ -196,7 +192,9 @@ export function main(args: string[] = process.argv.slice(2)): number {
     const drift = evaluateStructureDrift(baseline, trackedFiles);
 
     console.log('============================================================');
-    console.log(`VELORA STRUCTURE GUARD  —  mode: ${isUpdate ? '--update' : isReport ? '--report' : '--check'}`);
+    console.log(
+      `VELORA STRUCTURE GUARD  —  mode: ${isUpdate ? '--update' : isReport ? '--report' : '--check'}`,
+    );
     console.log('============================================================');
 
     if (!drift.hasDrift) {
@@ -240,7 +238,9 @@ export function main(args: string[] = process.argv.slice(2)): number {
     }
 
     console.log('\n>> FAIL: Structural drift detected.');
-    console.log('   Run `npm run structure:check -- --update` to sync baseline if changes are intentional.');
+    console.log(
+      '   Run `npm run structure:check -- --update` to sync baseline if changes are intentional.',
+    );
     return 1;
   } catch (err) {
     console.error(`ERROR: ${(err as Error).message}`);

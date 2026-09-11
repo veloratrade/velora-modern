@@ -1,0 +1,211 @@
+# Deploy Production — manual Railway release with owner gate + staging-green rule.
+#
+# Semantic port of PHP `deploy.yml` (FTP -> Railway `railway up`).
+# Preserved: manual-only trigger (no push trigger, OC-9), exact-phrase owner
+# gate, staging-green precondition, dry-run default, release battery, BACKUP
+# GATE law, pinned destination (C-2 equivalent: project/service/env hardcoded),
+# concurrency without cancellation, post-deploy live verify, provenance report,
+# `production` GitHub environment on every production-touching job.
+# Dropped with reason: DB backup/verify/retention jobs (deferred to the final
+# database phase), FTP transfer + critical-file heuristics (no shared host),
+# CSP-manifest provenance (no static HTML — replaced by deployment provenance
+# record), server-side asset checks (Railway immutable deployments).
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_deploy:
+        description: 'To release to the live site, type exactly: CONFIRM-PRODUCTION-DEPLOY'
+        required: true
+        default: ''
+        type: string
+      dry_run:
+        description: 'Dry run — gates and plan only, nothing is deployed (default true)'
+        required: false
+        default: true
+        type: boolean
+      bootstrap_ack:
+        description: 'Only if production provably holds no data, type exactly: EMPTY-TARGET-BOOTSTRAP'
+        required: false
+        default: ''
+        type: string
+      backup_id:
+        description: 'Backup evidence (once the final-phase backup producer exists)'
+        required: false
+        default: ''
+        type: string
+      release_tag:
+        required: false
+        default: ''
+        type: string
+      sha256:
+        required: false
+        default: ''
+        type: string
+      source_commit_sha:
+        required: false
+        default: ''
+        type: string
+      verification_status:
+        required: false
+        default: ''
+        type: string
+      environment:
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false # an interrupted production deploy is the worst outcome
+
+env:
+  # PINNED Railway identity (C-2 equivalent): hardcoded, never parameterized,
+  # never taken from dispatch inputs. Values are non-secret (see
+  # docs/infrastructure/railway-baseline.md).
+  RAILWAY_PROJECT_ID: 56d1762e-79d3-4518-b788-5eda1d93dd22
+  RAILWAY_SERVICE: velora-modern
+  RAILWAY_ENVIRONMENT: production
+
+jobs:
+  gate:
+    name: Owner confirm gate
+    if: github.repository == 'veloratrade/velora-modern'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - name: Verify exact confirm phrase
+        run: |
+          if [ "${{ inputs.confirm_production_deploy }}" != "CONFIRM-PRODUCTION-DEPLOY" ]; then
+            echo "::error::wrong confirm phrase — production release stopped. No connection was made."
+            exit 1
+          fi
+          echo "Owner confirm accepted."
+          echo "destination: \`${{ env.RAILWAY_SERVICE }}\` @ \`${{ env.RAILWAY_ENVIRONMENT }}\` (pinned)" >> "$GITHUB_STEP_SUMMARY"
+
+  staging_gate:
+    name: Staging-green precondition
+    needs: [gate]
+    uses: ./.github/workflows/healthcheck-staging.yml
+    with:
+      guard_probes: false
+
+  backup_gate:
+    name: Backup evidence gate
+    needs: [gate]
+    uses: ./.github/workflows/backup-evidence-gate.yml
+    with:
+      expected_env: production
+      backup_id: ${{ inputs.backup_id }}
+      release_tag: ${{ inputs.release_tag }}
+      sha256: ${{ inputs.sha256 }}
+      source_commit_sha: ${{ inputs.source_commit_sha }}
+      verification_status: ${{ inputs.verification_status }}
+      environment: ${{ inputs.environment }}
+      bootstrap_ack: ${{ inputs.bootstrap_ack }}
+
+  quality:
+    name: Release battery
+    needs: [gate, staging_gate, backup_gate]
+    uses: ./.github/workflows/quality-gate.yml
+
+  deploy:
+    name: Railway deploy (production)
+    needs: [gate, staging_gate, backup_gate, quality]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Dry-run plan (no deploy)
+        if: ${{ inputs.dry_run }}
+        run: |
+          {
+            echo "## DRY RUN — production deploy plan (nothing was deployed)"
+            echo ""
+            echo "- commit: \`${{ github.sha }}\`"
+            echo "- project: \`${{ env.RAILWAY_PROJECT_ID }}\` (pinned)"
+            echo "- service: \`${{ env.RAILWAY_SERVICE }}\` (pinned)"
+            echo "- environment: \`${{ env.RAILWAY_ENVIRONMENT }}\` (pinned)"
+            echo "- staging green: yes (precondition passed)"
+            echo "- backup path: \`${{ needs.backup_gate.outputs.path_taken }}\`"
+            echo "- quality battery: passed"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install Railway CLI
+        if: ${{ !inputs.dry_run }}
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway production
+        if: ${{ !inputs.dry_run }}
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::error::RAILWAY_TOKEN is not set on the production environment."
+            exit 1
+          fi
+          railway link --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service "$RAILWAY_SERVICE"
+          railway up
+
+  verify:
+    name: Post-deploy live verify (production)
+    needs: [deploy]
+    if: ${{ !inputs.dry_run }}
+    uses: ./.github/workflows/healthcheck-production.yml
+    with:
+      guard_probes: false
+
+  deployment_report:
+    name: Deployment report + provenance
+    needs: [deploy, verify, backup_gate]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Write provenance record
+        run: |
+          mkdir -p provenance
+          cat > provenance/production-deploy.json <<'JSON'
+          {
+            "workflow": "deploy-production",
+            "repository": "${{ github.repository }}",
+            "ref": "${{ github.ref }}",
+            "commit": "${{ github.sha }}",
+            "actor": "${{ github.actor }}",
+            "run_id": "${{ github.run_id }}",
+            "dry_run": ${{ inputs.dry_run }},
+            "railway_project": "${{ env.RAILWAY_PROJECT_ID }}",
+            "railway_service": "${{ env.RAILWAY_SERVICE }}",
+            "railway_environment": "${{ env.RAILWAY_ENVIRONMENT }}",
+            "backup_path": "${{ needs.backup_gate.outputs.path_taken }}",
+            "deploy_result": "${{ needs.deploy.result }}",
+            "verify_result": "${{ needs.verify.result }}",
+            "reported_version": "${{ needs.verify.outputs.reported_version }}"
+          }
+          JSON
+          {
+            echo "## Production deployment report"
+            echo ""
+            echo "- commit: \`${{ github.sha }}\` by \`${{ github.actor }}\`"
+            echo "- dry run: \`${{ inputs.dry_run }}\`"
+            echo "- staging green: precondition passed"
+            echo "- backup path: \`${{ needs.backup_gate.outputs.path_taken }}\`"
+            echo "- deploy: \`${{ needs.deploy.result }}\` · verify: \`${{ needs.verify.result }}\`"
+            echo "- live version: \`${{ needs.verify.outputs.reported_version }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload provenance artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-deploy-provenance
+          path: provenance/production-deploy.json
+          retention-days: 14

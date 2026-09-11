@@ -1,0 +1,176 @@
+# Velora Health Check Suite (reusable) — single home of live smoke logic.
+#
+# Semantic port of the PHP `healthcheck-suite.yml` responsibility, adapted to
+# the MODERN API contract (NOT the PHP contract):
+# - Modern GET /health is FLAT `{status:'ok', service, version, ...}` while PHP
+#   wrapped it in `{status:'success', data:{status:'ok'}}`. This suite asserts
+#   the Modern shape; asserting the PHP envelope here would be a false port.
+# - Same-origin logout probes + CSP-manifest comparisons have no Modern subject
+#   (API-only service, no static HTML, no manifest): replaced by guard probes
+#   (401 auth boundary + 400 validation boundary, both side-effect-free) and
+#   Helmet header assertions.
+# - 404-envelope assertion preserves the PHP envelope-contract check (B-8 class).
+# - Version drift (reported vs package.json) is recorded as evidence and warns
+#   only; it never fails the suite (drift is a governance finding, not an outage).
+name: Health Check Suite (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      base_url:
+        description: 'Target origin, e.g. https://staging-modern.veloratrade.ir (never a secret)'
+        required: true
+        type: string
+      environment_name:
+        description: 'staging | production'
+        required: true
+        type: string
+      guard_probes:
+        description: 'Run side-effect-free guard probes (401 + 400 boundaries)'
+        required: false
+        default: false
+        type: boolean
+      confirm_production_probes:
+        description: 'Required exact phrase for guard probes against production'
+        required: false
+        default: ''
+        type: string
+    outputs:
+      reported_version:
+        description: 'Version string reported by GET /health'
+        value: ${{ jobs.smoke.outputs.reported_version }}
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Live smoke suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      reported_version: ${{ steps.probe.outputs.reported_version }}
+    steps:
+      - name: Checkout repository (package.json version reference)
+        uses: actions/checkout@v4
+
+      - name: Run smoke checks
+        id: probe
+        env:
+          BASE: ${{ inputs.base_url }}
+          ENVNAME: ${{ inputs.environment_name }}
+          GUARD_PROBES: ${{ inputs.guard_probes }}
+          CONFIRM_PROD: ${{ inputs.confirm_production_probes }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys, time, urllib.request, urllib.error, urllib.parse
+
+          BASE = os.environ.get('BASE', '').rstrip('/')
+          ENVNAME = os.environ.get('ENVNAME', '')
+          GUARD = os.environ.get('GUARD_PROBES', '') == 'true'
+          CONFIRM = os.environ.get('CONFIRM_PROD', '')
+          UA = 'velora-healthcheck'
+          failures = []
+
+          def check(name, ok, detail):
+              print(('PASS ' if ok else 'FAIL ') + name + ' — ' + detail)
+              if not ok:
+                  failures.append(name)
+
+          # ── Fail closed on bad invocation ──────────────────────────
+          if not BASE.startswith('https://'):
+              print('::error::base_url must be an https origin (got empty/non-https value)')
+              sys.exit(1)
+          if ENVNAME not in ('staging', 'production'):
+              print(f"::error::environment_name must be staging|production (got {ENVNAME!r})")
+              sys.exit(1)
+          if GUARD and ENVNAME == 'production' and CONFIRM != 'GUARD-PROBES-PRODUCTION':
+              print('::error::guard probes against production require the exact confirm phrase')
+              sys.exit(1)
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, *a, **k):
+                  return None
+
+          def call(method, path, payload=None, tries=3):
+              safe = urllib.parse.quote(path, safe='/?&=%-._~')
+              data = json.dumps(payload).encode() if payload is not None else None
+              last = ('ERR no-attempt', {}, '')
+              for attempt in range(tries):
+                  req = urllib.request.Request(BASE + safe, data=data, method=method)
+                  req.add_header('User-Agent', UA)
+                  if data is not None:
+                      req.add_header('Content-Type', 'application/json')
+                  try:
+                      r = urllib.request.build_opener(NoRedirect).open(req, timeout=30)
+                      return r.status, dict(r.headers), r.read(65536).decode('utf-8', 'replace')
+                  except urllib.error.HTTPError as e:
+                      return e.code, dict(e.headers), e.read(65536).decode('utf-8', 'replace')
+                  except Exception as e:
+                      last = (f'ERR {e}', {}, '')
+                      time.sleep(5)
+              return last
+
+          # ── 1. GET /health — Modern FLAT contract ──────────────────
+          st, hd, body = call('GET', '/health')
+          reported_version = 'unknown'
+          ok = (st == 200)
+          detail = f'status={st}'
+          try:
+              payload = json.loads(body)
+              reported_version = str(payload.get('version', 'unknown'))
+              ok = ok and payload.get('status') == 'ok' and payload.get('service') == 'velora-modern'
+              detail += f"; status={payload.get('status')!r} service={payload.get('service')!r} version={reported_version}"
+          except Exception:
+              ok = False
+              detail += f'; invalid JSON; snippet={body[:160]!r}'
+          check('GET /health → 200 + flat {status:ok}', ok, detail)
+
+          # ── 2. Helmet security headers present ─────────────────────
+          hd_low = {k.lower(): v for k, v in hd.items()}
+          check('Helmet x-frame-options == DENY',
+                hd_low.get('x-frame-options') == 'DENY',
+                f"value={hd_low.get('x-frame-options')!r}")
+
+          # ── 3. 404 envelope contract (B-8 class) ───────────────────
+          st, _, body = call('GET', '/no-such-route-velora-probe')
+          ok = (st == 404)
+          detail = f'status={st}'
+          try:
+              payload = json.loads(body)
+              err = payload.get('error') or {}
+              ok = ok and payload.get('status') == 'error' and err.get('code') == 'NOT_FOUND'
+              detail += f"; code={err.get('code')!r}"
+          except Exception:
+              ok = False
+              detail += f'; invalid JSON; snippet={body[:160]!r}'
+          check('GET /no-such-route → 404 + NOT_FOUND envelope', ok, detail)
+
+          # ── 4. Guard probes (side-effect-free by construction) ─────
+          if GUARD:
+              st, _, _ = call('GET', '/api/v1/trades')
+              check('GET /api/v1/trades w/o token → 401 (auth boundary live)',
+                    st == 401, f'status={st}')
+              st, _, _ = call('POST', '/api/v1/auth/forgot-password', {})
+              check('POST forgot-password {} → 400 (validation boundary live, no side effects)',
+                    st == 400, f'status={st}')
+
+          # ── 5. Version-drift evidence (warn only, never fails) ─────
+          try:
+              with open('package.json', encoding='utf-8') as f:
+                  repo_version = json.load(f).get('version', 'unknown')
+          except Exception:
+              repo_version = 'unknown'
+          if reported_version != repo_version:
+              print(f"::warning::version drift: live reports {reported_version!r}, repo package.json is {repo_version!r} (governance finding, not an outage)")
+          else:
+              print(f'version match: live == repo == {reported_version!r}')
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+              f.write(f'reported_version={reported_version}\n')
+
+          if failures:
+              print(f"::error::smoke suite failed: {', '.join(failures)}")
+              sys.exit(1)
+          print('SMOKE SUITE PASS')
+          PY
