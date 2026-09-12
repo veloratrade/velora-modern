@@ -83,6 +83,7 @@ Every architectural claim must be tagged:
 | `docs/capability-registry.md` | Capability registry / parity matrix (PORT/SKIP/DEFER/SYNCED) |
 | `docs/migration-strategy.md` | MySQL→PostgreSQL migration & validation spec |
 | `docs/hosting-validation.md` | Hosting readiness checklist (evidence-based) |
+| `docs/evidence/PHASE-B-SECURITY-RECORD.md` | Phase B (2026-09-12) S1–S8 hardening dispositions, evidence, and limitations |
 | `docs/parity-plan.md` | Executable behavioral parity specification |
 | `docs/observability-contract.md` | Metrics/logs/traces naming + SLOs |
 | `docs/phase-0-exit-criteria.md` | Phase 0 gates, decision ledger (D-01…D-17), and reconciliation decisions (OD-1…OD-10) |
