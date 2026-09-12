@@ -19,20 +19,31 @@ async function withServer(
 }
 const healthy = { database: async () => "ok" as const };
 
-test("health: exact B-8 envelope, 200, DB check included (C-01)", async () => {
+test("health: PHP reference contract (OD-3) — 200, data {status:'ok', time}, 4-field envelope", async () => {
   await withServer(healthy, async (base) => {
     const res = await fetch(`${base}/health`);
     assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { status: "success", data: { status: "ok", checks: { database: "ok" } } });
+    const body = (await res.json()) as {
+      status: string;
+      data: { status: string; time: string };
+      error: null;
+      timestamp: string;
+    };
+    assert.equal(body.status, "success");
+    assert.equal(body.data.status, "ok");
+    assert.match(body.data.time, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00$/); // gmdate('c')
+    assert.equal(body.error, null); // 4-field envelope (C-10)
+    assert.match(body.timestamp, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00$/);
   });
 });
 
-test("health: 503 error envelope when database probe fails", async () => {
+test("health: liveness stays 200 while readiness fails when the DB probe fails (S8 split)", async () => {
   await withServer({ database: async () => "fail" as const }, async (base) => {
-    const res = await fetch(`${base}/health`);
-    assert.equal(res.status, 503);
-    const body = (await res.json()) as { status: string };
-    assert.equal(body.status, "error");
+    const health = await fetch(`${base}/health`);
+    assert.equal(health.status, 200);
+    assert.equal(((await health.json()) as { data: { status: string } }).data.status, "ok");
+    const ready = await fetch(`${base}/ready`);
+    assert.equal(ready.status, 503);
   });
 });
 
@@ -133,8 +144,6 @@ test("ready (S8): readiness fails honestly when the durable probe fails", async 
     const body = (await res.json()) as { data: { status: string; checks: { database: string } } };
     assert.equal(body.data.status, "not_ready");
     assert.equal(body.data.checks.database, "fail");
-    // and health never lies either
-    const health = await fetch(`${base}/health`);
-    assert.equal(health.status, 503);
+    // (liveness is /health — always 200 per the OD-3 PHP contract; covered above)
   });
 });

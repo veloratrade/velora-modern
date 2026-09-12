@@ -11,6 +11,15 @@ export function isTimestamptzString(v: unknown): v is string {
   return typeof v === "string" && UTC_ISO_RE.test(v);
 }
 
+/**
+ * Serialize an instant in the observed PHP external format (OD-5, Phase C):
+ * UTC, seconds precision, explicit "+00:00" offset — matching the reference
+ * `gmdate('c')` outputs (Response envelope timestamp, /health data.time).
+ */
+export function phpUtcTimestamp(now: Date = new Date()): string {
+  return now.toISOString().replace(/\.\d{3}Z$/, "+00:00");
+}
+
 /** Dual-column trading timestamp (sync-sourced), per ADR-004 §2. */
 export interface TradingTimestamp {
   /** Instant of occurrence, UTC (timestamptz). */

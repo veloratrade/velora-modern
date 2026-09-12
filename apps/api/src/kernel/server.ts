@@ -2,7 +2,7 @@
 // own the logic). Implements the frozen external tier: health envelope (C-01),
 // locale routing + headers (C-02/C-03/D-14), cache classes, origin guard.
 import { createServer as httpCreateServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
-import { ok, fail, resolvePublicRoute, CACHE_POLICY, LOCALE_HEADER } from "@velora/contracts";
+import { ok, fail, resolvePublicRoute, CACHE_POLICY, LOCALE_HEADER, phpUtcTimestamp } from "@velora/contracts";
 import { newSecurityContext, buildCsp, SECURITY_HEADERS, originAllowed } from "./security.js";
 
 export interface HealthChecks {
@@ -22,9 +22,9 @@ async function route(req: IncomingMessage, config: ApiConfig, sec: { requestId: 
   const path = url.pathname;
 
   if (method === "GET" && path === "/health") {
-    const db = await config.checks.database();
-    if (db === "ok") return { status: 200, body: ok({ status: "ok", checks: { database: "ok" } }) };
-    return { status: 503, body: fail("INTERNAL", "unhealthy", sec.requestId) };
+    // PHP reference contract (OD-3, VERIFIED api/index.php:43-45): liveness with
+    // data {status:'ok', time:<gmdate('c')>}. Durability is reported by /ready.
+    return { status: 200, body: ok({ status: "ok", time: phpUtcTimestamp() }) };
   }
 
   if (method === "GET" && path === "/ready") {

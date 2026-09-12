@@ -59,9 +59,20 @@ test("scale matrix matches ADR-001", () => {
   assert.deepEqual(SCALES, { price: 8, volume: 8, contractSize: 8, currency: 2, rMultiple: 8 });
 });
 
-test("envelope shape (B-8 parity)", () => {
-  assert.deepEqual(ok({ status: "ok" }), { status: "success", data: { status: "ok" } });
-  assert.deepEqual(fail("NOT_FOUND", "x", "req-1").error.code, "NOT_FOUND");
+test("envelope shape (C-10: PHP 4-field envelope, Phase C port)", () => {
+  const success = ok({ status: "ok" }, new Date("2026-09-12T10:00:00.500Z"));
+  assert.deepEqual(success, {
+    status: "success",
+    data: { status: "ok" },
+    error: null,
+    timestamp: "2026-09-12T10:00:00+00:00", // PHP gmdate('c') format (OD-5)
+  });
+  const error = fail("NOT_FOUND", "x", "req-1", new Date("2026-09-12T10:00:00.500Z"));
+  assert.equal(error.status, "error");
+  assert.equal(error.data, null);
+  assert.equal(error.error.code, "NOT_FOUND");
+  assert.equal(error.error.requestId, "req-1");
+  assert.equal(error.timestamp, "2026-09-12T10:00:00+00:00");
 });
 
 test("webhook sources: metaapi configured with ±5 min tolerance (D-05)", () => {

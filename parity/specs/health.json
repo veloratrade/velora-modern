@@ -4,8 +4,8 @@
   "request": { "method": "GET", "path": "/health" },
   "expect": {
     "status": 200,
-    "json": { "status": "success", "data": { "status": "ok" } },
-    "jsonContains": ["data.checks.database"],
+    "json": { "status": "success", "data": { "status": "ok" }, "error": null },
+    "jsonContains": ["data.time", "timestamp"],
     "tolerances": ["timestamps", "request ids"]
   }
 }
