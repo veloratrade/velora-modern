@@ -8,3 +8,4 @@ export * from "./trades.js";
 export * from "./webhooks.js";
 export * from "./jobs.js";
 export * from "./errors.js";
+export * from "./environment.js";

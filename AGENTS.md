@@ -10,6 +10,9 @@ dev/staging only**. Foundation implemented: contracts, pure domain (decimal/
 PnL/ledger), PostgreSQL migrations + roles, auth primitives (bcrypt `$2y$`
 proof gate PASSED), queue semantics, API/web kernels, CI/infra/parity
 scaffolding — see `docs/adr/ADR-011-phase1-implementation-record.md`.
+Post-audit governance alignment (2026-09-12): backup-gate law (ADR-012) and
+environment-origin safety contract (ADR-013) adopted; capability registry
+re-verified against Reference `main` @ `a8eabac`.
 Production hosting validation (Gate 3B) gates production deployment/cutover,
 not Phase 1.
 
@@ -43,6 +46,17 @@ not Phase 1.
     ADR updates in the same change when a decision is affected.
 12. **Do not silently resolve business decisions.** Ambiguity in business rules
     is reported as OWNER DECISION REQUIRED, never guessed away.
+13. **No covered mutation without a backup gate.** Any staging/production
+    operation that can affect persistent application state requires a valid
+    backup gate — satisfied for that exact operation, target, and environment —
+    immediately before the mutation. Fail-closed; no bypass flags; no
+    "operator confirms manually" exception; mechanism-exists is not
+    backup-exists (ADR-012, D-16).
+14. **Environment identity is explicit.** `APP_ENV` and `APP_ORIGIN` must be
+    explicitly configured and validated against the canonical
+    environment↔origin map. Unknown environments and missing origins never
+    receive implicit defaults; staging↔production cross-bindings are blocked
+    (ADR-013, D-17).
 
 ## Evidence vocabulary
 
@@ -57,7 +71,7 @@ Every architectural claim must be tagged:
 
 | Path | Role |
 |---|---|
-| `docs/adr/ADR-001…010` | Architectural decisions — all ten Accepted (2026-08-29, D-01…D-05 + D-11…D-15); evidence-gated sub-items tracked within each ADR |
+| `docs/adr/ADR-001…013` | Architectural decisions — ADR-001…010 accepted 2026-08-29 (D-01…D-05 + D-11…D-15); ADR-011 Phase-1 implementation record; **ADR-012 backup-gate law + ADR-013 environment-origin safety law** (2026-09-12, D-16/D-17); evidence-gated sub-items tracked within each ADR |
 | `docs/threat-model.md` | Threats, controls, detection, residual risk |
 | `docs/security-policy.md` | Mandatory baseline + production security gates |
 | `docs/external-contracts.md` | Frozen external contract tier |

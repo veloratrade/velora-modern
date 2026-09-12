@@ -23,6 +23,8 @@ OWNER DECISION REQUIRED.
 | D-13 | ADR-007 job semantics | **Accepted** (2026-08-29) — pg-boss + job standard + four Redis triggers. |
 | D-14 | ADR-009 SEO/locale | **Accepted** (2026-08-29) — route map, locale strategy, cache classes, CSP nonces; **checkout URL = `/fa/checkout` + `/en/checkout`** (F-03). hreflang verification Phase 2. |
 | D-15 | ADR-010 delivery/repo | **Accepted as policy** (2026-08-29) — monorepo, immutable images, roles, restore-drill gate. Repository posture per **revised D-06: PUBLIC** (original PRIVATE proposal superseded by owner decision). |
+| D-16 | ADR-012 backup gate law | **Accepted** (2026-09-12, owner directive — post-audit governance alignment) — permanent mutation-safety invariant: no staging/production mutation affecting persistent state without a valid, environment-attributed, `INTEGRITY_VERIFIED` backup gate evaluated for that exact operation before the mutation. Fail-closed; no bypass; no manual-confirmation exception; mechanism deferred to a future implementation decision. |
+| D-17 | ADR-013 environment-origin safety | **Accepted** (2026-09-12, owner directive) — explicit environment identity + canonical origin binding contract, implemented as a typed validator in `packages/contracts`; canonical staging origin remains **OWNER DECISION REQUIRED (OD-1)** before any staging environment exists. |
 
 ## Mandatory gates (recalculated 2026-08-29)
 

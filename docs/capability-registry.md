@@ -42,6 +42,9 @@ Migration class: `PORT` = reimplement; `SKIP` = not carried (hosting-era); `DEFE
 2. `SYNCED` requires: contract tests + behavioral parity + security/data checks
    green, evidence linked, owner sign-off recorded here.
 3. Nothing in this registry is `SYNCED` today (no modern implementation exists).
+4. The registry is re-verified against Reference `main` at every phase boundary
+   and whenever the Reference advances materially; the drift log below records
+   the Reference HEAD audited (`a8eabac`, 2026-09-12).
 
 ## Open items (verification debt)
 
@@ -50,3 +53,39 @@ Migration class: `PORT` = reimplement; `SKIP` = not carried (hosting-era); `DEFE
 - `trade_events` population behavior (CAP-TRADE-01) — NEEDS VERIFICATION.
 - Content-translation engine (AI vs other) (CAP-I18N-02) — NEEDS VERIFICATION.
 - `tools/tests/*` inventory for porting scope — NEEDS VERIFICATION (sparse scope excluded them).
+- **Canonical Modern staging origin (ADR-013 OD-1) — OWNER DECISION REQUIRED**
+  (candidate `https://staging.veloratrade.ir`, matching the Reference
+  architected origin) before any staging environment exists.
+
+## Reference drift log (re-verification 2026-09-12)
+
+Reference `main` advanced `0aba2e8` (2026-08-29) → `a8eabac` (2026-09-12):
+499 files changed (+78,122/−8,387), PRs #91–#139. Impact on this registry:
+
+1. **PR #139 (commit `8aaa2da`) — n8n migration tooling RETIRED in the
+   Reference.** Deleted: `tools/n8n_migrate/` (29 files),
+   `content/n8n-migrate/`, `content/n8n-integration/`.
+   `docs/N8N_INSTANCE_MIGRATION.md` rewritten as a Claude-direct OLD→NEW API
+   contract; AGENTS.md §2.3 updated; rebuilding the framework is explicitly
+   forbidden by the Reference. **Modern impact:** nothing to port and no row
+   exists — correctly none; do not create one. C-12 (article-pipeline approval
+   gate) is UNCHANGED — the archive/approval gate is separate from instance
+   migration.
+2. **Backup gate became permanent Reference law (2026-09-09):** AGENTS.md §14
+   + `ops/velora-mgmt/` + `app-schema-migration-staging.yml` (v1.7/v1.8
+   allowlist, check/apply modes, `APPLY-APP-SCHEMA-MIGRATION` confirmation
+   phrase, canonical order). **Modern impact:** CAP-OPS-01 added; law adopted
+   as ADR-012 (D-16) on 2026-09-12.
+3. **Admin v2:** new top-level `admin/` (22 files) + Playwright shell suites in
+   CI. CAP-PLAT-03 note: the Reference admin evolved well beyond a users
+   list; the Modern rebuild plan is unchanged.
+4. **AI layer matured:** PR #90 gemini-transport-router —
+   `GeminiTransportInterface` (direct vs `n8n_relay` behind one contract) +
+   `AiRouteResolver` precedence (admin global route > env > legacy flag >
+   direct); AI P2 phase reports A–L; gemini staging probe workflows.
+   CAP-AI-01..05 plans unchanged; the transport/route-precedence semantics
+   are recorded design input for the Phase 2/3 port.
+5. **Scale growth (context only):** `.github/` 28→36 workflows, `tools/`
+   145→196, `docs/` 26→55, new `ops/` top level. CAP-PLAT-04 (SKIP)
+   re-confirmed correct — the hosting-era mechanism set grew further and
+   remains non-portable by design (ADR-010).
