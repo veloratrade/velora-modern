@@ -19,6 +19,10 @@
 // yields permanently-red readiness (honest failure, never a fabricated "ok").
 import { createApp, listen } from "./kernel/server.js";
 import { assertBootable, BootError } from "./kernel/boot.js";
+import { AuthService } from "./auth/authService.js";
+import { JwtService } from "./auth/jwt.js";
+import { VeloraHasher } from "./auth/hashing.js";
+import { MemoryUserStore } from "./auth/memoryUserStore.js";
 
 type PgClient = import("pg").Client;
 

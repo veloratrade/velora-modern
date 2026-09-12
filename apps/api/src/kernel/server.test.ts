@@ -3,13 +3,26 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createApp, listen } from "./server.js";
 import type { Server } from "node:http";
+import { AuthService } from "../auth/authService.js";
+import { MemoryUserStore } from "../auth/memoryUserStore.js";
+import { VeloraHasher } from "../auth/hashing.js";
+import { JwtService } from "../auth/jwt.js";
 
-async function withServer(
+async function withKernelServer(
   checks: { database(): Promise<"ok" | "fail"> },
   fn: (base: string) => Promise<void>,
   origins: readonly string[] = ["https://veloratrade.ir"],
+  opts: { withAuth?: boolean } = {},
 ): Promise<void> {
-  const app = createApp({ allowedOrigins: origins, checks });
+  const auth =
+    opts.withAuth === true
+      ? new AuthService({
+          store: new MemoryUserStore(),
+          hasher: new VeloraHasher(),
+          jwt: JwtService.create("server-test-auth-secret-0123456789abcdef"),
+        })
+      : undefined;
+  const app = createApp({ allowedOrigins: origins, checks, ...(auth !== undefined ? { auth } : {}) });
   const port = await listen(app);
   try {
     await fn(`http://127.0.0.1:${port}`);
@@ -20,7 +33,7 @@ async function withServer(
 const healthy = { database: async () => "ok" as const };
 
 test("health: PHP reference contract (OD-3) — 200, data {status:'ok', time}, 4-field envelope", async () => {
-  await withServer(healthy, async (base) => {
+  await withKernelServer(healthy, async (base) => {
     const res = await fetch(`${base}/health`);
     assert.equal(res.status, 200);
     const body = (await res.json()) as {
@@ -38,7 +51,7 @@ test("health: PHP reference contract (OD-3) — 200, data {status:'ok', time}, 4
 });
 
 test("health: liveness stays 200 while readiness fails when the DB probe fails (S8 split)", async () => {
-  await withServer({ database: async () => "fail" as const }, async (base) => {
+  await withKernelServer({ database: async () => "fail" as const }, async (base) => {
     const health = await fetch(`${base}/health`);
     assert.equal(health.status, 200);
     assert.equal(((await health.json()) as { data: { status: string } }).data.status, "ok");
@@ -48,7 +61,7 @@ test("health: liveness stays 200 while readiness fails when the DB probe fails (
 });
 
 test("locale routing: X-VELORA-Locale + per-class Cache-Control (C-02, ADR-009)", async () => {
-  await withServer(healthy, async (base) => {
+  await withKernelServer(healthy, async (base) => {
     const fa = await fetch(`${base}/fa/checkout`);
     assert.equal(fa.status, 200);
     assert.equal(fa.headers.get("X-VELORA-Locale"), "fa");
@@ -67,7 +80,9 @@ test("locale routing: X-VELORA-Locale + per-class Cache-Control (C-02, ADR-009)"
 });
 
 test("origin guard: forged Origin on POST logout → 403 (verified PHP parity)", async () => {
-  await withServer(healthy, async (base) => {
+  await withKernelServer(
+    healthy,
+    async (base) => {
     const evil = await fetch(`${base}/api/v1/auth/logout`, {
       method: "POST",
       headers: { Origin: "https://evil.example" },
@@ -78,13 +93,16 @@ test("origin guard: forged Origin on POST logout → 403 (verified PHP parity)",
       method: "POST",
       headers: { Origin: "https://veloratrade.ir" },
     });
-    assert.equal(good.status, 200);
-    assert.deepEqual(((await good.json()) as { data: unknown }).data, { loggedOut: true });
-  });
+      assert.equal(good.status, 200);
+      assert.deepEqual(((await good.json()) as { data: unknown }).data, { loggedOut: true });
+    },
+    ["https://veloratrade.ir"],
+    { withAuth: true },
+  );
 });
 
 test("CSP: nonce present, unique per request, and no unsafe-inline", async () => {
-  await withServer(healthy, async (base) => {
+  await withKernelServer(healthy, async (base) => {
     const a = await fetch(`${base}/`);
     const b = await fetch(`${base}/`);
     const cspA = a.headers.get("Content-Security-Policy")!;
@@ -98,7 +116,7 @@ test("CSP: nonce present, unique per request, and no unsafe-inline", async () =>
 });
 
 test("unknown route → 404 error envelope with request id", async () => {
-  await withServer(healthy, async (base) => {
+  await withKernelServer(healthy, async (base) => {
     const res = await fetch(`${base}/definitely/not/a/route`);
     assert.equal(res.status, 404);
     const body = (await res.json()) as { status: string; error: { code: string; requestId?: string } };
@@ -109,7 +127,7 @@ test("unknown route → 404 error envelope with request id", async () => {
 });
 
 test("CSP (S7): exact directive policy — strict, no weakening", async () => {
-  await withServer(healthy, async (base) => {
+  await withKernelServer(healthy, async (base) => {
     const res = await fetch(`${base}/health`);
     const csp = res.headers.get("Content-Security-Policy")!;
     const directives = csp.split(";").map((d) => d.trim());
@@ -138,7 +156,7 @@ test("CSP (S7): exact directive policy — strict, no weakening", async () => {
 });
 
 test("ready (S8): readiness fails honestly when the durable probe fails", async () => {
-  await withServer({ database: async () => "fail" as const }, async (base) => {
+  await withKernelServer({ database: async () => "fail" as const }, async (base) => {
     const res = await fetch(`${base}/ready`);
     assert.equal(res.status, 503);
     const body = (await res.json()) as { data: { status: string; checks: { database: string } } };
