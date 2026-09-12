@@ -57,13 +57,14 @@ export type LedgerEvent =
   | { id: string; type: "FINANCIAL_CORRECTED"; actor: "sync" | "webhook" | "admin"; at: string; expectedVersion: number; patch: Partial<TradeFinancial> }
   | { id: string; type: "JOURNALING_EDITED"; actor: "user" | "admin"; at: string; expectedVersion: number; patch: Partial<TradeJournaling> }
   | { id: string; type: "EXIT_RECORDED"; actor: MutationActor; at: string; expectedVersion: number; exit: TradeExit }
+  | { id: string; type: "EXIT_CANCELLED"; actor: "user" | "admin"; at: string; expectedVersion: number; exitId: string; volume: string }
   | { id: string; type: "TOMBSTONE_SET"; actor: "user" | "admin"; at: string; expectedVersion: number; reason: string }
   | { id: string; type: "ADMIN_CORRECTION"; actor: "admin"; at: string; expectedVersion: number; note: string; patch: Partial<TradeFinancial & TradeJournaling> }
   | { id: string; type: "QUARANTINE_RAISED"; actor: MutationActor; at: string; expectedVersion: number; reason: string };
 
 const EVENT_TYPES: readonly LedgerEventType[] = [
   "TRADE_IMPORTED", "TRADE_CREATED", "FINANCIAL_CORRECTED", "JOURNALING_EDITED",
-  "EXIT_RECORDED", "TOMBSTONE_SET", "ADMIN_CORRECTION", "QUARANTINE_RAISED",
+  "EXIT_RECORDED", "EXIT_CANCELLED", "TOMBSTONE_SET", "ADMIN_CORRECTION", "QUARANTINE_RAISED",
 ];
 
 export function isLedgerEvent(e: unknown): e is LedgerEvent {
@@ -78,6 +79,7 @@ const ALLOWED_ACTORS: Record<LedgerEventType, readonly MutationActor[]> = {
   FINANCIAL_CORRECTED: ["sync", "webhook", "admin"], // SYNC_WINS_FINANCIAL — user never rewrites financials
   JOURNALING_EDITED: ["user", "admin"], // USER_WINS_JOURNALING — sync never rewrites journaling
   EXIT_RECORDED: ["user", "sync", "webhook", "admin"],
+  EXIT_CANCELLED: ["user", "admin"], // exit tombstone — the ADR-002 representation of exit deletion
   TOMBSTONE_SET: ["user", "admin"],
   ADMIN_CORRECTION: ["admin"],
   QUARANTINE_RAISED: ["sync", "webhook", "system", "admin"],
@@ -137,6 +139,15 @@ export function applyEvent(state: TradeState | null, event: LedgerEvent): TradeS
       next.allocatedVolume = alloc;
       return next;
     }
+    case "EXIT_CANCELLED": {
+      const next: TradeState = { ...state, version: state.version + 1 };
+      const freed = subAllocated(state.allocatedVolume, event.volume);
+      if (D.isNeg(D.fromString(freed))) {
+        throw new LedgerError(`exit cancellation ${event.volume} would underflow allocated volume ${state.allocatedVolume}`);
+      }
+      next.allocatedVolume = freed;
+      return next;
+    }
     case "TOMBSTONE_SET":
       return { ...state, version: state.version + 1, deletedAt: event.at };
     case "QUARANTINE_RAISED":
@@ -163,6 +174,10 @@ function pickJournaling(p: Partial<TradeFinancial & TradeJournaling>): Partial<T
 import * as D from "./decimal.js";
 function addAllocated(current: string, add: string): string {
   const r = D.add(D.fromString(current), D.fromString(add));
+  return D.toString(D.rescale(r, 8, "half-even"));
+}
+function subAllocated(current: string, sub: string): string {
+  const r = D.sub(D.fromString(current), D.fromString(sub));
   return D.toString(D.rescale(r, 8, "half-even"));
 }
 function compareVolume(a: string, b: string): -1 | 0 | 1 {

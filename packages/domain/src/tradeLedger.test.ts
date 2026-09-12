@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   applyEvent, fold, externalTradeKey,
-  VersionConflictError, TombstoneError, OverAllocationError, OwnershipPolicyError,
+  VersionConflictError, TombstoneError, OverAllocationError, OwnershipPolicyError, LedgerError,
   type LedgerEvent, type TradeState,
 } from "./tradeLedger.js";
 
@@ -74,6 +74,26 @@ test("exits: allocation accumulates and over-allocation is rejected", () => {
   );
   const s3 = applyEvent(s2, { id: "x3", type: "EXIT_RECORDED", actor: "user", at: "2026-08-31T12:06:00Z", expectedVersion: 1, exit: { exitId: "x3", volume: "0.75000000", price: "1.09000000", recordedAt: "2026-08-31T12:06:00Z" } });
   assert.equal(s3.allocatedVolume, "2.00000000"); // exactly fully allocated is legal
+});
+
+test("exit cancellation frees allocation with version bump (EXIT_CANCELLED)", () => {
+  const s1 = applyEvent(null, created);
+  const s2 = applyEvent(s1, { id: "e10", type: "EXIT_RECORDED", actor: "user", at: "2026-09-12T10:00:00Z", expectedVersion: 0, exit: { exitId: "x1", volume: "0.60000000", price: "1.08800000", recordedAt: "2026-09-12T10:00:00Z" } });
+  assert.equal(s2.allocatedVolume, "0.60000000");
+  const s3 = applyEvent(s2, { id: "e11", type: "EXIT_CANCELLED", actor: "user", at: "2026-09-12T10:05:00Z", expectedVersion: 1, exitId: "x1", volume: "0.60000000" });
+  assert.equal(s3.allocatedVolume, "0.00000000");
+  assert.equal(s3.version, 2);
+  // freed allocation is reusable
+  const s4 = applyEvent(s3, { id: "e12", type: "EXIT_RECORDED", actor: "user", at: "2026-09-12T10:06:00Z", expectedVersion: 2, exit: { exitId: "x2", volume: "1.00000000", price: "1.09100000", recordedAt: "2026-09-12T10:06:00Z" } });
+  assert.equal(s4.allocatedVolume, "1.00000000");
+});
+
+test("exit cancellation: underflow and ownership are rejected", () => {
+  const s1 = applyEvent(null, created);
+  const s2 = applyEvent(s1, { id: "e13", type: "EXIT_RECORDED", actor: "user", at: "2026-09-12T10:00:00Z", expectedVersion: 0, exit: { exitId: "x1", volume: "0.50000000", price: "1.08800000", recordedAt: "2026-09-12T10:00:00Z" } });
+  assert.throws(() => applyEvent(s2, { id: "e14", type: "EXIT_CANCELLED", actor: "user", at: "2026-09-12T10:05:00Z", expectedVersion: 1, exitId: "x1", volume: "0.50000001" }), LedgerError);
+  const illegal = { id: "e15", type: "EXIT_CANCELLED", actor: "sync", at: "2026-09-12T10:05:00Z", expectedVersion: 1, exitId: "x1", volume: "0.50000000" } as unknown as LedgerEvent;
+  assert.throws(() => applyEvent(s2, illegal), OwnershipPolicyError);
 });
 
 test("tombstone: blocks every further mutation event", () => {
