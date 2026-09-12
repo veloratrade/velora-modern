@@ -54,6 +54,17 @@ async function parseJsonBody(req: IncomingMessage): Promise<Record<string, unkno
   return parsed as Record<string, unknown>;
 }
 
+/** Bearer access-token authentication for protected routes (fail-closed). */
+function authenticateRequest(
+  req: IncomingMessage,
+  auth: AuthService,
+): { sub: string } | null {
+  const bearer = req.headers.authorization;
+  if (bearer === undefined || !bearer.startsWith("Bearer ")) return null;
+  const payload = auth.verifyAccessToken(bearer.slice("Bearer ".length));
+  return payload === null ? null : { sub: payload.sub };
+}
+
 function validationFailure(error: z.ZodError, requestId: string): RouteResult {
   const details: Record<string, string> = {};
   for (const issue of error.issues) {
@@ -241,6 +252,88 @@ async function route(req: IncomingMessage, config: ApiConfig, sec: { requestId: 
       }
       const user = await auth.me(payload.sub);
       return { status: 200, body: ok({ user }) };
+    });
+  }
+
+  // ---- Phase C increment 2: identity completion (Remote/PHP-verified) ----
+  if (method === "POST" && path === "/api/v1/auth/change-password") {
+    return authRouteResult(async (auth) => {
+      const claims = authenticateRequest(req, auth);
+      if (claims === null) {
+        return { status: 401, body: fail("UNAUTHENTICATED", "Unauthenticated.", sec.requestId) };
+      }
+      const body = await parseJsonBody(req);
+      if (typeof body.currentPassword !== "string" || typeof body.newPassword !== "string") {
+        return {
+          status: 400,
+          body: fail("VALIDATION_FAILED", "Current password and new password are required.", sec.requestId, {
+            ...(body.currentPassword === undefined ? { currentPassword: "Current password is required." } : {}),
+            ...(body.newPassword === undefined ? { newPassword: "New password is required." } : {}),
+          }),
+        };
+      }
+      const result = await auth.changePassword(claims.sub, {
+        currentPassword: body.currentPassword,
+        newPassword: body.newPassword,
+      });
+      return { status: 200, body: ok(result) };
+    });
+  }
+
+  if (method === "PATCH" && path === "/api/v1/auth/me/preferences") {
+    return authRouteResult(async (auth) => {
+      const claims = authenticateRequest(req, auth);
+      if (claims === null) {
+        return { status: 401, body: fail("UNAUTHENTICATED", "Unauthenticated.", sec.requestId) };
+      }
+      const body = await parseJsonBody(req);
+      const locale = body.locale;
+      const aiConsent = body.ai_consent;
+      if (locale === undefined && aiConsent === undefined) {
+        return {
+          status: 400,
+          body: fail("VALIDATION_FAILED", "No valid preference field provided.", sec.requestId),
+        };
+      }
+      if (locale !== undefined && locale !== "fa" && locale !== "en") {
+        return {
+          status: 400,
+          body: fail("VALIDATION_FAILED", "locale must be fa or en.", sec.requestId, { locale: "locale must be fa or en." }),
+        };
+      }
+      if (aiConsent !== undefined && typeof aiConsent !== "boolean") {
+        return {
+          status: 400,
+          body: fail("VALIDATION_FAILED", "ai_consent must be a boolean.", sec.requestId, { ai_consent: "ai_consent must be a boolean." }),
+        };
+      }
+      const result = await auth.updatePreferences(claims.sub, {
+        ...(locale !== undefined ? { locale } : {}),
+        ...(aiConsent !== undefined ? { ai_consent: aiConsent } : {}),
+      });
+      return { status: 200, body: ok(result) };
+    });
+  }
+
+  if (method === "GET" && path === "/api/v1/auth/email-preferences") {
+    return authRouteResult(async (auth) => {
+      const claims = authenticateRequest(req, auth);
+      if (claims === null) {
+        return { status: 401, body: fail("UNAUTHENTICATED", "Unauthenticated.", sec.requestId) };
+      }
+      return { status: 200, body: ok(await auth.getEmailPreferences(claims.sub)) };
+    });
+  }
+
+  if (method === "PUT" && path === "/api/v1/auth/email-preferences") {
+    return authRouteResult(async (auth) => {
+      const claims = authenticateRequest(req, auth);
+      if (claims === null) {
+        return { status: 401, body: fail("UNAUTHENTICATED", "Unauthenticated.", sec.requestId) };
+      }
+      const body = await parseJsonBody(req);
+      const result = await auth.updateEmailPreferences(claims.sub, body);
+      return { status: 200, body: ok(result) };
     });
   }
 

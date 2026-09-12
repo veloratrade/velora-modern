@@ -254,3 +254,54 @@ test("me: returns the Remote-verified PublicUserDto shape", async () => {
   assert.equal(dto.aiConsent, false);
   assert.equal(typeof dto.id, "number");
 });
+
+test("changePassword: policy + revocation semantics (service level)", async () => {
+  const h = makeService();
+  await registerVerifiedUser(h, "policy@velora.example", "original-password-123");
+  const userId = (await h.store.findUserByEmail("policy@velora.example"))!.id;
+  const pair = await h.service.login({ email: "policy@velora.example", password: "original-password-123" });
+
+  // weak new password → VALIDATION_FAILED on newPassword (Local policy min 10; PHP min 8 — documented difference)
+  await assert.rejects(
+    h.service.changePassword(userId, { currentPassword: "original-password-123", newPassword: "short" }),
+    (e: unknown) => e instanceof AuthError && e.code === "VALIDATION_FAILED" && e.details?.newPassword !== undefined,
+  );
+  // missing user → USER_NOT_FOUND (ownership boundary)
+  await assert.rejects(
+    h.service.changePassword("999999", { currentPassword: "x", newPassword: "y-strong-enough-1" }),
+    (e: unknown) => e instanceof AuthError && e.code === "USER_NOT_FOUND",
+  );
+
+  await h.service.changePassword(userId, { currentPassword: "original-password-123", newPassword: "rotated-password-456" });
+  // every session of the user is revoked
+  await assert.rejects(h.service.refresh(pair.refreshToken));
+  // new password verifies; old one does not
+  await assert.rejects(h.service.login({ email: "policy@velora.example", password: "original-password-123" }));
+  await h.service.login({ email: "policy@velora.example", password: "rotated-password-456" });
+});
+
+test("preferences + email preferences service contracts", async () => {
+  const h = makeService();
+  await registerVerifiedUser(h, "svc-pref@velora.example", "a-strong-password-123");
+  const userId = (await h.store.findUserByEmail("svc-pref@velora.example"))!.id;
+
+  // no field → 400
+  await assert.rejects(
+    h.service.updatePreferences(userId, {}),
+    (e: unknown) => e instanceof AuthError && e.code === "VALIDATION_FAILED",
+  );
+  const r = await h.service.updatePreferences(userId, { locale: "en", ai_consent: true });
+  assert.deepEqual(
+    { updated: r.updated, locale: r.locale, ai_consent: r.ai_consent },
+    { updated: true, locale: "en", ai_consent: true },
+  );
+
+  const prefs = await h.service.getEmailPreferences(userId);
+  assert.deepEqual(prefs.preferences, {
+    welcome_email: 1, security_alerts: 1, trade_notifications: 1,
+    weekly_report: 1, monthly_report: 1, achievement_notifications: 1,
+  });
+  const merged = await h.service.updateEmailPreferences(userId, { trade_notifications: false });
+  assert.equal(merged.preferences.trade_notifications, 0);
+  assert.equal(merged.preferences.weekly_report, 1); // no reset
+});

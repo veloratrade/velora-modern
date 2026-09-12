@@ -40,6 +40,25 @@ export interface VerificationRecord {
   readonly createdAt: string;
 }
 
+/** PHP email-preference categories (BUG-A9; 6 keys, all default ON — PHP shape). */
+export interface EmailPreferences {
+  readonly welcomeEmail: boolean;
+  readonly securityAlerts: boolean;
+  readonly tradeNotifications: boolean;
+  readonly weeklyReport: boolean;
+  readonly monthlyReport: boolean;
+  readonly achievementNotifications: boolean;
+}
+
+export const DEFAULT_EMAIL_PREFERENCES: EmailPreferences = {
+  welcomeEmail: true,
+  securityAlerts: true,
+  tradeNotifications: true,
+  weeklyReport: true,
+  monthlyReport: true,
+  achievementNotifications: true,
+};
+
 /** Thrown by createUser on a duplicate canonical email (DB UNIQUE equivalent). */
 export class UserEmailExistsError extends Error {
   constructor(email: string) {
@@ -96,4 +115,18 @@ export interface UserStore {
     },
   ): Promise<void>;
   revokeSession(id: string, revokedAt: Date): Promise<void>;
+  /** Revoke ALL active sessions of a user (change-password; both lineages). */
+  revokeAllSessionsForUser(userId: string, revokedAt: Date): Promise<void>;
+
+  /** Update user preferences; returns the updated record or null if absent. */
+  updateUserPreferences(
+    userId: string,
+    patch: { locale?: "fa" | "en"; aiConsentAt?: string | null },
+    now: Date,
+  ): Promise<UserRecord | null>;
+
+  /** Email preferences; DEFAULT_EMAIL_PREFERENCES when no row exists (PHP). */
+  getEmailPreferences(userId: string): Promise<EmailPreferences>;
+  /** Upsert the full preference set (partial merge happens above the port). */
+  upsertEmailPreferences(userId: string, prefs: EmailPreferences, now: Date): Promise<void>;
 }

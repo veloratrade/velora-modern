@@ -18,7 +18,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { PasswordHasher } from "@velora/domain";
 import { verifyAndRehash } from "@velora/domain";
-import type { UserStore, UserRecord } from "./userStore.js";
+import { passwordSchema } from "@velora/contracts";
+import type { UserStore, UserRecord, EmailPreferences } from "./userStore.js";
+import { DEFAULT_EMAIL_PREFERENCES } from "./userStore.js";
 import type { JwtService, JwtPayload } from "./jwt.js";
 
 export const ACCESS_TOKEN_TTL_SECONDS = 900;
@@ -324,6 +326,134 @@ export class AuthService {
       expiresIn: ACCESS_TOKEN_TTL_SECONDS,
       tokenType: "Bearer",
       user: this.toPublicUser(user),
+    };
+  }
+
+  /**
+   * Change password (Remote + PHP verified semantics): verify current →
+   * reject identical → policy-check new → persist Argon2id → REVOKE ALL
+   * active sessions (Remote updateMany revokedAt; PHP revokeAllForUser).
+   * The PHP password-changed email is Phase I (email dispatch) — deferred.
+   */
+  async changePassword(
+    userId: string,
+    input: { currentPassword: string; newPassword: string },
+  ): Promise<{ changed: true; messageKey: "auth.passwordChanged"; params: Record<string, never> }> {
+    const user = await this.deps.store.findUserById(userId);
+    if (user === null) {
+      // Remote: 400 USER_NOT_FOUND; PHP: ValidationException (exact status
+      // fixture-pending). Nearly unreachable behind a valid access token.
+      throw new AuthError(400, "USER_NOT_FOUND", "User not found.");
+    }
+    if (!(await this.deps.hasher.verify(input.currentPassword, user.passwordHash))) {
+      throw new AuthError(400, "VALIDATION_FAILED", "Current password is incorrect.", {
+        currentPassword: "Current password is incorrect.",
+      });
+    }
+    if (input.currentPassword === input.newPassword) {
+      throw new AuthError(400, "VALIDATION_FAILED", "New password must differ from current password.", {
+        newPassword: "New password must differ from current password.",
+      });
+    }
+    // DOCUMENTED DIFFERENCE: Local password policy (min 10, ADR-005-adjacent
+    // contract) is stricter than the observed PHP change-password validation
+    // (min 8) — fixture-pending; stricter policy retained deliberately.
+    const policy = passwordSchema.safeParse(input.newPassword);
+    if (!policy.success) {
+      throw new AuthError(400, "VALIDATION_FAILED", "New password does not meet the password policy.", {
+        newPassword: policy.error.issues[0]?.message ?? "invalid password",
+      });
+    }
+    const newHash = await this.deps.hasher.hash(input.newPassword);
+    await this.deps.store.updateUserPasswordHash(userId, newHash, this.now());
+    await this.deps.store.revokeAllSessionsForUser(userId, this.now());
+    return { changed: true, messageKey: "auth.passwordChanged", params: {} };
+  }
+
+  /** Update preferences (Remote + PHP): locale (fa|en) and/or ai_consent. */
+  async updatePreferences(
+    userId: string,
+    input: { locale?: "fa" | "en" | undefined; ai_consent?: boolean | undefined },
+  ): Promise<{
+    updated: true;
+    locale: string;
+    ai_consent: boolean;
+    ai_consent_at: string | null;
+  }> {
+    if (input.locale === undefined && input.ai_consent === undefined) {
+      throw new AuthError(400, "VALIDATION_FAILED", "No valid preference field provided.");
+    }
+    const now = this.now();
+    const aiConsentAt =
+      input.ai_consent === undefined ? undefined : input.ai_consent ? now.toISOString() : null;
+    const updated = await this.deps.store.updateUserPreferences(
+      userId,
+      {
+        ...(input.locale !== undefined ? { locale: input.locale } : {}),
+        ...(aiConsentAt !== undefined ? { aiConsentAt } : {}),
+      },
+      now,
+    );
+    if (updated === null) {
+      throw new AuthError(404, "USER_NOT_FOUND", "User not found.");
+    }
+    return {
+      updated: true,
+      locale: updated.locale,
+      ai_consent: updated.aiConsentAt !== null,
+      ai_consent_at: updated.aiConsentAt,
+    };
+  }
+
+  /** Email preferences API payload in the PHP shape (6 keys, 1|0 ints). */
+  private preferencesToApi(p: EmailPreferences): Record<string, 0 | 1> {
+    return {
+      welcome_email: p.welcomeEmail ? 1 : 0,
+      security_alerts: p.securityAlerts ? 1 : 0,
+      trade_notifications: p.tradeNotifications ? 1 : 0,
+      weekly_report: p.weeklyReport ? 1 : 0,
+      monthly_report: p.monthlyReport ? 1 : 0,
+      achievement_notifications: p.achievementNotifications ? 1 : 0,
+    };
+  }
+
+  async getEmailPreferences(userId: string): Promise<{
+    preferences: Record<string, 0 | 1>;
+    messageKey: "auth.emailPreferences";
+    params: Record<string, never>;
+  }> {
+    const prefs = await this.deps.store.getEmailPreferences(userId);
+    return { preferences: this.preferencesToApi(prefs), messageKey: "auth.emailPreferences", params: {} };
+  }
+
+  /**
+   * Update email preferences (PHP semantics): partial booleans over the 6
+   * known keys (non-bool / unknown keys are IGNORED — PHP is_bool check),
+   * merged onto current-or-default so no category is silently reset.
+   */
+  async updateEmailPreferences(
+    userId: string,
+    body: Record<string, unknown>,
+  ): Promise<{
+    updated: true;
+    preferences: Record<string, 0 | 1>;
+    messageKey: "auth.emailPreferencesUpdated";
+    params: Record<string, never>;
+  }> {
+    const current = await this.deps.store.getEmailPreferences(userId);
+    const merged: { -readonly [K in keyof EmailPreferences]: EmailPreferences[K] } = { ...current };
+    if (typeof body.welcome_email === "boolean") merged.welcomeEmail = body.welcome_email;
+    if (typeof body.security_alerts === "boolean") merged.securityAlerts = body.security_alerts;
+    if (typeof body.trade_notifications === "boolean") merged.tradeNotifications = body.trade_notifications;
+    if (typeof body.weekly_report === "boolean") merged.weeklyReport = body.weekly_report;
+    if (typeof body.monthly_report === "boolean") merged.monthlyReport = body.monthly_report;
+    if (typeof body.achievement_notifications === "boolean") merged.achievementNotifications = body.achievement_notifications;
+    await this.deps.store.upsertEmailPreferences(userId, merged, this.now());
+    return {
+      updated: true,
+      preferences: this.preferencesToApi(merged),
+      messageKey: "auth.emailPreferencesUpdated",
+      params: {},
     };
   }
 

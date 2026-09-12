@@ -7,6 +7,8 @@ import {
   type SessionRecord,
   type VerificationRecord,
   type UserStore,
+  type EmailPreferences,
+  DEFAULT_EMAIL_PREFERENCES,
   UserEmailExistsError,
 } from "./userStore.js";
 
@@ -17,6 +19,7 @@ export class MemoryUserStore implements UserStore {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly verifications = new Map<string, VerificationRecord>();
   private readonly sessionsByRefreshHash = new Map<string, string>();
+  private readonly emailPrefs = new Map<string, EmailPreferences>();
   private idCounter = 0;
 
   async createUser(input: {
@@ -181,5 +184,40 @@ export class MemoryUserStore implements UserStore {
   async revokeSession(id: string, revokedAt: Date): Promise<void> {
     const s = this.sessions.get(id);
     if (s) this.sessions.set(id, { ...s, revokedAt: iso(revokedAt) });
+  }
+
+  async revokeAllSessionsForUser(userId: string, revokedAt: Date): Promise<void> {
+    for (const [id, s] of this.sessions) {
+      if (s.userId === userId && s.revokedAt === null) {
+        this.sessions.set(id, { ...s, revokedAt: iso(revokedAt) });
+      }
+    }
+  }
+
+  async updateUserPreferences(
+    userId: string,
+    patch: { locale?: "fa" | "en"; aiConsentAt?: string | null },
+    now: Date,
+  ): Promise<UserRecord | null> {
+    const u = this.users.get(userId);
+    if (u === undefined) return null;
+    const updated: UserRecord = {
+      ...u,
+      ...(patch.locale !== undefined ? { locale: patch.locale } : {}),
+      ...(patch.aiConsentAt !== undefined ? { aiConsentAt: patch.aiConsentAt } : {}),
+      updatedAt: iso(now),
+    };
+    this.users.set(userId, updated);
+    return updated;
+  }
+
+  async getEmailPreferences(userId: string): Promise<EmailPreferences> {
+    return this.emailPrefs.get(userId) ?? DEFAULT_EMAIL_PREFERENCES;
+  }
+
+  async upsertEmailPreferences(userId: string, prefs: EmailPreferences, now: Date): Promise<void> {
+    this.emailPrefs.set(userId, prefs);
+    const u = this.users.get(userId);
+    if (u) this.users.set(userId, { ...u, updatedAt: iso(now) });
   }
 }

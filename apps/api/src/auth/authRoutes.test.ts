@@ -256,3 +256,157 @@ test("auth routes fail closed (503 SERVICE_UNAVAILABLE) when the capability is u
     { configureAuth: false },
   );
 });
+
+test("IDENTITY COMPLETION: change-password journey (wrong current → change → sessions revoked → new login)", async () => {
+  await withAuthServer(async (base, tokens) => {
+    // setup: registered + verified user with an active session
+    await post(base, "/api/v1/auth/register", { email: "chg@velora.example", password: "first-strong-password-1" });
+    await post(base, "/api/v1/auth/verify-email", { token: tokens.shift() });
+    const login1 = await fetch(`${base}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "chg@velora.example", password: "first-strong-password-1" }),
+    });
+    const refreshToken = /refresh_token=([^;]+)/.exec(login1.headers.get("set-cookie") ?? "")?.[1] ?? "";
+    const accessToken = ((await login1.json()) as Envelope<{ tokens: { accessToken: string } }>).data.tokens.accessToken;
+
+    // wrong current password → 400 VALIDATION_FAILED + details.currentPassword
+    const wrong = await fetch(`${base}/api/v1/auth/change-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ currentPassword: "wrong-current-password-9", newPassword: "second-strong-password-2" }),
+    });
+    assert.equal(wrong.status, 400);
+    const wrongBody = (await wrong.json()) as Envelope<null>;
+    assert.equal(wrongBody.error?.code, "VALIDATION_FAILED");
+    assert.ok(wrongBody.error?.details && "currentPassword" in wrongBody.error.details);
+
+    // identical password → 400 + details.newPassword
+    const same = await fetch(`${base}/api/v1/auth/change-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ currentPassword: "first-strong-password-1", newPassword: "first-strong-password-1" }),
+    });
+    assert.equal(same.status, 400);
+    assert.ok("newPassword" in (((await same.json()) as Envelope<null>).error?.details ?? {}));
+
+    // unauthenticated → 401
+    const unauth = await fetch(`${base}/api/v1/auth/change-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword: "a", newPassword: "b" }),
+    });
+    assert.equal(unauth.status, 401);
+
+    // success → {changed, messageKey, params}
+    const okRes = await fetch(`${base}/api/v1/auth/change-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ currentPassword: "first-strong-password-1", newPassword: "second-strong-password-2" }),
+    });
+    assert.equal(okRes.status, 200);
+    assert.deepEqual(((await okRes.json()) as Envelope<{ changed: boolean; messageKey: string }>).data, {
+      changed: true,
+      messageKey: "auth.passwordChanged",
+      params: {},
+    });
+
+    // the pre-change refresh session is revoked
+    const deadRefresh = await fetch(`${base}/api/v1/auth/refresh`, {
+      method: "POST",
+      headers: { Cookie: `refresh_token=${refreshToken}` },
+    });
+    assert.equal(deadRefresh.status, 401);
+
+    // old password no longer logs in; the new one does
+    const oldLogin = await post(base, "/api/v1/auth/login", { email: "chg@velora.example", password: "first-strong-password-1" });
+    assert.equal(oldLogin.status, 401);
+    const newLogin = await post(base, "/api/v1/auth/login", { email: "chg@velora.example", password: "second-strong-password-2" });
+    assert.equal(newLogin.status, 200);
+  });
+});
+
+test("PREFERENCES: PATCH /me/preferences (locale + ai_consent) contract", async () => {
+  await withAuthServer(async (base, tokens) => {
+    await post(base, "/api/v1/auth/register", { email: "pref@velora.example", password: "a-strong-password-123" });
+    await post(base, "/api/v1/auth/verify-email", { token: tokens.shift() });
+    const login = await fetch(`${base}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "pref@velora.example", password: "a-strong-password-123" }),
+    });
+    const accessToken = ((await login.json()) as Envelope<{ tokens: { accessToken: string } }>).data.tokens.accessToken;
+    const auth = { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` };
+
+    // no field → 400
+    const none = await fetch(`${base}/api/v1/auth/me/preferences`, { method: "PATCH", headers: auth, body: "{}" });
+    assert.equal(none.status, 400);
+    // invalid locale → 400 with details
+    const badLocale = await fetch(`${base}/api/v1/auth/me/preferences`, {
+      method: "PATCH", headers: auth, body: JSON.stringify({ locale: "fr" }),
+    });
+    assert.equal(badLocale.status, 400);
+    // unauthenticated → 401
+    const unauth = await fetch(`${base}/api/v1/auth/me/preferences`, { method: "PATCH", body: "{}" });
+    assert.equal(unauth.status, 401);
+
+    // both fields → Remote-verified response shape
+    const both = await fetch(`${base}/api/v1/auth/me/preferences`, {
+      method: "PATCH", headers: auth, body: JSON.stringify({ locale: "en", ai_consent: true }),
+    });
+    assert.equal(both.status, 200);
+    const body = (await both.json()) as Envelope<{ updated: boolean; locale: string; ai_consent: boolean; ai_consent_at: string | null }>;
+    assert.equal(body.data.updated, true);
+    assert.equal(body.data.locale, "en");
+    assert.equal(body.data.ai_consent, true);
+    assert.ok(body.data.ai_consent_at !== null);
+
+    // ai_consent=false clears the timestamp
+    const off = await fetch(`${base}/api/v1/auth/me/preferences`, {
+      method: "PATCH", headers: auth, body: JSON.stringify({ ai_consent: false }),
+    });
+    assert.equal(((await off.json()) as Envelope<{ ai_consent: boolean; ai_consent_at: string | null }>).data.ai_consent_at, null);
+  });
+});
+
+test("EMAIL PREFERENCES: GET defaults (PHP 6-key shape, all ON) + PUT partial merge", async () => {
+  await withAuthServer(async (base, tokens) => {
+    await post(base, "/api/v1/auth/register", { email: "emailpref@velora.example", password: "a-strong-password-123" });
+    await post(base, "/api/v1/auth/verify-email", { token: tokens.shift() });
+    const login = await fetch(`${base}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "emailpref@velora.example", password: "a-strong-password-123" }),
+    });
+    const accessToken = ((await login.json()) as Envelope<{ tokens: { accessToken: string } }>).data.tokens.accessToken;
+    const auth = { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` };
+
+    // unauthenticated → 401
+    assert.equal((await fetch(`${base}/api/v1/auth/email-preferences`)).status, 401);
+
+    // GET: PHP defaults — 6 keys, all 1, ints not booleans; marketing_emails absent
+    const get = await fetch(`${base}/api/v1/auth/email-preferences`, { headers: { Authorization: `Bearer ${accessToken}` } });
+    assert.equal(get.status, 200);
+    const getBody = (await get.json()) as Envelope<{ preferences: Record<string, number>; messageKey: string }>;
+    assert.deepEqual(getBody.data.preferences, {
+      welcome_email: 1, security_alerts: 1, trade_notifications: 1,
+      weekly_report: 1, monthly_report: 1, achievement_notifications: 1,
+    });
+    assert.equal(getBody.data.messageKey, "auth.emailPreferences");
+    assert.ok(!("marketing_emails" in getBody.data.preferences));
+
+    // PUT partial: only known boolean keys merge; no category silently resets
+    const put = await fetch(`${base}/api/v1/auth/email-preferences`, {
+      method: "PUT", headers: auth,
+      body: JSON.stringify({ weekly_report: false, marketing_emails: true, monthly_report: "yes" }),
+    });
+    assert.equal(put.status, 200);
+    const putBody = (await put.json()) as Envelope<{ updated: boolean; preferences: Record<string, number>; messageKey: string }>;
+    assert.equal(putBody.data.updated, true);
+    assert.equal(putBody.data.messageKey, "auth.emailPreferencesUpdated");
+    assert.equal(putBody.data.preferences.weekly_report, 0);
+    assert.equal(putBody.data.preferences.monthly_report, 1);
+    assert.equal(putBody.data.preferences.welcome_email, 1);
+    assert.ok(!("marketing_emails" in putBody.data.preferences));
+  });
+});
