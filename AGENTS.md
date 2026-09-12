@@ -86,6 +86,7 @@ Every architectural claim must be tagged:
 | `docs/evidence/PHASE-B-SECURITY-RECORD.md` | Phase B (2026-09-12) S1–S8 hardening dispositions, evidence, and limitations |
 | `docs/evidence/PHASE-C-INCREMENT-1-RECORD.md` | Phase C increment 1 (2026-09-12): envelope/health contracts + identity capability port, evidence labels, deferrals |
 | `docs/evidence/PHASE-C-INCREMENT-2-RECORD.md` | Phase C increment 2 (2026-09-12): identity completion (change-password/preferences/email-preferences), PnL golden-vector reconciliation (per-value classification), accounts capability (ownership-scoped port + 0004 ALTER migration); documented differences, deferrals, full battery |
+| `docs/evidence/PHASE-C-INCREMENT-3-RECORD.md` | Phase C increment 3 (2026-09-12): trades capability on the ADR-002 ledger (correction events, tombstones, EXIT_CANCELLED, optimistic 409s), 0005 migration, ADR-004 time model, documented divergences (403 financial PUT, dead search params, scale-2 costs) |
 | `docs/reconciliation/PHASE-C-CAPABILITY-MATRIX.md` | Phase C capability classification (27 domains) + external contract inventory |
 | `docs/parity-plan.md` | Executable behavioral parity specification |
 | `docs/observability-contract.md` | Metrics/logs/traces naming + SLOs |
