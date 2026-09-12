@@ -1,5 +1,10 @@
 # Phase B Security Record — S1–S8 Hardening & Verification (2026-09-12)
 
+> **Follow-up verification (2026-09-12, owner-authorized): PASS WITH OPEN ITEMS.**
+> Addendum section at the bottom covers: S5 real-persistence-boundary determination,
+> S4 evidence-provenance corroboration, `@velora/config` disposition, and the
+> follow-up regression battery. No code changes were required by the follow-up.
+
 **Owner authorization:** Phase B ONLY — audit, fix, and prove closure of security
 findings S1–S8 on branch `reconcile/foundation-first`. No promotion to `main`;
 no Phase C+; no production systems touched. Execution locus confirmed by owner:
@@ -67,3 +72,89 @@ tree exists.
   declares the canonical origin set (intentional; Gate 3B is BLOCKED).
 - Worker queue boot policy is Phase F; the worker has no memory fallback today
   (without DATABASE_URL it does nothing, loudly).
+
+---
+
+## Follow-up Verification Addendum (2026-09-12, owner-authorized)
+
+**Scope:** Phase B follow-up only — no Phase C work, no Remote-snapshot
+modification, no push/merge/deploy, no production access. All findings below
+were established by read-only inspection plus the executed regression battery.
+
+### S5 — real persistence-boundary determination
+
+**VERIFIED FACTS (read-only inspection):**
+- The Local schema DOES define the persistence substrate: `users.password_hash`
+  ("bcrypt `$2y$` import or argon2id (ADR-005/D-04)") in
+  `db/migrations/0001_core.sql:7-17`, plus `user_sessions`/`user_devices` etc.
+- `db/migrate.ts` provides a `MigrationEngine` (PGlite disposable default; real
+  PostgreSQL via `DATABASE_URL`) — used ONLY by the migration runner and the
+  migration tests.
+- **No application-level user-store persistence boundary exists**: a repository-
+  wide search finds no `UserStore`/`UserRepository`/`PersistencePort` interface,
+  no adapter, and no login flow that reads/writes users through any persistence
+  abstraction. The only store exercised by the S5 proof is the in-memory double
+  inside `apps/api/src/auth/rehash.test.ts` (the authorized local boundary).
+
+**Determination:** a PGlite-backed test hand-writing `UPDATE users …` statements
+would test the test's own SQL, not an application boundary — manufacturing
+evidence rather than verifying it. Per the owner directive, S5 remains:
+
+> **S5: CLOSED — LOCAL BOUNDARY / REAL-PG VERIFICATION DEFERRED TO PHASE C/D.**
+
+Deferred proof (Phase C/D, when the PersistencePort/user store exists): legacy
+`$2y$` verifies through the real store; rehash triggered; Argon2id persisted;
+subsequent login uses the upgraded hash; compliant hashes not replaced; wrong
+passwords rejected — against a real PostgreSQL (labeled real-PG, not PGlite).
+
+### S4 — evidence provenance (corroborated)
+
+**VERIFIED FACT:** the fixture
+`$2y$10$.vGA1O9wmRjrwAVXD98HNOgsNpDczlqm3Jq7KnEd1rVAGv3Fykk1a` is the documented
+output of PHP `password_hash("rasmuslerdorf", PASSWORD_DEFAULT)` — the canonical
+example in the PHP manual (php.net), independently quoted in multiple public
+sources citing php.net (e.g., 2014 and 2018 Alsacreations threads; Stack Overflow
+canonical-example discussions). "rasmuslerdorf" (PHP's creator) is a public
+documentation example identity, not a credential.
+
+- **Genuine PHP output:** corroborated by independent public documentation of
+  the exact vector + password pair; `$2y$` is PHP's own crypt flavor marker.
+- **Not a relabeled `$2b$`:** documented provenance as native PHP output; the
+  flavor-equivalence test separately proves `$2y$` ≡ `$2b$` verification.
+- **Verifies / rejects:** test-executed (proof.test.ts, 154/154 suite).
+- **No production credentials:** the only plaintext present in the repository is
+  the public example password itself, in test code, explicitly commented as a
+  non-credential (`rehash.test.ts`); it is inseparable from the documented
+  fixture. No real-system password appears anywhere.
+
+**Determination: S4 stays CLOSED** — provenance upgraded from "documented in
+test header" to "independently corroborated public documentation".
+
+### `@velora/config` — disposition
+
+**VERIFIED FACTS:** the package is a stub (only `package.json`; its `main`
+points to `tsconfig.base.json`, which does not exist inside the package). A
+repository-wide search finds ZERO imports of `@velora/config` (matches: its own
+`package.json`, the lockfile, and this record). It was created in the scaffold
+commit `b6228ef` and was only ever referenced by the root `typecheck`/`build`
+scripts (dead reference repaired in Phase B `440919b`).
+
+**Determination: DEFERRED — OWNER DECISION / LATER ARCHITECTURE WORK.** No
+security or Phase B requirement to populate or remove it. Options for a later
+phase: populate as the intended shared-configuration package, or remove the
+stub. Not implemented here.
+
+### Follow-up regression battery (executed 2026-09-12, tree at `d4e1d7c`)
+
+| Command | Result |
+|---|---|
+| `npm run typecheck` | PASS — 0 errors |
+| `npm test` | 154/154 pass, 0 fail, 0 skipped |
+| `npm run test:migrations` | 5/5 pass |
+| `npx tsx tools/parity-smoke.ts` | 6/6 pass |
+| `bash tools/secret-scan.sh` | PASS — 0 findings |
+| `npm run lint` | N/A — no lint script exists |
+
+**Result: PHASE B FOLLOW-UP: PASS WITH OPEN ITEMS** — S5's Phase C/D deferral
+and the `@velora/config` owner decision are the open items; they are documented
+boundaries, not unverified claims.
