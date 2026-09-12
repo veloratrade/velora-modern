@@ -24,7 +24,24 @@ OWNER DECISION REQUIRED.
 | D-14 | ADR-009 SEO/locale | **Accepted** (2026-08-29) — route map, locale strategy, cache classes, CSP nonces; **checkout URL = `/fa/checkout` + `/en/checkout`** (F-03). hreflang verification Phase 2. |
 | D-15 | ADR-010 delivery/repo | **Accepted as policy** (2026-08-29) — monorepo, immutable images, roles, restore-drill gate. Repository posture per **revised D-06: PUBLIC** (original PRIVATE proposal superseded by owner decision). |
 | D-16 | ADR-012 backup gate law | **Accepted** (2026-09-12, owner directive — post-audit governance alignment) — permanent mutation-safety invariant: no staging/production mutation affecting persistent state without a valid, environment-attributed, `INTEGRITY_VERIFIED` backup gate evaluated for that exact operation before the mutation. Fail-closed; no bypass; no manual-confirmation exception; mechanism deferred to a future implementation decision. |
-| D-17 | ADR-013 environment-origin safety | **Accepted** (2026-09-12, owner directive) — explicit environment identity + canonical origin binding contract, implemented as a typed validator in `packages/contracts`; canonical staging origin remains **OWNER DECISION REQUIRED (OD-1)** before any staging environment exists. |
+| D-17 | ADR-013 environment-origin safety | **Accepted** (2026-09-12, owner directive) — explicit environment identity + canonical origin binding contract, implemented as a typed validator in `packages/contracts`; canonical staging origin was **OWNER DECISION REQUIRED (ADR-013 OD-1)** — reconciliation OD-8 (2026-09-12) now approves `https://staging.veloratrade.ir` **as a candidate only**, not a production host. |
+
+## Reconciliation gate — owner decisions OD-1…OD-10 (2026-09-12)
+
+Full record: `docs/reconciliation/RECONCILIATION_DECISIONS.md` (owner-approved 2026-09-12; scope authorized: A0 + A-Preparation only).
+
+| OD | Subject | Disposition |
+|---|---|---|
+| OD-1 | Reconciliation strategy | **APPROVED — Foundation-First Hybrid** (Local = foundation; Remote = ported feature lineage; PHP = behavioral/visual reference) |
+| OD-2 | Remote lineage preservation | **APPROVED** — fetch + annotated tag `remote-snapshot-99e024c829db` + provenance manifest; NO import tree, NO history rewrite |
+| OD-3 | External API/health contract | **APPROVED** — PHP `/health` = reference contract; fixture-first; no invented fields |
+| OD-4 | Backup bootstrap exception | **NOT APPROVED** — investigate empty-schema dump evidence instead; no ADR-012 change |
+| OD-5 | Timestamp precision | **APPROVED** — PG-native storage; UTC; PHP-parity serialization (seconds + `+00:00`) pending fixtures |
+| OD-6 | ORM | **OPEN** — Phase D spike against defined criteria |
+| OD-7 | Queue | **APPROVED — pg-boss** (ADR-007); no BullMQ; Redis conditional only |
+| OD-8 | Staging origin | **APPROVED AS CANDIDATE ONLY** — `https://staging.veloratrade.ir`; not a production host |
+| OD-9 | Ledger enforcement | **APPROVED DIRECTION** — staged: soft-launch/observability → verified → strict |
+| OD-10 | Future promotion | **APPROVED FUTURE PROCESS ONLY** — branch + owner-reviewed PR/fast-forward; never reset/rewrite/force-push |
 
 ## Mandatory gates (recalculated 2026-08-29)
 

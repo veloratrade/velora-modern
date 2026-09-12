@@ -13,6 +13,11 @@ scaffolding — see `docs/adr/ADR-011-phase1-implementation-record.md`.
 Post-audit governance alignment (2026-09-12): backup-gate law (ADR-012) and
 environment-origin safety contract (ADR-013) adopted; capability registry
 re-verified against Reference `main` @ `a8eabac`.
+Reconciliation gate (2026-09-12): **Foundation-First Hybrid APPROVED**
+(OD-1…OD-10, `docs/reconciliation/RECONCILIATION_DECISIONS.md`); Remote
+lineage pinned by annotated tag + provenance manifest
+(`docs/provenance/REMOTE_LINEAGE.md`); authorized scope was A0 +
+A-Preparation only — Phases B–O remain unauthorized.
 Production hosting validation (Gate 3B) gates production deployment/cutover,
 not Phase 1.
 
@@ -80,7 +85,9 @@ Every architectural claim must be tagged:
 | `docs/hosting-validation.md` | Hosting readiness checklist (evidence-based) |
 | `docs/parity-plan.md` | Executable behavioral parity specification |
 | `docs/observability-contract.md` | Metrics/logs/traces naming + SLOs |
-| `docs/phase-0-exit-criteria.md` | Phase 0 gates and Phase 1 readiness |
+| `docs/phase-0-exit-criteria.md` | Phase 0 gates, decision ledger (D-01…D-17), and reconciliation decisions (OD-1…OD-10) |
+| `docs/reconciliation/RECONCILIATION_DECISIONS.md` | Owner-approved reconciliation gate record (2026-09-12) — Foundation-First Hybrid, scope + non-authorizations |
+| `docs/provenance/REMOTE_LINEAGE.md` | Remote lineage provenance manifest (pinned snapshot, annotated tag, verification evidence) |
 
 ## Session protocol (lean)
 
