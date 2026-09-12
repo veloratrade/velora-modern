@@ -344,3 +344,45 @@ test("TRADES HTTP: validation envelopes + account ownership on create", async ()
     assert.equal(((await linked.json()) as Envelope<{ accountId: string }>).data.accountId, ownId);
   });
 });
+
+test("JOURNAL HTTP: q journal search + order whitelist over real HTTP", async () => {
+  await withServer(async (base, { ownerToken, otherToken }) => {
+    const auth = { "Content-Type": "application/json", Authorization: `Bearer ${ownerToken}` };
+    const a = await createTrade(base, ownerToken, { ...VECTOR_A, symbol: "EURUSD", strategyTag: "Breakout", notes: "clean London session" });
+    await createTrade(base, ownerToken, {
+      symbol: "XAUUSD", direction: "sell", entryPrice: "2350.00", exitPrice: "2340.00", volume: "1",
+      contractSize: "100", openTime: "2026-09-11 10:00:00", closeTime: "2026-09-11 12:00:00",
+      strategyTag: "Pullback", notes: "gold reversal",
+    });
+    await createTrade(base, otherToken, { ...VECTOR_A, notes: "other user EURUSD" }); // never visible
+
+    // q across symbol / strategy / notes — journal data searchable, cross-user isolated
+    for (const [q, expected] of [["eurusd", 1], ["pull", 1], ["LONDON SESSION", 1], ["other user", 0]] as const) {
+      const res = await fetch(`${base}/api/v1/trades?q=${encodeURIComponent(q)}`, { headers: { Authorization: `Bearer ${ownerToken}` } });
+      assert.equal(res.status, 200);
+      const body = ((await res.json()) as Envelope<{ items: unknown[] }>).data;
+      assert.equal(body.items.length, expected, `q=${q}`);
+    }
+
+    // order whitelist: profit_loss ranks the XAUUSD win first
+    const byPnl = await fetch(`${base}/api/v1/trades?order=profit_loss`, { headers: { Authorization: `Bearer ${ownerToken}` } });
+    const pnlItems = ((await byPnl.json()) as Envelope<{ items: Array<{ symbol: string }> }>).data.items;
+    assert.equal(pnlItems[0]!.symbol, "XAUUSD");
+    // unknown order falls back to the default (open_time) — no error, no echo
+    const bogus = await fetch(`${base}/api/v1/trades?order=total_bogus`, { headers: { Authorization: `Bearer ${ownerToken}` } });
+    assert.equal(bogus.status, 200);
+    assert.equal(((await bogus.json()) as Envelope<{ items: unknown[] }>).data.items.length, 2);
+
+    // journal edit via PUT reflects immediately in q results
+    const edit = await fetch(`${base}/api/v1/trades/${a}`, { method: "PUT", headers: auth, body: JSON.stringify({ notes: "post-journal-edit note" }) });
+    assert.equal(edit.status, 200);
+    const reSearch = await fetch(`${base}/api/v1/trades?q=post-journal-edit`, { headers: { Authorization: `Bearer ${ownerToken}` } });
+    assert.equal(((await reSearch.json()) as Envelope<{ items: unknown[] }>).data.items.length, 1);
+    // null clear is searchable-consistent (old note no longer matches)
+    const clear = await fetch(`${base}/api/v1/trades/${a}`, { method: "PUT", headers: auth, body: JSON.stringify({ notes: null }) });
+    assert.equal(clear.status, 200);
+    assert.equal(((await clear.json()) as Envelope<{ notes: string | null }>).data.notes, null);
+    const afterClear = await fetch(`${base}/api/v1/trades?q=London`, { headers: { Authorization: `Bearer ${ownerToken}` } });
+    assert.equal(((await afterClear.json()) as Envelope<{ items: unknown[] }>).data.items.length, 0);
+  });
+});

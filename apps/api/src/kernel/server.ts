@@ -446,8 +446,8 @@ async function route(req: IncomingMessage, config: ApiConfig, sec: { requestId: 
         direction: q.get("direction") ?? undefined,
         from: q.get("from") ?? undefined,
         to: q.get("to") ?? undefined,
-        q: q.get("q") ?? undefined, // Remote-verified dead param: accepted, not applied
-        order: q.get("order") ?? undefined, // ditto
+        q: q.get("q") ?? undefined, // journal search (PHP evidence): symbol | strategy | notes
+        order: q.get("order") ?? undefined, // PHP whitelist: open_time|close_time|profit_loss
         page: q.get("page") ?? undefined,
         limit: q.get("limit") ?? undefined,
       });
