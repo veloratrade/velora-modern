@@ -89,6 +89,7 @@ Every architectural claim must be tagged:
 | `docs/evidence/PHASE-C-INCREMENT-3-RECORD.md` | Phase C increment 3 (2026-09-12): trades capability on the ADR-002 ledger (correction events, tombstones, EXIT_CANCELLED, optimistic 409s), 0005 migration, ADR-004 time model, documented divergences (403 financial PUT, dead search params, scale-2 costs) |
 | `docs/evidence/PHASE-C-INCREMENT-4-RECORD.md` | Phase C increment 4 (2026-09-13): journal capability on the trades ledger — field ownership matrix, PHP-evidenced q/order search, journal replay proof, null-clear bug fixed in the PGlite store |
 | `docs/evidence/PHASE-C-INCREMENT-5-RECORD.md` | Phase C increment 5 (2026-09-13): strategies determination — NO standalone capability in either lineage (verified); strategyTag journal contract regression-tested; dashboard stats formulas inventoried and deferred; no CRUD/entity/migration manufactured |
+| `docs/evidence/PHASE-C-INCREMENT-6-RECORD.md` | Phase C increment 6 (2026-09-13): entitlements — standalone EntitlementService module (Remote shape), fail-closed 503 plan lookup, per-user quota serialization ([201,429]), 429 messageKey, provider-bypass prevention; no migration/routes; DB-level guarantees stay Phase D |
 | `docs/reconciliation/PHASE-C-CAPABILITY-MATRIX.md` | Phase C capability classification (27 domains) + external contract inventory |
 | `docs/parity-plan.md` | Executable behavioral parity specification |
 | `docs/observability-contract.md` | Metrics/logs/traces naming + SLOs |

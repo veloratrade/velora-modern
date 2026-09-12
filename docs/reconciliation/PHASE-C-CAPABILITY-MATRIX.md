@@ -26,7 +26,7 @@ executed Phase B work. Classifications per the required model.
 | 11 | PnL calculation | **KEEP (Local engine) + PORT (vectors)** | `trades/pnlCalculator.ts`, vectors A–E green | `packages/domain/pnl.ts`, vectors V1–V7 green | C-later | Merge Remote golden vectors into Local suite (gate decision) |
 | 12 | R-multiple | **PORT** | pnlCalculator (R computation) | Partial in domain PnL | C-later | With PnL vector merge |
 | 13 | Dashboard metrics | **PORT** | `src/modules/dashboard/*` | No Local equivalent | C-later | Aggregates follow trades port |
-| 14 | Entitlements / plans / quotas | **PORT** | `entitlements/entitlement.service.ts` (free\|pro, quotas) | No Local equivalent | C-later | Depends on users.plan (this increment adds the column) |
+| 14 | Entitlements / plans / quotas | **PORT — DONE (inc 6)** | `entitlements/entitlement.service.ts` (free\|pro\|enterprise, quotas; fail-closed 503; memory-path userLocks) | `apps/api/src/entitlements/entitlementService.ts` + accountService quota + per-user mutex + 429 messageKey | C-inc6 | Remote unit+integration matrix ported (SAFE-FAIL CLOSED unknown plans, Blocker A fail-closed, Blocker B concurrency, provider-bypass); PHP flat MetaApi quota NOT ported (documented divergence, Phase H); DB transaction+row lock = Phase D |
 | 15 | MetaAPI synchronization (auto+manual) | **NOT IMPLEMENTED** | schema tables only (`uq_sync_*`, `uq_metaapi_*`) | ADR-008 contracts | Phase H | No implementation exists to port |
 | 16 | Screenshot / OCR import | **NOT IMPLEMENTED** | schema tables only | — | Phase J |同上 (same: nothing implemented) |
 | 17 | Email / notifications | **NOT IMPLEMENTED (Remote)** | schema + contract docs only | C-09 contract + link builders | Phase I | Resend templates from PHP reference |
