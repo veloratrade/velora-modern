@@ -12,8 +12,8 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "tsc -b packages/contracts packages/domain packages/config",
-    "typecheck": "tsc -b packages/contracts packages/domain packages/config apps/api apps/worker apps/web",
+    "build": "tsc -b packages/contracts packages/domain",
+    "typecheck": "tsc -b packages/contracts packages/domain apps/api apps/worker apps/web",
     "test": "node tools/run-tests.mjs",
     "test:migrations": "tsx --test db/tests/migrations.test.ts",
     "secret-scan": "bash tools/secret-scan.sh",
