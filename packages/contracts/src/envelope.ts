@@ -21,7 +21,7 @@ export const errorEnvelope = z.object({
     code: z.string(),
     message: z.string(),
     requestId: z.string().optional(),
-    details: z.record(z.string()).optional(),
+    details: z.record(z.union([z.string(), z.number()])).optional(),
   }),
   timestamp: z.string(),
 });
@@ -40,7 +40,7 @@ export type ErrorEnvelope = {
     code: string;
     message: string;
     requestId?: string;
-    details?: Record<string, string>;
+    details?: Record<string, string | number>;
   };
   timestamp: string;
 };
@@ -53,7 +53,7 @@ export function fail(
   code: string,
   message: string,
   requestId?: string,
-  details?: Record<string, string>,
+  details?: Record<string, string | number>,
   now: Date = new Date(),
 ): ErrorEnvelope {
   return {

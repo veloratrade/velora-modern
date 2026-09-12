@@ -15,6 +15,7 @@ import {
 } from "@velora/contracts";
 import { newSecurityContext, buildCsp, SECURITY_HEADERS, originAllowed } from "./security.js";
 import { AuthService, AuthError } from "../auth/authService.js";
+import { AccountService, AccountError } from "../accounts/accountService.js";
 
 export interface HealthChecks {
   database(): Promise<"ok" | "fail">;
@@ -25,6 +26,8 @@ export interface ApiConfig {
   checks: HealthChecks;
   /** Phase C identity capability. Absent → auth routes fail closed (503). */
   readonly auth?: AuthService;
+  /** Phase C accounts capability. Absent → account routes fail closed (503). */
+  readonly accounts?: AccountService;
 }
 
 type RouteResult = { status: number; body: unknown; headers?: Record<string, string> };
@@ -333,6 +336,73 @@ async function route(req: IncomingMessage, config: ApiConfig, sec: { requestId: 
       }
       const body = await parseJsonBody(req);
       const result = await auth.updateEmailPreferences(claims.sub, body);
+      return { status: 200, body: ok(result) };
+    });
+  }
+
+  // ---- Phase C increment 2 (wave 3): accounts (ownership-scoped resource) ----
+  const accountsRoute = (fn: (accounts: AccountService, claims: { sub: string }) => Promise<RouteResult>): Promise<RouteResult> => {
+    if (config.auth === undefined || config.accounts === undefined) {
+      return Promise.resolve({
+        status: 503,
+        body: fail("SERVICE_UNAVAILABLE", "accounts not configured", sec.requestId),
+      });
+    }
+    const claims = authenticateRequest(req, config.auth);
+    if (claims === null) {
+      return Promise.resolve({
+        status: 401,
+        body: fail("UNAUTHENTICATED", "Unauthenticated.", sec.requestId),
+      });
+    }
+    return fn(config.accounts, claims).catch((err: unknown) => {
+      if (err instanceof AccountError) {
+        return { status: err.status, body: fail(err.code, err.message, sec.requestId, err.details) };
+      }
+      if (err instanceof AuthError) {
+        return { status: err.status, body: fail(err.code, err.message, sec.requestId, err.details) };
+      }
+      throw err;
+    });
+  };
+
+  if (method === "GET" && path === "/api/v1/accounts") {
+    return accountsRoute(async (accounts, claims) => {
+      const list = await accounts.listAccounts(claims.sub);
+      return { status: 200, body: ok({ accounts: list }) };
+    });
+  }
+
+  if (method === "POST" && path === "/api/v1/accounts") {
+    return accountsRoute(async (accounts, claims) => {
+      const body = await parseJsonBody(req);
+      const account = await accounts.createAccount(claims.sub, body);
+      return { status: 201, body: ok({ account }) };
+    });
+  }
+
+  if (method === "POST" && path === "/api/v1/accounts/detect-server") {
+    return accountsRoute(async (accounts) => {
+      const body = await parseJsonBody(req);
+      const login = body.mt_login ?? body.accountNumber;
+      const result = accounts.detectServer(login);
+      return { status: 200, body: ok(result) };
+    });
+  }
+
+  if (method === "PATCH" && /^\/api\/v1\/accounts\/[^/]+\/timezone$/.test(path)) {
+    return accountsRoute(async (accounts, claims) => {
+      const id = decodeURIComponent(path.split("/")[4] ?? "");
+      const body = await parseJsonBody(req);
+      const account = await accounts.updateTimezone(id, claims.sub, body.timezone);
+      return { status: 200, body: ok({ account }) };
+    });
+  }
+
+  if (method === "DELETE" && /^\/api\/v1\/accounts\/[^/]+$/.test(path)) {
+    return accountsRoute(async (accounts, claims) => {
+      const id = decodeURIComponent(path.split("/")[4] ?? "");
+      const result = await accounts.deleteAccount(id, claims.sub);
       return { status: 200, body: ok(result) };
     });
   }

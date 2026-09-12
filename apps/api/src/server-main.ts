@@ -23,6 +23,8 @@ import { AuthService } from "./auth/authService.js";
 import { JwtService } from "./auth/jwt.js";
 import { VeloraHasher } from "./auth/hashing.js";
 import { MemoryUserStore } from "./auth/memoryUserStore.js";
+import { AccountService } from "./accounts/accountService.js";
+import { MemoryAccountStore } from "./accounts/memoryAccountStore.js";
 
 type PgClient = import("pg").Client;
 
