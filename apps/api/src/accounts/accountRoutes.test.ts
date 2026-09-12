@@ -166,7 +166,12 @@ test("ACCOUNTS HTTP: cross-user access → identical non-disclosing 404; quota �
     assert.equal(quota.status, 429);
     const quotaBody = (await quota.json()) as Envelope<null>;
     assert.equal(quotaBody.error?.code, "ACCOUNT_QUOTA_EXCEEDED");
-    assert.deepEqual(quotaBody.error?.details, { plan: "free", currentCount: 1, maxAllowed: 1 });
+    assert.deepEqual(quotaBody.error?.details, {
+      messageKey: "errors.accounts.quotaExceeded", // Remote-verified (integration test)
+      plan: "free",
+      currentCount: 1,
+      maxAllowed: 1,
+    });
   });
 });
 
@@ -201,6 +206,40 @@ test("ACCOUNTS HTTP: validation errors (400 VALIDATION_FAILED with field details
     const detect = ((await okLogin.json()) as Envelope<{ suggestedServers: string[]; messageKey: string }>).data;
     assert.deepEqual(detect.suggestedServers, ["ICMarkets-Demo", "ICMarkets-Live", "Pepperstone-Demo"]);
     assert.equal(detect.messageKey, "accounts.detectServerHint");
+  });
+});
+
+test("ACCOUNTS HTTP: concurrent creation serializes to exactly [201, 429] (Remote Blocker B)", async () => {
+  await withServer(async (base, { ownerToken }) => {
+    const auth = { "Content-Type": "application/json", Authorization: `Bearer ${ownerToken}` };
+    // two simultaneous creations on the free plan (1-account quota)
+    const [a, b] = await Promise.all([
+      fetch(`${base}/api/v1/accounts`, { method: "POST", headers: auth, body: JSON.stringify({ provider: "MANUAL", label: "Concurrent A" }) }),
+      fetch(`${base}/api/v1/accounts`, { method: "POST", headers: auth, body: JSON.stringify({ provider: "MT4", label: "Concurrent B" }) }),
+    ]);
+    const codes = [a.status, b.status].sort();
+    assert.deepEqual(codes, [201, 429]); // exactly one wins
+    const failed = a.status === 429 ? a : b;
+    const failedBody = (await failed.json()) as Envelope<null>;
+    assert.equal(failedBody.error?.code, "ACCOUNT_QUOTA_EXCEEDED");
+    assert.equal(failedBody.error?.details?.messageKey, "errors.accounts.quotaExceeded");
+    // exactly one account exists afterwards
+    const list = await fetch(`${base}/api/v1/accounts`, { headers: { Authorization: `Bearer ${ownerToken}` } });
+    assert.equal(((await list.json()) as Envelope<{ accounts: unknown[] }>).data.accounts.length, 1);
+  });
+});
+
+test("ACCOUNTS HTTP: provider-bypass prevention — quota counts across MANUAL/MT4/MT5", async () => {
+  await withServer(async (base, { ownerToken }) => {
+    const auth = { "Content-Type": "application/json", Authorization: `Bearer ${ownerToken}` };
+    const manual = await fetch(`${base}/api/v1/accounts`, { method: "POST", headers: auth, body: JSON.stringify({ provider: "MANUAL", label: "Manual Account" }) });
+    assert.equal(manual.status, 201);
+    const mt4 = await fetch(`${base}/api/v1/accounts`, { method: "POST", headers: auth, body: JSON.stringify({ provider: "MT4", label: "MT4 Bypass Attempt" }) });
+    assert.equal(mt4.status, 429);
+    assert.equal(((await mt4.json()) as Envelope<null>).error?.code, "ACCOUNT_QUOTA_EXCEEDED");
+    const mt5 = await fetch(`${base}/api/v1/accounts`, { method: "POST", headers: auth, body: JSON.stringify({ provider: "MT5", label: "MT5 Bypass Attempt" }) });
+    assert.equal(mt5.status, 429);
+    assert.equal(((await mt5.json()) as Envelope<null>).error?.code, "ACCOUNT_QUOTA_EXCEEDED");
   });
 });
 

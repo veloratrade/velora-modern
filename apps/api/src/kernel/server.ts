@@ -17,6 +17,7 @@ import { newSecurityContext, buildCsp, SECURITY_HEADERS, originAllowed } from ".
 import { AuthService, AuthError } from "../auth/authService.js";
 import { AccountService, AccountError } from "../accounts/accountService.js";
 import { TradeService, TradeError } from "../trades/tradeService.js";
+import { EntitlementError } from "../entitlements/entitlementService.js";
 
 export interface HealthChecks {
   database(): Promise<"ok" | "fail">;
@@ -360,6 +361,10 @@ async function route(req: IncomingMessage, config: ApiConfig, sec: { requestId: 
     }
     return fn(config.accounts, claims).catch((err: unknown) => {
       if (err instanceof AccountError) {
+        return { status: err.status, body: fail(err.code, err.message, sec.requestId, err.details) };
+      }
+      if (err instanceof EntitlementError) {
+        // fail-closed plan/entitlement lookup failures surface as their own status
         return { status: err.status, body: fail(err.code, err.message, sec.requestId, err.details) };
       }
       if (err instanceof AuthError) {

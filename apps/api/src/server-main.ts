@@ -27,6 +27,7 @@ import { AccountService } from "./accounts/accountService.js";
 import { MemoryAccountStore } from "./accounts/memoryAccountStore.js";
 import { TradeService } from "./trades/tradeService.js";
 import { MemoryTradeStore } from "./trades/memoryTradeStore.js";
+import { EntitlementService } from "./entitlements/entitlementService.js";
 
 type PgClient = import("pg").Client;
 
@@ -119,9 +120,14 @@ async function main(): Promise<void> {
       hasher: new VeloraHasher(),
       jwt: JwtService.create(boot.jwtSecret),
     });
+    // Plan lookup through the entitlement module — fail-closed (503 on store
+    // errors, never a silent 'free') per the Remote EntitlementService invariant.
+    const entitlements = new EntitlementService({
+      findUserById: (userId) => memoryUserStore.findUserById(userId),
+    });
     capabilities.accounts = new AccountService({
       store: memoryAccountStore,
-      getPlan: async (userId) => (await memoryUserStore.findUserById(userId))?.plan ?? "free",
+      getPlan: (userId) => entitlements.getUserPlan(userId),
     });
     capabilities.trades = new TradeService({
       store: new MemoryTradeStore(),

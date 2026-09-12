@@ -38,20 +38,11 @@ export class AccountError extends Error {
   }
 }
 
-/** Remote EntitlementService plan quota (free: 1; pro/enterprise: unlimited). */
-export interface PlanQuota {
-  readonly plan: string;
-  readonly maxTradingAccounts: number;
-  readonly isUnlimited: boolean;
-}
-
-export function getPlanQuota(planInput: string | undefined): PlanQuota {
-  const plan = (planInput ?? "free").toLowerCase().trim();
-  if (plan === "pro" || plan === "enterprise") {
-    return { plan, maxTradingAccounts: Number.POSITIVE_INFINITY, isUnlimited: true };
-  }
-  return { plan: "free", maxTradingAccounts: 1, isUnlimited: false };
-}
+// Entitlement logic lives in the standalone entitlement module (inc 6,
+// Remote EntitlementService shape). Re-exported for existing consumers.
+export { getPlanQuota } from "../entitlements/entitlementService.js";
+export type { PlanQuota } from "../entitlements/entitlementService.js";
+import { getPlanQuota } from "../entitlements/entitlementService.js";
 
 export interface DetectServerResult {
   readonly mt_login: string;
@@ -173,37 +164,67 @@ export class AccountService {
     }
 
     // Entitlement quota (Remote free=1 / pro|enterprise=unlimited → 429).
-    // NOTE: check-then-create — the DB-transactional row-lock guarantee is
-    // Phase D (real PostgreSQL); not pretended here.
-    const plan = userPlan ?? (await this.deps.getPlan?.(userId)) ?? "free";
-    const quota = getPlanQuota(plan);
-    if (!quota.isUnlimited) {
-      const count = await this.deps.store.countByUser(userId);
-      if (count >= quota.maxTradingAccounts) {
-        throw new AccountError(
-          429,
-          "ACCOUNT_QUOTA_EXCEEDED",
-          `Trading account quota exceeded. Free plan allows up to ${quota.maxTradingAccounts} trading account.`,
-          { plan: quota.plan, currentCount: count, maxAllowed: quota.maxTradingAccounts },
-        );
+    // The check+create pair runs under a per-user mutex — the Remote-evidenced
+    // memory-path mechanism (repository userLocks) that makes concurrent
+    // creation deterministically [201, 429]. The DB-transactional row-lock
+    // guarantee is Phase D (real PostgreSQL); not pretended here.
+    return this.withUserQuotaLock(userId, async () => {
+      const plan = userPlan ?? (await this.deps.getPlan?.(userId)) ?? "free";
+      const quota = getPlanQuota(plan);
+      if (!quota.isUnlimited) {
+        const count = await this.deps.store.countByUser(userId);
+        if (count >= quota.maxTradingAccounts) {
+          throw new AccountError(
+            429,
+            "ACCOUNT_QUOTA_EXCEEDED",
+            `Trading account quota exceeded. Free plan allows up to ${quota.maxTradingAccounts} trading account.`,
+            {
+              messageKey: "errors.accounts.quotaExceeded", // Remote-verified (integration test)
+              plan: quota.plan,
+              currentCount: count,
+              maxAllowed: quota.maxTradingAccounts,
+            },
+          );
+        }
       }
-    }
 
-    return this.deps.store.create(
+      return this.deps.store.create(
+        userId,
+        {
+          provider,
+          platform: provider,
+          label,
+          accountNumber,
+          currency,
+          leverage,
+          timezone,
+          timezoneSource: timezone !== null ? "user_config" : "unknown",
+          status,
+        },
+        this.now(),
+      );
+    });
+  }
+
+  /**
+   * Per-user serialization of the quota check+create pair — the Remote
+   * memory-path mechanism (repository `userLocks` promise chain) that makes
+   * concurrent creation deterministically [201, 429]. Process-local only;
+   * the real-DB transaction + row lock is Phase D.
+   */
+  private readonly quotaLocks = new Map<string, Promise<void>>();
+
+  private withUserQuotaLock<T>(userId: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.quotaLocks.get(userId) ?? Promise.resolve();
+    const run = prev.then(fn);
+    this.quotaLocks.set(
       userId,
-      {
-        provider,
-        platform: provider,
-        label,
-        accountNumber,
-        currency,
-        leverage,
-        timezone,
-        timezoneSource: timezone !== null ? "user_config" : "unknown",
-        status,
-      },
-      this.now(),
+      run.then(
+        () => undefined,
+        () => undefined,
+      ),
     );
+    return run;
   }
 
   /** Static server-suggestion helper (Remote + PHP identical pure logic). */

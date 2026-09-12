@@ -133,6 +133,38 @@ test("plan quota: free = 1 (429 ACCOUNT_QUOTA_EXCEEDED with counts); pro = unlim
   assert.equal(getPlanQuota("free").maxTradingAccounts, 1);
 });
 
+test("quota: concurrent creation serializes to exactly one success (Remote Blocker B)", async () => {
+  const { svc } = makeService(); // owner on free plan
+  const results = await Promise.allSettled([
+    svc.createAccount(OWNER, { provider: "MANUAL", label: "Concurrent A" }),
+    svc.createAccount(OWNER, { provider: "MT4", label: "Concurrent B" }),
+    svc.createAccount(OWNER, { provider: "MT5", label: "Concurrent C" }),
+  ]);
+  const fulfilled = results.filter((r) => r.status === "fulfilled");
+  const rejected = results.filter((r) => r.status === "rejected");
+  assert.equal(fulfilled.length, 1); // exactly one account created
+  assert.equal(rejected.length, 2);
+  for (const r of rejected) {
+    const e = (r as PromiseRejectedResult).reason as AccountError;
+    assert.equal(e.status, 429);
+    assert.equal(e.code, "ACCOUNT_QUOTA_EXCEEDED");
+    assert.equal(e.details?.messageKey, "errors.accounts.quotaExceeded");
+  }
+  const list = await svc.listAccounts(OWNER);
+  assert.equal(list.length, 1);
+});
+
+test("quota: provider-bypass prevention — the limit counts across MANUAL/MT4/MT5", async () => {
+  const { svc } = makeService();
+  await svc.createAccount(OWNER, { provider: "MANUAL", label: "Manual" }); // 201-equivalent
+  for (const provider of ["MT4", "MT5"]) {
+    await assert.rejects(
+      svc.createAccount(OWNER, { provider, label: `${provider} bypass` }),
+      (e: unknown) => e instanceof AccountError && e.status === 429 && e.code === "ACCOUNT_QUOTA_EXCEEDED",
+    );
+  }
+});
+
 test("detect-server: static suggestion logic (Remote + PHP identical)", async () => {
   const { svc } = makeService();
   const r5 = svc.detectServer("5012345");
