@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import bcrypt from "bcryptjs";
 import { VeloraHasher } from "./hashing.js";
 import { needsRehash, identifyHash } from "@velora/domain";
+import { ARGON2ID_PARAMS } from "@velora/contracts";
 
 const PHP_BCRYPT_2Y_COST10 =
   "$2y$10$.vGA1O9wmRjrwAVXD98HNOgsNpDczlqm3Jq7KnEd1rVAGv3Fykk1a";
@@ -46,4 +47,22 @@ test("rehash policy: bcrypt → rehash; D-04 argon2id → no rehash", () => {
   assert.equal(needsRehash(PHP_BCRYPT_2Y_COST10), true);
   assert.equal(needsRehash("$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA"), false);
   assert.equal(needsRehash("$argon2id$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA"), true); // off-spec params
+});
+
+test("S3 GATE: generated Argon2id hash encodes the EXACT ADR-005 parameters (decoded, not just prefix-matched)", async () => {
+  const hasher = new VeloraHasher();
+  const h = await hasher.hash("exact-parameter-compliance-proof");
+  // Decode the actual generated hash's parameter segment: $argon2id$v=19$m=…,t=…,p=…$
+  const m = h.match(/^\$argon2id\$v=19\$m=(\d+),t=(\d+),p=(\d+)\$/);
+  assert.ok(m, `encoded argon2id parameter segment not found in: ${h.slice(0, 40)}…`);
+  assert.equal(m?.[1], "19456", "memory must be exactly 19456 KiB (ADR-005)");
+  assert.equal(m?.[2], "2", "iterations must be exactly 2 (ADR-005)");
+  assert.equal(m?.[3], "1", "parallelism must be exactly 1 (ADR-005)");
+  // The policy constants themselves are pinned to ADR-005 (defense in depth)
+  assert.equal(ARGON2ID_PARAMS.memoryKiB, 19456);
+  assert.equal(ARGON2ID_PARAMS.iterations, 2);
+  assert.equal(ARGON2ID_PARAMS.parallelism, 1);
+  // Verification + wrong-password rejection on the freshly generated hash
+  assert.equal(await hasher.verify("exact-parameter-compliance-proof", h), true);
+  assert.equal(await hasher.verify("wrong-password", h), false);
 });

@@ -96,3 +96,45 @@ test("unknown route → 404 error envelope with request id", async () => {
     assert.ok(body.error.requestId);
   });
 });
+
+test("CSP (S7): exact directive policy — strict, no weakening", async () => {
+  await withServer(healthy, async (base) => {
+    const res = await fetch(`${base}/health`);
+    const csp = res.headers.get("Content-Security-Policy")!;
+    const directives = csp.split(";").map((d) => d.trim());
+    assert.ok(directives.includes("default-src 'self'"));
+    assert.ok(directives.includes("style-src 'self'"));
+    assert.ok(directives.includes("img-src 'self' data: https:"));
+    assert.ok(directives.includes("object-src 'none'"));
+    assert.ok(directives.includes("base-uri 'self'"));
+    assert.ok(directives.includes("form-action 'self'"));
+    assert.ok(directives.includes("frame-ancestors 'none'"));
+    assert.ok(directives.includes("upgrade-insecure-requests"));
+    // script-src is EXACTLY 'self' + the nonce — no hosts, no wildcards
+    const nonce = csp.match(/'nonce-([A-Za-z0-9+/=]{24})'/)?.[1];
+    assert.ok(nonce, "24-char base64 nonce (16 bytes) must be present");
+    assert.ok(directives.includes(`script-src 'self' 'nonce-${nonce}'`));
+    // No weakening anywhere in the policy
+    assert.ok(!csp.includes("unsafe-inline"));
+    assert.ok(!csp.includes("unsafe-eval"));
+    assert.ok(!/script-src[^;]*\*/.test(csp), "no wildcard script sources");
+    // Security headers present on every response
+    assert.equal(res.headers.get("X-Content-Type-Options"), "nosniff");
+    assert.equal(res.headers.get("X-Frame-Options"), "DENY");
+    assert.equal(res.headers.get("Referrer-Policy"), "strict-origin-when-cross-origin");
+    assert.ok((res.headers.get("X-Request-Id") ?? "").length > 0);
+  });
+});
+
+test("ready (S8): readiness fails honestly when the durable probe fails", async () => {
+  await withServer({ database: async () => "fail" as const }, async (base) => {
+    const res = await fetch(`${base}/ready`);
+    assert.equal(res.status, 503);
+    const body = (await res.json()) as { data: { status: string; checks: { database: string } } };
+    assert.equal(body.data.status, "not_ready");
+    assert.equal(body.data.checks.database, "fail");
+    // and health never lies either
+    const health = await fetch(`${base}/health`);
+    assert.equal(health.status, 503);
+  });
+});
