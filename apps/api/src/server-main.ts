@@ -25,6 +25,8 @@ import { VeloraHasher } from "./auth/hashing.js";
 import { MemoryUserStore } from "./auth/memoryUserStore.js";
 import { AccountService } from "./accounts/accountService.js";
 import { MemoryAccountStore } from "./accounts/memoryAccountStore.js";
+import { TradeService } from "./trades/tradeService.js";
+import { MemoryTradeStore } from "./trades/memoryTradeStore.js";
 
 type PgClient = import("pg").Client;
 
@@ -105,7 +107,34 @@ async function main(): Promise<void> {
   }
 
   const dbProbe = makeDbProbe(boot.persistence.databaseUrl);
-  const app = createApp({ allowedOrigins: boot.allowedOrigins, checks: { database: dbProbe } });
+
+  // Dev wiring: in-memory adapters only (real-PostgreSQL stores = Phase D).
+  // Without a boot JWT secret every capability route stays fail-closed (503).
+  const memoryUserStore = new MemoryUserStore();
+  const memoryAccountStore = new MemoryAccountStore();
+  const capabilities: { auth?: AuthService; accounts?: AccountService; trades?: TradeService } = {};
+  if (boot.jwtSecret !== undefined) {
+    capabilities.auth = new AuthService({
+      store: memoryUserStore,
+      hasher: new VeloraHasher(),
+      jwt: JwtService.create(boot.jwtSecret),
+    });
+    capabilities.accounts = new AccountService({
+      store: memoryAccountStore,
+      getPlan: async (userId) => (await memoryUserStore.findUserById(userId))?.plan ?? "free",
+    });
+    capabilities.trades = new TradeService({
+      store: new MemoryTradeStore(),
+      getUserTimezone: async (userId) => (await memoryUserStore.findUserById(userId))?.timezone ?? "UTC",
+      verifyAccountOwnership: async (accountId, userId) =>
+        (await memoryAccountStore.findByIdForUser(accountId, userId)) !== null,
+    });
+  }
+  const app = createApp({
+    allowedOrigins: boot.allowedOrigins,
+    checks: { database: dbProbe },
+    ...capabilities,
+  });
   const bound = await listen(app, boot.port);
   console.log(
     JSON.stringify({

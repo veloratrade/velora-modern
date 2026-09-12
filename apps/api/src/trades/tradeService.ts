@@ -42,14 +42,16 @@ export interface TradeServiceDeps {
 }
 
 export interface TradeSearchQuery {
-  symbol?: string;
-  direction?: string;
-  from?: string;
-  to?: string;
-  q?: string; // Remote-verified dead param: accepted, never applied
-  order?: string; // Remote-verified dead param: accepted, never applied
-  page?: string;
-  limit?: string;
+  symbol?: string | undefined;
+  direction?: string | undefined;
+  from?: string | undefined;
+  to?: string | undefined;
+  /** Remote-verified dead param: accepted, never applied. */
+  q?: string | undefined;
+  /** Remote-verified dead param: accepted, never applied. */
+  order?: string | undefined;
+  page?: string | undefined;
+  limit?: string | undefined;
 }
 
 function invalid(field: string, messageKey: string, params?: Record<string, string | number>, message = "Invalid value."): never {

@@ -16,6 +16,7 @@ import {
 import { newSecurityContext, buildCsp, SECURITY_HEADERS, originAllowed } from "./security.js";
 import { AuthService, AuthError } from "../auth/authService.js";
 import { AccountService, AccountError } from "../accounts/accountService.js";
+import { TradeService, TradeError } from "../trades/tradeService.js";
 
 export interface HealthChecks {
   database(): Promise<"ok" | "fail">;
@@ -28,6 +29,8 @@ export interface ApiConfig {
   readonly auth?: AuthService;
   /** Phase C accounts capability. Absent → account routes fail closed (503). */
   readonly accounts?: AccountService;
+  /** Phase C trades capability (increment 3). Absent → trade routes fail closed (503). */
+  readonly trades?: TradeService;
 }
 
 type RouteResult = { status: number; body: unknown; headers?: Record<string, string> };
@@ -404,6 +407,110 @@ async function route(req: IncomingMessage, config: ApiConfig, sec: { requestId: 
       const id = decodeURIComponent(path.split("/")[4] ?? "");
       const result = await accounts.deleteAccount(id, claims.sub);
       return { status: 200, body: ok(result) };
+    });
+  }
+
+  // ---- Trades (Phase C increment 3; ADR-002 ledger) ----------------------
+  const tradesRoute = (fn: (trades: TradeService, claims: { sub: string }) => Promise<RouteResult>): Promise<RouteResult> => {
+    if (config.auth === undefined || config.trades === undefined) {
+      return Promise.resolve({
+        status: 503,
+        body: fail("SERVICE_UNAVAILABLE", "trades not configured", sec.requestId),
+      });
+    }
+    const claims = authenticateRequest(req, config.auth);
+    if (claims === null) {
+      return Promise.resolve({
+        status: 401,
+        body: fail("UNAUTHENTICATED", "Unauthenticated.", sec.requestId),
+      });
+    }
+    return fn(config.trades, claims).catch((err: unknown) => {
+      if (err instanceof TradeError) {
+        return { status: err.status, body: fail(err.code, err.message, sec.requestId, err.details) };
+      }
+      if (err instanceof AuthError) {
+        return { status: err.status, body: fail(err.code, err.message, sec.requestId, err.details) };
+      }
+      throw err;
+    });
+  };
+
+  // NOTE: /trades/symbols and /trades/exits/:exitId are matched BEFORE the
+  // generic /trades/:id pattern (PHP route-order evidence, api/index.php).
+  if (method === "GET" && path === "/api/v1/trades") {
+    return tradesRoute(async (trades, claims) => {
+      const q = url.searchParams;
+      const result = await trades.searchTrades(claims.sub, {
+        symbol: q.get("symbol") ?? undefined,
+        direction: q.get("direction") ?? undefined,
+        from: q.get("from") ?? undefined,
+        to: q.get("to") ?? undefined,
+        q: q.get("q") ?? undefined, // Remote-verified dead param: accepted, not applied
+        order: q.get("order") ?? undefined, // ditto
+        page: q.get("page") ?? undefined,
+        limit: q.get("limit") ?? undefined,
+      });
+      return { status: 200, body: ok(result) };
+    });
+  }
+
+  if (method === "POST" && path === "/api/v1/trades") {
+    return tradesRoute(async (trades, claims) => {
+      const body = await parseJsonBody(req);
+      const trade = await trades.createTrade(claims.sub, body);
+      return { status: 201, body: ok(trade) };
+    });
+  }
+
+  if (method === "GET" && path === "/api/v1/trades/symbols") {
+    return tradesRoute(async (trades, claims) => {
+      return { status: 200, body: ok(await trades.listSymbols(claims.sub)) };
+    });
+  }
+
+  if (method === "DELETE" && /^\/api\/v1\/trades\/exits\/[^/]+$/.test(path)) {
+    return tradesRoute(async (trades, claims) => {
+      const exitId = decodeURIComponent(path.split("/")[5] ?? "");
+      const result = await trades.deleteExit(exitId, claims.sub);
+      return { status: 200, body: ok(result) };
+    });
+  }
+
+  if (method === "GET" && /^\/api\/v1\/trades\/[^/]+$/.test(path)) {
+    return tradesRoute(async (trades, claims) => {
+      const id = decodeURIComponent(path.split("/")[4] ?? "");
+      return { status: 200, body: ok(await trades.getTrade(id, claims.sub)) };
+    });
+  }
+
+  if (method === "PUT" && /^\/api\/v1\/trades\/[^/]+$/.test(path)) {
+    return tradesRoute(async (trades, claims) => {
+      const id = decodeURIComponent(path.split("/")[4] ?? "");
+      const body = await parseJsonBody(req);
+      return { status: 200, body: ok(await trades.updateTrade(id, claims.sub, body)) };
+    });
+  }
+
+  if (method === "DELETE" && /^\/api\/v1\/trades\/[^/]+$/.test(path)) {
+    return tradesRoute(async (trades, claims) => {
+      const id = decodeURIComponent(path.split("/")[4] ?? "");
+      return { status: 200, body: ok(await trades.deleteTrade(id, claims.sub)) };
+    });
+  }
+
+  if (method === "GET" && /^\/api\/v1\/trades\/[^/]+\/exits$/.test(path)) {
+    return tradesRoute(async (trades, claims) => {
+      const id = decodeURIComponent(path.split("/")[4] ?? "");
+      return { status: 200, body: ok(await trades.listExits(id, claims.sub)) };
+    });
+  }
+
+  if (method === "POST" && /^\/api\/v1\/trades\/[^/]+\/exits$/.test(path)) {
+    return tradesRoute(async (trades, claims) => {
+      const id = decodeURIComponent(path.split("/")[4] ?? "");
+      const body = await parseJsonBody(req);
+      return { status: 201, body: ok(await trades.createExit(id, claims.sub, body)) };
     });
   }
 
