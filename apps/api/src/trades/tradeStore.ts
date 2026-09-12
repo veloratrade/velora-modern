@@ -80,12 +80,19 @@ export interface StoredTradeEvent {
   readonly at: string;
 }
 
+/** Sort keys whitelisted from PHP evidence (open_time|profit_loss|close_time). */
+export type TradeSortKey = "open_time" | "close_time" | "profit_loss";
+
 export interface TradeSearchFilter {
   readonly userId: string;
-  readonly symbol?: string; // contains, case-insensitive (Remote evidence)
-  readonly direction?: string; // exact; non buy/sell simply matches nothing
-  readonly from?: string; // ISO instant — openAtUtc >=
-  readonly to?: string; // ISO instant — closeAtUtc <=
+  readonly symbol?: string | undefined; // contains, case-insensitive (Remote evidence)
+  readonly direction?: string | undefined; // exact; non buy/sell simply matches nothing
+  readonly from?: string | undefined; // ISO instant — openAtUtc >=
+  readonly to?: string | undefined; // ISO instant — closeAtUtc <=
+  /** Journal search (PHP evidence): case-insensitive contains across symbol | strategy | notes. */
+  readonly q?: string | undefined;
+  /** Sort key (service-whitelisted); default open_time (Remote lineage). */
+  readonly sort?: TradeSortKey | undefined;
 }
 
 /** Store-level failure modes mapped by the service to HTTP semantics. */

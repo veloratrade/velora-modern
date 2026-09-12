@@ -91,7 +91,22 @@ export class MemoryTradeStore implements TradeStore {
       const to = Date.parse(filter.to);
       list = list.filter((t) => Date.parse(t.closeAtUtc) <= to);
     }
-    list.sort((a, b) => Date.parse(b.openAtUtc) - Date.parse(a.openAtUtc) || Number(a.id) - Number(b.id));
+    if (filter.q !== undefined) {
+      // Journal search (PHP evidence): symbol | strategy | notes, contains.
+      const needle = filter.q.toUpperCase();
+      list = list.filter(
+        (t) =>
+          t.symbol.toUpperCase().includes(needle) ||
+          (t.strategy ?? "").toUpperCase().includes(needle) ||
+          (t.notes ?? "").toUpperCase().includes(needle),
+      );
+    }
+    const byOpen = (t: { openAtUtc: string }): number => Date.parse(t.openAtUtc);
+    const byClose = (t: { closeAtUtc: string }): number => Date.parse(t.closeAtUtc);
+    const byPnl = (t: { netPnl: string | null }): number => Number(t.netPnl ?? "0");
+    const key = filter.sort ?? "open_time";
+    const cmpFn = key === "close_time" ? byClose : key === "profit_loss" ? byPnl : byOpen;
+    list.sort((a, b) => cmpFn(b) - cmpFn(a) || Number(a.id) - Number(b.id)); // deterministic id tiebreak
     const total = list.length;
     const items = list.slice((page - 1) * limit, (page - 1) * limit + limit).map((t) => ({ ...t }));
     return { items, total };

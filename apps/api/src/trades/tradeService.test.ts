@@ -307,7 +307,7 @@ test("exits: cross-user exit access is a non-disclosing 404", async () => {
   assert.ok(otherList instanceof TradeError && otherList.status === 404);
 });
 
-test("search: filters, ordering, pagination; q/order accepted but not applied (Remote dead params)", async () => {
+test("search: filters, ordering, pagination (q/order covered in dedicated tests)", async () => {
   const { svc } = makeService();
   const a = (await svc.createTrade(OWNER, { ...VECTOR_A, symbol: "EURUSD", openTime: "2026-09-08 10:00:00", closeTime: "2026-09-08 12:00:00" })) as Record<string, unknown>;
   const b = (await svc.createTrade(OWNER, { ...VECTOR_A, symbol: "GBPUSD", direction: "sell", entryPrice: "1.2800", exitPrice: "1.2750", openTime: "2026-09-10 10:00:00", closeTime: "2026-09-10 12:00:00" })) as Record<string, unknown>;
@@ -329,10 +329,148 @@ test("search: filters, ordering, pagination; q/order accepted but not applied (R
   assert.deepEqual(paged.pagination, { page: 2, limit: 1, total: 2, totalPages: 2 });
   const clamped = (await svc.searchTrades(OWNER, { limit: "500" })) as { pagination: Record<string, number> };
   assert.equal(clamped.pagination.limit, 200); // PHP clamp
-  // dead params accepted, ignored
-  const dead = (await svc.searchTrades(OWNER, { q: "EURUSD", order: "close_time" })) as { items: unknown[] };
-  assert.equal(dead.items.length, 2);
   await expectTradeError(svc.searchTrades(OWNER, { from: "garbage" }), 400, "VALIDATION_FAILED", { field: "from" });
+});
+
+test("journal search q (PHP evidence): contains across symbol | strategy | notes, case-insensitive, trimmed", async () => {
+  const { svc } = makeService();
+  await svc.createTrade(OWNER, { ...VECTOR_A, symbol: "EURUSD", strategyTag: "Breakout", notes: "clean London session" });
+  await svc.createTrade(OWNER, { ...VECTOR_A, symbol: "XAUUSD", strategyTag: "Pullback", notes: "gold reversal" });
+  await svc.createTrade(OTHER, { ...VECTOR_A, symbol: "EURUSD", notes: "other user EURUSD" }); // never visible
+
+  const bySymbol = (await svc.searchTrades(OWNER, { q: "eurusd" })) as { items: unknown[] };
+  assert.equal(bySymbol.items.length, 1); // case-insensitive symbol match
+  const byStrategy = (await svc.searchTrades(OWNER, { q: "pull" })) as { items: unknown[] };
+  assert.equal(byStrategy.items.length, 1); // strategy contains
+  const byNotes = (await svc.searchTrades(OWNER, { q: "LONDON SESSION" })) as { items: unknown[] };
+  assert.equal(byNotes.items.length, 1); // notes contains, case-insensitive
+  const none = (await svc.searchTrades(OWNER, { q: "no-such-text" })) as { items: unknown[] };
+  assert.equal(none.items.length, 0);
+  const trimmed = (await svc.searchTrades(OWNER, { q: "   gold   " })) as { items: unknown[] };
+  assert.equal(trimmed.items.length, 1); // PHP controller trims
+  const emptyQ = (await svc.searchTrades(OWNER, { q: "   " })) as { items: unknown[] };
+  assert.equal(emptyQ.items.length, 2); // empty-after-trim = no filter (PHP !empty)
+  // q composes with other filters
+  const composed = (await svc.searchTrades(OWNER, { q: "gold", direction: "buy" })) as { items: unknown[] };
+  assert.equal(composed.items.length, 1);
+  // emotion is NOT in the PHP q scope (symbol | strategy_tag | notes only)
+  await svc.createTrade(OWNER, { ...VECTOR_A, symbol: "GBPJPY", notes: null, strategyTag: null, emotionalScore: 5 });
+  const byEmotion = (await svc.searchTrades(OWNER, { q: "5" })) as { items: unknown[] };
+  assert.equal(byEmotion.items.length, 0);
+});
+
+test("search order: PHP whitelist open_time|close_time|profit_loss; default/unknown → open_time", async () => {
+  const { svc } = makeService();
+  // trade a: opens first, loses; trade b: opens later, wins
+  const a = (await svc.createTrade(OWNER, {
+    symbol: "EURUSD", direction: "sell", entryPrice: "1.3000", exitPrice: "1.3050", volume: "0.5",
+    commission: "3.50", swap: "0.50", contractSize: "100000",
+    openTime: "2026-09-08 10:00:00", closeTime: "2026-09-08 12:00:00",
+  })) as Record<string, unknown>; // net = -254.00 (Remote sell-loser vector)
+  const b = (await svc.createTrade(OWNER, {
+    symbol: "XAUUSD", direction: "buy", entryPrice: "100.00", exitPrice: "105.00", volume: "2.0",
+    contractSize: "10", openTime: "2026-09-10 10:00:00", closeTime: "2026-09-10 09:00:00".replace("09", "11"),
+  })) as Record<string, unknown>; // net = +100.00, opens later, closes EARLIER than a closes? no: closes 11:00 on the 10th
+
+  const open = (await svc.searchTrades(OWNER, {})) as { items: Array<Record<string, unknown>> };
+  assert.deepEqual(open.items.map((x) => x.id), [b.id, a.id]); // default open_time DESC (Remote lineage)
+  const explicitOpen = (await svc.searchTrades(OWNER, { order: "open_time" })) as { items: Array<Record<string, unknown>> };
+  assert.deepEqual(explicitOpen.items.map((x) => x.id), [b.id, a.id]);
+  const byClose = (await svc.searchTrades(OWNER, { order: "close_time" })) as { items: Array<Record<string, unknown>> };
+  assert.deepEqual(byClose.items.map((x) => x.id), [b.id, a.id]); // b closes later (Sep 10) than a (Sep 8)
+  const byPnl = (await svc.searchTrades(OWNER, { order: "profit_loss" })) as { items: Array<Record<string, unknown>> };
+  assert.deepEqual(byPnl.items.map((x) => x.id), [b.id, a.id]); // +100 before -254
+  const unknown = (await svc.searchTrades(OWNER, { order: "total_bogus" })) as { items: Array<Record<string, unknown>> };
+  assert.deepEqual(unknown.items.map((x) => x.id), [b.id, a.id]); // unknown → default open_time (PHP: default branch)
+});
+
+test("journal field ownership: every FINANCIAL_IMMUTABLE field is 403; SYSTEM_DERIVED rejected on create", async () => {
+  const { svc } = makeService();
+  const t = (await svc.createTrade(OWNER, VECTOR_A)) as Record<string, unknown>;
+  const id = t.id as string;
+  for (const field of [
+    "symbol", "direction", "entryPrice", "exitPrice", "volume", "contractSize",
+    "commission", "swap", "stopLoss", "takeProfit", "accountId", "openTime", "closeTime",
+  ]) {
+    await expectTradeError(
+      svc.updateTrade(id, OWNER, { [field]: "1.0" }),
+      403, "FORBIDDEN", { messageKey: "errors.trades.financialImmutable" },
+    );
+  }
+  // derived/provenance fields are not accepted journal inputs at all (ignored on PUT —
+  // the journaling patch only reads strategyTag/emotionalScore/notes; system fields
+  // like profitLoss/version are never writable through the journal path)
+  const untouched = (await svc.updateTrade(id, OWNER, { profitLoss: "999", rMultiple: "999", source: "metaapi" } as Record<string, unknown>)) as Record<string, unknown>;
+  assert.equal(untouched.profitLoss, "493.5");
+  assert.equal(untouched.rMultiple, "1.645");
+  assert.equal(untouched.source, "manual");
+});
+
+test("journal semantics: null/empty clear, explicit values set; emotion range enforced on edit", async () => {
+  const { svc } = makeService();
+  const t = (await svc.createTrade(OWNER, VECTOR_A)) as Record<string, unknown>;
+  const id = t.id as string;
+  const cleared = (await svc.updateTrade(id, OWNER, { strategyTag: null, notes: "", emotionalScore: null })) as Record<string, unknown>;
+  assert.equal(cleared.strategyTag, null);
+  assert.equal(cleared.notes, null);
+  assert.equal(cleared.emotionalScore, null);
+  const set = (await svc.updateTrade(id, OWNER, { strategyTag: "Breakout", notes: "ok", emotionalScore: 3 })) as Record<string, unknown>;
+  assert.equal(set.strategyTag, "Breakout");
+  assert.equal(set.notes, "ok");
+  assert.equal(set.emotionalScore, 3);
+  await expectTradeError(svc.updateTrade(id, OWNER, { emotionalScore: 0 }), 400, "VALIDATION_FAILED", { field: "emotionalScore", messageKey: "errors.validation.range" });
+  await expectTradeError(svc.updateTrade(id, OWNER, { strategyTag: "x".repeat(65) }), 400, "VALIDATION_FAILED", { field: "strategyTag", messageKey: "errors.validation.maxLength" });
+  await expectTradeError(svc.updateTrade(id, OWNER, { notes: "x".repeat(5001) }), 400, "VALIDATION_FAILED", { field: "notes", messageKey: "errors.validation.maxLength" });
+});
+
+test("journal integration script (authorization step 8): create → read → edit → immutability → events → replay → tombstone → 409", async () => {
+  const { svc, store } = makeService();
+  // 1. create
+  const t = (await svc.createTrade(OWNER, VECTOR_A)) as Record<string, unknown>;
+  const id = t.id as string;
+  // 2. read journal state
+  const read = (await svc.getTrade(id, OWNER)) as Record<string, unknown>;
+  assert.equal(read.strategyTag, "Breakout");
+  assert.equal(read.notes, "Clean H1 breakout trade");
+  assert.equal(read.emotionalScore, 4);
+  // 3. edit permitted journal metadata
+  const edited = (await svc.updateTrade(id, OWNER, { notes: "journal edit", emotionalScore: 2 })) as Record<string, unknown>;
+  assert.equal(edited.notes, "journal edit");
+  assert.equal(edited.emotionalScore, 2);
+  // 4. financial fields remain unchanged
+  assert.equal(edited.entryPrice, "1.1");
+  assert.equal(edited.exitPrice, "1.105");
+  assert.equal(edited.volume, "1");
+  assert.equal(edited.profitLoss, "493.5");
+  assert.equal(edited.rMultiple, "1.645");
+  // 5. event history contains the journal event
+  const journalEvents = store.eventLog().filter((e) => e.type === "JOURNALING_EDITED");
+  assert.equal(journalEvents.length, 1);
+  assert.equal(journalEvents[0]!.actor, "user");
+  // 6+7. replay: the projection is derivable from the event stream (memory adapter)
+  const { fold } = await import("@velora/domain");
+  const replayEvents = store.eventLog().map((e, i) => {
+    const payload = e.payload as { event: import("@velora/domain").LedgerEvent };
+    const ev = { ...payload.event, id: `replay-${i}` };
+    if (ev.type === "TRADE_CREATED") ev.trade = { ...ev.trade, id };
+    return ev as import("@velora/domain").LedgerEvent;
+  });
+  const { state } = fold(replayEvents);
+  assert.equal(state!.journaling.notes, "journal edit");
+  assert.equal(state!.journaling.emotion, "2");
+  assert.equal(state!.financial.entryPrice, "1.10000000"); // financial facts intact through replay
+  assert.equal(state!.version, 1);
+  // 8. tombstone
+  assert.deepEqual(await svc.deleteTrade(id, OWNER), { deleted: true });
+  // 9. journal becomes non-readable (tombstoned ≡ missing)
+  await expectTradeError(svc.getTrade(id, OWNER), 404, "NOT_FOUND");
+  await expectTradeError(svc.updateTrade(id, OWNER, { notes: "zombie" }), 404, "NOT_FOUND");
+  const search = (await svc.searchTrades(OWNER, { q: "journal edit" })) as { items: unknown[] };
+  assert.equal(search.items.length, 0); // tombstoned journal data is not searchable
+  // 10. stale version → 409 (on a second trade; the first is tombstoned)
+  const t2 = (await svc.createTrade(OWNER, VECTOR_A)) as Record<string, unknown>;
+  await svc.updateTrade(t2.id as string, OWNER, { notes: "v1" });
+  await expectTradeError(svc.updateTrade(t2.id as string, OWNER, { notes: "stale", version: 0 }), 409, "CONFLICT");
 });
 
 test("symbols: distinct + alphabetical (PHP evidence)", async () => {

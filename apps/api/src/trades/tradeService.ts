@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { computePnl, applyEvent, VersionConflictError, TombstoneError, OverAllocationError, type LedgerEvent, type TradeState } from "@velora/domain";
 import * as D from "@velora/domain";
 import {
-  type TradeStore, type TradeRecord, type NewTrade, type NewTradeExit, type TradeExitType, type StoredTradeEvent,
+  type TradeStore, type TradeRecord, type NewTrade, type NewTradeExit, type TradeExitType, type StoredTradeEvent, type TradeSearchFilter,
   TradeVersionConflictError, TradeOverAllocationError, TradeStoreError,
 } from "./tradeStore.js";
 
@@ -371,18 +371,30 @@ export class TradeService {
     const rawLimit = Math.floor(Number(query.limit ?? "20")) || 20;
     const limit = Math.max(1, Math.min(200, rawLimit)); // PHP clamp (documented divergence from Remote)
 
-    const filter: { userId: string; symbol?: string; direction?: string; from?: string; to?: string } = { userId };
-    if (typeof query.symbol === "string" && query.symbol !== "") filter.symbol = query.symbol;
-    if (typeof query.direction === "string" && query.direction !== "") filter.direction = query.direction;
-    if (typeof query.from === "string" && query.from !== "") {
-      const t = interpretDatetime(query.from, "UTC", "from"); // bound must be an instant; naive → UTC
-      filter.from = t.iso;
-    }
-    if (typeof query.to === "string" && query.to !== "") {
-      const t = interpretDatetime(query.to, "UTC", "to");
-      filter.to = t.iso;
-    }
-    // query.q / query.order: accepted, never applied — Remote-verified dead params.
+    // PHP controller evidence: query params are trimmed; empty-after-trim = no filter.
+    const trimmed = (v: string | undefined): string | undefined => {
+      const t = v?.trim();
+      return t === "" || t === undefined ? undefined : t;
+    };
+    const from = typeof query.from === "string" && query.from.trim() !== ""
+      ? interpretDatetime(query.from, "UTC", "from").iso // bound must be an instant; naive → UTC
+      : undefined;
+    const to = typeof query.to === "string" && query.to.trim() !== ""
+      ? interpretDatetime(query.to, "UTC", "to").iso
+      : undefined;
+    // PHP-evidenced order whitelist (open_time|profit_loss|close_time);
+    // absent/unknown → open_time (Remote-lineage default; PHP defaults to
+    // close_time — documented difference).
+    const order = trimmed(query.order);
+    const filter: TradeSearchFilter = {
+      userId,
+      symbol: trimmed(query.symbol),
+      direction: trimmed(query.direction),
+      q: trimmed(query.q), // journal search (PHP): symbol | strategy | notes
+      from,
+      to,
+      sort: order === "close_time" || order === "profit_loss" || order === "open_time" ? order : "open_time",
+    };
 
     const { items, total } = await this.deps.store.searchTrades(filter, page, limit);
     return {
