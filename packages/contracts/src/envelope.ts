@@ -21,6 +21,7 @@ export const errorEnvelope = z.object({
     code: z.string(),
     message: z.string(),
     requestId: z.string().optional(),
+    details: z.record(z.string()).optional(),
   }),
   timestamp: z.string(),
 });
@@ -35,7 +36,12 @@ export type SuccessEnvelope<T> = {
 export type ErrorEnvelope = {
   status: "error";
   data: null;
-  error: { code: string; message: string; requestId?: string };
+  error: {
+    code: string;
+    message: string;
+    requestId?: string;
+    details?: Record<string, string>;
+  };
   timestamp: string;
 };
 
@@ -47,12 +53,18 @@ export function fail(
   code: string,
   message: string,
   requestId?: string,
+  details?: Record<string, string>,
   now: Date = new Date(),
 ): ErrorEnvelope {
   return {
     status: "error",
     data: null,
-    error: { code, message, ...(requestId !== undefined ? { requestId } : {}) },
+    error: {
+      code,
+      message,
+      ...(requestId !== undefined ? { requestId } : {}),
+      ...(details !== undefined ? { details } : {}),
+    },
     timestamp: phpUtcTimestamp(now),
   };
 }

@@ -67,7 +67,7 @@ test("envelope shape (C-10: PHP 4-field envelope, Phase C port)", () => {
     error: null,
     timestamp: "2026-09-12T10:00:00+00:00", // PHP gmdate('c') format (OD-5)
   });
-  const error = fail("NOT_FOUND", "x", "req-1", new Date("2026-09-12T10:00:00.500Z"));
+  const error = fail("NOT_FOUND", "x", "req-1", undefined, new Date("2026-09-12T10:00:00.500Z"));
   assert.equal(error.status, "error");
   assert.equal(error.data, null);
   assert.equal(error.error.code, "NOT_FOUND");
