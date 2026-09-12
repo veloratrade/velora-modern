@@ -56,6 +56,7 @@ export const LEDGER_EVENTS = [
   "FINANCIAL_CORRECTED", // by sync/webhook (SYNC_WINS_FINANCIAL)
   "JOURNALING_EDITED", // by user (USER_WINS_JOURNALING)
   "EXIT_RECORDED",
+  "EXIT_CANCELLED", // exit tombstone (ADR-002: exit deletion is a mutation event)
   "TOMBSTONE_SET", // soft delete (immutable history preserved)
   "ADMIN_CORRECTION",
   "QUARANTINE_RAISED",
