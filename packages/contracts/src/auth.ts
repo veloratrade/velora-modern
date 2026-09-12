@@ -23,6 +23,8 @@ export const registerRequest = z.object({
   email: emailSchema,
   password: passwordSchema,
   locale: z.enum(["fa", "en"]).optional(),
+  fullName: z.string().trim().max(100).optional(),
+  timezone: z.string().trim().max(64).optional(),
 });
 
 export const loginRequest = z.object({
