@@ -139,6 +139,25 @@ test("TRADES HTTP: fail closed (503) when the capability is unconfigured", async
   }
 });
 
+test("TRADES HTTP: create WITHOUT stop-loss → rMultiple null over the wire (inc 8 lineage parity)", async () => {
+  // PHP/Remote riskAmount: no SL → null risk → r_multiple null (JSON null).
+  await withServer(async (base, { ownerToken }) => {
+    const auth = { "Content-Type": "application/json", Authorization: `Bearer ${ownerToken}` };
+    const create = await fetch(`${base}/api/v1/trades`, {
+      method: "POST", headers: auth,
+      body: JSON.stringify({ ...VECTOR_A, stopLoss: undefined }),
+    });
+    assert.equal(create.status, 201);
+    const t = (await create.json() as Envelope<Record<string, unknown>>).data;
+    assert.equal(t.profitLoss, "493.5"); // PnL still computed and stored
+    assert.equal(t.rMultiple, null);     // undefined risk — lineage parity (inc 8)
+    // read-back round-trip preserves the null (nullable column since 0001)
+    const read = await fetch(`${base}/api/v1/trades/${t.id}`, { headers: auth });
+    assert.equal(read.status, 200);
+    assert.equal((await read.json() as Envelope<Record<string, unknown>>).data.rMultiple, null);
+  });
+});
+
 test("TRADES HTTP: owner journey — create (vector A), read, search, symbols", async () => {
   await withServer(async (base, { ownerToken }) => {
     const auth = { "Content-Type": "application/json", Authorization: `Bearer ${ownerToken}` };

@@ -65,6 +65,42 @@ async function expectTradeError(p: Promise<unknown>, status: number, code: strin
   );
 }
 
+test("create: NO stop-loss → rMultiple null, PnL still computed (lineage parity, inc 8)", async () => {
+  // PHP PnlCalculator::riskAmount + Remote riskAmount: no SL → null risk →
+  // r_multiple NULL (serialized as JSON null; DB column nullable since 0001).
+  // Inc-8 inventory §3: the former Local fallback (risk = |exit−entry|)
+  // traced to an unimplemented PHP docblock and is removed.
+  const { svc } = makeService();
+  const t = (await svc.createTrade(OWNER, {
+    ...VECTOR_A, stopLoss: undefined,
+  })) as Record<string, unknown>;
+  assert.equal(t.profitLoss, "493.5"); // net unchanged — gross − commission − swap
+  assert.equal(t.rMultiple, null);
+});
+
+test("create: WRONG-SIDE stop-loss (buy, SL above entry) → rMultiple null (lineage parity, inc 8)", async () => {
+  // PHP: directional delta (buy: entry − SL) <= 0 → null risk ("SL on wrong
+  // side — undefined risk"); Remote: identical. gross/net still computed.
+  const { svc } = makeService();
+  const t = (await svc.createTrade(OWNER, {
+    ...VECTOR_A, stopLoss: "1.2000",
+  })) as Record<string, unknown>;
+  assert.equal(t.profitLoss, "493.5");
+  assert.equal(t.rMultiple, null);
+});
+
+test("create: zero stop-loss string → rejected (PHP MUST_BE_POSITIVE parity; engine zero-SL branch is defensive-only)", async () => {
+  // PHP TradeService.php:100 rejects stopLoss <= 0 at validation — Local is
+  // the exact port (inc 3). The engine's zero-SL → no-stop-loss branch
+  // (PHP bccomp === 0 → null) is defensive parity below the validation layer
+  // and is pinned at the engine level by VECTOR-8c.
+  const { svc } = makeService();
+  await expectTradeError(
+    svc.createTrade(OWNER, { ...VECTOR_A, stopLoss: "0" } as Record<string, unknown>),
+    400, "VALIDATION_FAILED", { field: "stopLoss", messageKey: "errors.validation.positive" },
+  );
+});
+
 test("create: valid manual trade — vector A PnL via the Local engine, trimZeros serialization", async () => {
   const { svc } = makeService();
   const t = (await svc.createTrade(OWNER, VECTOR_A)) as Record<string, unknown>;

@@ -14,6 +14,12 @@
 // Vector sources: Remote tests/unit/financialParity.test.ts @
 // remote-snapshot-99e024c829db (expected values cross-checked by independent
 // arithmetic in the comments of this file).
+//
+// Inc 8 fixture resolution: PHP api/src/Trades/PnlCalculator.php read from
+// source — net serialized bcadd(net, 0, 2) TRUNCATES; r_multiple =
+// bcdiv(net8, risk8, 8) serialized bcadd(r, 0, 4); riskAmount: no SL / SL 0 /
+// wrong side → null (directional delta). The fixture-pending classifications
+// below are resolved accordingly; intentional ADR-001 divergences preserved.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { computePnl } from "./pnl.js";
@@ -67,27 +73,37 @@ test("VECTOR C (Remote C — fractional contract size): gross/net VERIFIED; rMul
   assert.equal(r.grossPnl, "333.33"); // VERIFIED
   assert.equal(r.netPnl, "331.58");   // VERIFIED
   // rMultiple DIFFERS BY DESIGN: Local divides the ADR-001 scale-2 money values
-  // (331.58 / 133.33 = 2.48691217), Remote divides scale-8 intermediates
-  // (331.58333330 / 133.33333332 = 2.48687500). Local behavior is pinned by
-  // VECTOR-4 (rounding-mode divergence) and ADR-001; the PHP-observable
-  // serialization is FIXTURE PENDING (OD-3 fixture capture).
+  // (331.58 / 133.33 = 2.48691217); BOTH lineages divide scale-8 intermediates
+  // (331.58333330 / 133.33333332 = 2.48687500 — Remote unit test; PHP
+  // bcdiv(net8, risk8, 8), inc-8 source read). Local behavior is pinned by
+  // VECTOR-4 (rounding-mode divergence) and ADR-001 — PRESERVED (inc-8
+  // inventory §4). Lineage serialization (both): fixed scale 4 ("2.4868");
+  // Local external precision remains an OD-3 open item (trimZeros).
   assert.equal(r.rMultiple, "2.48691217"); // Local: scale-2 money ÷ scale-2 risk
-  assert.notEqual(r.rMultiple, "2.48687500"); // Remote scale-8 ÷ scale-8 — explicit divergence record
+  assert.notEqual(r.rMultiple, "2.48687500"); // lineage scale-8 ÷ scale-8 — explicit divergence record
 });
 
 test("VECTOR D (Remote D — fractional commission/swap): DOCUMENTED DIFFERENCE on net (Remote half-up output vs PHP-parity truncation)", () => {
   // gross = 5.00×1.5 = 7.50 (both)
   // net   = 7.50−2.34567891−1.23456789 = 3.91975320 exactly
   //   Local parity mode truncates to 3.91 (bcmath semantics — ADR-001)
-  //   Remote emits toFixed(2) → 3.92 (half-up at output)
-  // PHP bcmath truncates → Local is the PHP-faithful value. FIXTURE PENDING
-  // on the PHP endpoint serialization before freezing the external contract.
+  //   Remote emits toFixed(2) → 3.92 (rounds at output)
+  // INC 8: FIXTURE RESOLVED from PHP source — PnlCalculator::calculate
+  // serializes net via bcadd($net, '0', 2), which TRUNCATES → "3.91".
+  // Local parity is the PHP-faithful value (VERIFIED); Remote's 3.92 is the
+  // Remote-side divergence. New computations (trades service) use half-even
+  // per ADR-001 → 3.92, pinned below (documented mode divergence).
   const r = run({
     direction: "buy", entryPrice: "100.00", exitPrice: "105.00", volume: "1.5",
     contractSize: "1", commission: "2.34567891", swap: "1.23456789", stopLoss: "90.00",
   });
   assert.equal(r.grossPnl, "7.50");  // VERIFIED
-  assert.equal(r.netPnl, "3.91");    // DOCUMENTED DIFFERENCE (Remote: 3.92)
+  assert.equal(r.netPnl, "3.91");    // VERIFIED vs PHP bcadd truncation (Remote: 3.92)
+  const rNew = computePnl({
+    direction: "buy", entryPrice: "100.00", exitPrice: "105.00", volume: "1.5",
+    contractSize: "1", commission: "2.34567891", swap: "1.23456789", stopLoss: "90.00",
+  }, "half-even");
+  assert.ok(rNew.kind === "ok" && rNew.netPnl === "3.92"); // ADR-001 new-mode (half-even) — documented divergence vs PHP
 });
 
 test("VECTOR E (Remote E — repeating r-multiple 10/3): VERIFIED — same value at Local scale 8", () => {
@@ -113,27 +129,31 @@ test("VECTOR F (Remote F — partial-exit cost allocation, ratio 0.5): VERIFIED"
   assert.equal(r.netPnl, "244.00");   // Remote expected '244.00' — VERIFIED
 });
 
-test("NULL-RISK SEMANTICS (Remote): DOCUMENTED DIFFERENCE — Local keeps the PHP-verified fallback, records the wrong-side gap", () => {
-  // Remote: no SL → rMultiple null. Local/PHP: no SL → risk falls back to the
-  // initial |exit−entry| delta (verified PHP behavior; pinned by VECTOR-2).
+test("NULL-RISK SEMANTICS: RESOLVED (inc 8) — no SL and wrong-side SL → undefined risk (both lineages)", () => {
+  // INC 8 FIXTURE RESOLUTION (inventory §2/§3): PHP riskAmount returns null
+  // for a missing SL (the "initial delta fallback" existed only in an
+  // unimplemented PHP docblock) and for a wrong-side SL (directional
+  // delta <= 0). Remote riskAmount: identical. gross/net stay defined.
   const noSl = computePnl(
     { direction: "buy", entryPrice: "100.00", exitPrice: "110.00", volume: "1.0",
       contractSize: "1", commission: "0.00", swap: "0.00", stopLoss: null },
     PARITY,
   );
-  assert.equal(noSl.kind, "ok");
-  if (noSl.kind === "ok") {
-    assert.equal(noSl.risk, "10.00"); // fallback risk — PHP-verified, Remote returns null
-  }
+  assert.deepEqual(noSl, {
+    kind: "undefined-risk", grossPnl: "10.00", netPnl: "10.00", reason: "no-stop-loss",
+  });
 
-  // Remote: SL on the wrong side (above entry for a buy) → null risk.
-  // Local currently computes risk = |entry−SL| regardless of side. The PHP
-  // behavior for a wrong-side SL is UNKNOWN → FIXTURE PENDING; no Local
-  // golden value is frozen for this case until PHP evidence exists.
+  // SL on the wrong side (above entry for a buy) → undefined risk.
   const wrongSide = computePnl(
     { direction: "buy", entryPrice: "100.00", exitPrice: "110.00", volume: "1.0",
       contractSize: "1", commission: "0.00", swap: "0.00", stopLoss: "105.00" },
     PARITY,
   );
-  assert.equal(wrongSide.kind, "ok"); // current Local behavior — NOT a frozen contract value
+  assert.deepEqual(wrongSide, {
+    kind: "undefined-risk", grossPnl: "10.00", netPnl: "10.00", reason: "stop-loss-wrong-side",
+  });
+
+  // Downstream contract (pinned at the service/HTTP layer in inc 8): both
+  // cases surface as rMultiple: null — the trades store column is nullable
+  // (0001) and the lineages persist NULL.
 });
