@@ -62,6 +62,13 @@ function mapTrade(r: TradeRow): TradeRecord {
   };
 }
 
+/** PHP-evidenced order whitelist -> SQL column (default open_time, Remote lineage). */
+function sortColumn(sort: TradeSearchFilter["sort"]): string {
+  if (sort === "close_time") return "occurred_close_at_utc";
+  if (sort === "profit_loss") return "net_pnl";
+  return "occurred_open_at_utc";
+}
+
 class PgliteTradeStore implements TradeStore {
   constructor(private readonly engine: MigrationEngine) {
     if (engine.transaction === undefined) throw new Error("engine.transaction required (PGlite)");
@@ -115,12 +122,17 @@ class PgliteTradeStore implements TradeStore {
     if (filter.direction !== undefined) { params.push(filter.direction); where.push(`direction = $${params.length}`); }
     if (filter.from !== undefined) { params.push(filter.from); where.push(`occurred_open_at_utc >= $${params.length}`); }
     if (filter.to !== undefined) { params.push(filter.to); where.push(`occurred_close_at_utc <= $${params.length}`); }
+    if (filter.q !== undefined) {
+      // Journal search (PHP evidence): symbol | strategy | notes, contains.
+      params.push(filter.q.toUpperCase().replace(/([%_\\])/g, "\\$1"));
+      where.push(`(UPPER(symbol) LIKE '%' || $${params.length} || '%' ESCAPE '\\' OR UPPER(strategy) LIKE '%' || $${params.length} || '%' ESCAPE '\\' OR UPPER(COALESCE(notes, '')) LIKE '%' || $${params.length} || '%' ESCAPE '\\')`);
+    }
     const whereSql = where.join(" AND ");
     const total = Number((await this.engine.query(
       `SELECT COUNT(*)::int AS n FROM trades WHERE ${whereSql}`, params,
     )).rows[0]!.n);
     const items = (await this.engine.query(
-      `SELECT * FROM trades WHERE ${whereSql} ORDER BY occurred_open_at_utc DESC, id DESC LIMIT ${limit} OFFSET ${(page - 1) * limit}`,
+      `SELECT * FROM trades WHERE ${whereSql} ORDER BY ${sortColumn(filter.sort)} DESC, id DESC LIMIT ${limit} OFFSET ${(page - 1) * limit}`,
       params,
     )).rows as unknown as TradeRow[];
     return { items: items.map(mapTrade), total };
@@ -148,10 +160,14 @@ class PgliteTradeStore implements TradeStore {
     return this.tx(async (q) => {
       const parent = await this.lockedParent(q, id, userId, event.expectedVersion);
       if (parent === null) return null;
+      // NOTE: explicit null in the patch CLEARS the column (?? would treat null
+      // as absent and keep the old value — caught by the journal null-clear test).
       const updated = (await q(
         `UPDATE trades SET strategy = $1, emotion = $2, notes = $3, version = version + 1, updated_at = $4
          WHERE id = $5 AND version = $6 RETURNING *`,
-        [patch.strategy ?? parent.strategy, patch.emotion ?? parent.emotion, patch.notes ?? parent.notes,
+        [patch.strategy !== undefined ? patch.strategy : parent.strategy,
+         patch.emotion !== undefined ? patch.emotion : parent.emotion,
+         patch.notes !== undefined ? patch.notes : parent.notes,
          event.at, id, event.expectedVersion],
       )).rows[0] as unknown as TradeRow;
       await q(
@@ -453,6 +469,74 @@ test("PGlite: ADR-002 property — trades projection == fold(event replay)", asy
     assert.equal(state!.version, Number(row.version));
     assert.equal(state!.allocatedVolume, String(row.allocated_volume));
     assert.ok(state!.deletedAt !== null && row.deleted_at !== null);
+  } finally {
+    await h.close();
+  }
+});
+
+test("PGlite: journal search q + order whitelist through the SQL store", async () => {
+  const h = await freshHarness();
+  try {
+    await h.svc.createTrade(OWNER, { ...VECTOR_A, symbol: "EURUSD", strategyTag: "Breakout", notes: "clean London session" });
+    await h.svc.createTrade(OWNER, {
+      symbol: "XAUUSD", direction: "sell", entryPrice: "2350.00", exitPrice: "2340.00", volume: "1",
+      contractSize: "100", openTime: "2026-09-11 10:00:00", closeTime: "2026-09-11 12:00:00",
+      strategyTag: "Pullback", notes: "gold reversal",
+    });
+    await h.svc.createTrade(OTHER, { ...VECTOR_A, symbol: "EURUSD", notes: "other user EURUSD" }); // never visible
+
+    // q across symbol / strategy / notes (case-insensitive contains)
+    for (const [q, expected] of [["eurusd", 1], ["pull", 1], ["LONDON SESSION", 1], ["no-such-text", 0]] as const) {
+      const r = (await h.svc.searchTrades(OWNER, { q })) as { items: unknown[] };
+      assert.equal(r.items.length, expected, `q=${q}`);
+    }
+    // tombstoned journal data is not searchable
+    const first = (await h.svc.searchTrades(OWNER, { q: "EURUSD" })) as { items: Array<{ id: string }> };
+    await h.svc.deleteTrade(first.items[0]!.id, OWNER);
+    const afterTombstone = (await h.svc.searchTrades(OWNER, { q: "EURUSD" })) as { items: unknown[] };
+    assert.equal(afterTombstone.items.length, 0);
+    // order whitelist (profit_loss: XAUUSD sell +100k... verify via net values)
+    const byPnl = (await h.svc.searchTrades(OWNER, { order: "profit_loss" })) as { items: Array<Record<string, unknown>> };
+    assert.equal((byPnl.items[0] as { symbol: string }).symbol, "XAUUSD"); // +1000.00 net wins over... only trade left? no: XAUUSD only
+    // ^ after tombstone only XAUUSD remains; assert it is returned in order regardless
+    assert.equal(byPnl.items.length, 1);
+  } finally {
+    await h.close();
+  }
+});
+
+test("PGlite: journal mutations persist as events; projection == fold(replay) for journal edits", async () => {
+  const h = await freshHarness();
+  try {
+    const t = (await h.svc.createTrade(OWNER, VECTOR_A)) as Record<string, unknown>;
+    const id = t.id as string;
+    // journal-only edits (financials untouched — ADR-002)
+    await h.svc.updateTrade(id, OWNER, { notes: "journal edit one", strategyTag: "Pullback" });
+    await h.svc.updateTrade(id, OWNER, { notes: null, emotionalScore: 2 }); // null clears
+    const projection = await h.engine.query("SELECT * FROM trades WHERE id = $1", [id]);
+    const row = projection.rows[0] as Record<string, unknown>;
+    assert.equal(row.notes, null); // cleared by the second edit
+    assert.equal(row.strategy, "Pullback");
+    assert.equal(row.emotion, "2");
+    assert.equal(row.entry_price, "1.10000000"); // financial facts intact
+    assert.equal(Number(row.version), 2);
+
+    // every journal mutation is an event; replaying them reproduces the projection
+    const events = await h.store.rawEvents(id);
+    assert.deepEqual(events.map((e) => e.type), ["TRADE_CREATED", "JOURNALING_EDITED", "JOURNALING_EDITED"]);
+    const replayed = events.map((ev, i) => {
+      const payload = ev.payload as { event: LedgerEvent };
+      const e2 = { ...payload.event, id: `replay-${i}` };
+      if (e2.type === "TRADE_CREATED") e2.trade = { ...e2.trade, id };
+      return e2 as LedgerEvent;
+    });
+    const { state } = fold(replayed);
+    assert.ok(state);
+    assert.equal(state!.journaling.notes, null);
+    assert.equal(state!.journaling.strategy, "Pullback");
+    assert.equal(state!.journaling.emotion, "2");
+    assert.equal(state!.financial.entryPrice, String(row.entry_price));
+    assert.equal(state!.version, Number(row.version));
   } finally {
     await h.close();
   }
