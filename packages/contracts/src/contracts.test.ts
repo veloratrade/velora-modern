@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   PUBLIC_ROUTES, resolvePublicRoute, CACHE_POLICY, LOCALE_HEADER,
   canonicalEmail, buildVerifyEmailLink, buildResetPasswordLink,
-  RATE_LIMIT_DEFAULTS, ARGON2ID_PARAMS, SCALES, ok, fail, WEBHOOK_SOURCES,
+  RATE_LIMIT_DEFAULTS, ARGON2ID_PARAMS, SCALES, ok, fail, WEBHOOK_SOURCES, ERROR_CODES,
   LEGACY_TZ_INTERPRETATION,
 } from "./index.js";
 
@@ -49,6 +49,22 @@ test("rate-limit defaults carry the verified PHP limits (C-14)", () => {
   assert.deepEqual(RATE_LIMIT_DEFAULTS["auth:register"], { limit: 5, windowSec: 3600 });
   assert.deepEqual(RATE_LIMIT_DEFAULTS["auth:login"], { limit: 8, windowSec: 300 });
   assert.deepEqual(RATE_LIMIT_DEFAULTS["trades:extract-screenshot"], { limit: 8, windowSec: 300 });
+  // inc 7: the remaining auth limits verified against the PHP dispatch table
+  // (api/index.php 260–289) — all eight auth routes match exactly.
+  assert.deepEqual(RATE_LIMIT_DEFAULTS["auth:verify-email"], { limit: 20, windowSec: 900 });
+  assert.deepEqual(RATE_LIMIT_DEFAULTS["auth:resend-verification"], { limit: 4, windowSec: 3600 });
+  assert.deepEqual(RATE_LIMIT_DEFAULTS["auth:forgot-password"], { limit: 4, windowSec: 3600 });
+  assert.deepEqual(RATE_LIMIT_DEFAULTS["auth:reset-password"], { limit: 6, windowSec: 3600 });
+  assert.deepEqual(RATE_LIMIT_DEFAULTS["auth:refresh"], { limit: 30, windowSec: 300 });
+  assert.deepEqual(RATE_LIMIT_DEFAULTS["auth:change-password"], { limit: 8, windowSec: 900 });
+});
+
+test("error taxonomy carries the evidenced 429 code TOO_MANY_REQUESTS (inc 7)", () => {
+  // Both lineages emit TOO_MANY_REQUESTS on 429 (PHP Response::defaultCode +
+  // RateLimiter ApiException; Remote ApiError). The earlier RATE_LIMITED
+  // placeholder appeared in neither lineage and was corrected (inc-7
+  // inventory §6 D3) before any endpoint ever emitted it.
+  assert.equal(ERROR_CODES.TOO_MANY_REQUESTS, "TOO_MANY_REQUESTS");
 });
 
 test("Argon2id parameters match owner decision D-04", () => {

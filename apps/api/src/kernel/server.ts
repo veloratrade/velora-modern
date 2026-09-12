@@ -12,12 +12,16 @@ import {
   phpUtcTimestamp,
   registerRequest,
   loginRequest,
+  type RateLimitKey,
 } from "@velora/contracts";
 import { newSecurityContext, buildCsp, SECURITY_HEADERS, originAllowed } from "./security.js";
 import { AuthService, AuthError } from "../auth/authService.js";
 import { AccountService, AccountError } from "../accounts/accountService.js";
 import { TradeService, TradeError } from "../trades/tradeService.js";
 import { EntitlementError } from "../entitlements/entitlementService.js";
+import { resolveClientIp, type RateLimitDecision } from "@velora/domain";
+import { FixedWindowRateLimiter, type RateLimiter } from "../ratelimits/rateLimiter.js";
+import { MemoryRateLimitStore } from "../ratelimits/memoryRateLimitStore.js";
 
 export interface HealthChecks {
   database(): Promise<"ok" | "fail">;
@@ -32,7 +36,26 @@ export interface ApiConfig {
   readonly accounts?: AccountService;
   /** Phase C trades capability (increment 3). Absent → trade routes fail closed (503). */
   readonly trades?: TradeService;
+  /** Phase C rate limiting (inc 7). Absent → createApp builds a default
+   *  fixed-window limiter on a per-process memory store (PHP applies
+   *  throttling unconditionally at dispatch; a per-app instance preserves
+   *  the established per-test-server isolation). */
+  readonly rateLimiter?: RateLimiter;
+  /** Trusted reverse-proxy CIDRs for X-Forwarded-For (PHP parity). Default:
+   *  none — the header is never honored (fail-closed). */
+  readonly trustedProxyCidrs?: readonly string[];
 }
+
+/** Throttled routes (inc 7): the implemented Local auth routes with
+ * PHP-verified dispatch-level limits (C-14). Phase H/I/J routes have no Local
+ * route yet — their C-14 defaults light up when those routes land. */
+export const THROTTLED_AUTH_ROUTES: Readonly<Record<string, RateLimitKey>> = {
+  "POST /api/v1/auth/register": "auth:register",
+  "POST /api/v1/auth/login": "auth:login",
+  "POST /api/v1/auth/refresh": "auth:refresh",
+  "POST /api/v1/auth/verify-email": "auth:verify-email",
+  "POST /api/v1/auth/change-password": "auth:change-password",
+};
 
 type RouteResult = { status: number; body: unknown; headers?: Record<string, string> };
 
@@ -80,7 +103,10 @@ function validationFailure(error: z.ZodError, requestId: string): RouteResult {
   return { status: 400, body: fail("VALIDATION_FAILED", "Validation failed.", requestId, details) };
 }
 
-async function route(req: IncomingMessage, config: ApiConfig, sec: { requestId: string; nonce: string }): Promise<RouteResult> {
+/** ApiConfig with the rate limiter materialized (createApp guarantees it). */
+type EffectiveApiConfig = ApiConfig & { readonly rateLimiter: RateLimiter };
+
+async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { requestId: string; nonce: string }): Promise<RouteResult> {
   // ---- Phase C identity route helpers (Remote-verified cookie/body contracts) ----
   const REFRESH_COOKIE_NAME = "refresh_token";
   const REFRESH_COOKIE_MAX_AGE = 2_592_000; // 30 days (Remote + PHP jwt_refresh_ttl_sec)
@@ -170,6 +196,38 @@ async function route(req: IncomingMessage, config: ApiConfig, sec: { requestId: 
         headers: { "Set-Cookie": REFRESH_COOKIE_CLEAR },
       };
     });
+  }
+
+  // ---- Rate limiting (inc 7 — PHP dispatch-level, C-14 verified limits) ----
+  // PHP parity: applied BEFORE validation/auth/capability checks — attempts
+  // count even when the request would fail them (brute-force semantics).
+  const throttleKey = THROTTLED_AUTH_ROUTES[`${method} ${path}`];
+  if (throttleKey !== undefined) {
+    const xffHeader = req.headers["x-forwarded-for"];
+    const clientIp = resolveClientIp(
+      {
+        remoteAddress: req.socket.remoteAddress,
+        xForwardedFor: Array.isArray(xffHeader) ? xffHeader[0] : xffHeader,
+      },
+      config.trustedProxyCidrs ?? [],
+    );
+    let decision: RateLimitDecision;
+    try {
+      decision = await config.rateLimiter.hit(throttleKey, clientIp);
+    } catch {
+      // Fail-closed (Remote non-test invariant + PHP ServiceUnavailableException):
+      // a broken limiter store must never silently disable throttling.
+      return { status: 503, body: fail("SERVICE_UNAVAILABLE", "rate limiter unavailable", sec.requestId) };
+    }
+    if (!decision.allowed) {
+      return {
+        status: 429,
+        body: fail("TOO_MANY_REQUESTS", "Too many requests.", sec.requestId, {
+          messageKey: "errors.rateLimited",
+        }),
+        headers: { "Retry-After": String(decision.retryAfterSec) },
+      };
+    }
   }
 
   // ---- Phase C identity routes (Remote/PHP-verified contracts) ----
@@ -523,9 +581,15 @@ async function route(req: IncomingMessage, config: ApiConfig, sec: { requestId: 
 }
 
 export function createApp(config: ApiConfig): Server {
+  // Always-on throttling (PHP dispatch evidence): a default per-app limiter
+  // when none is injected; per-app instance = per-test-server isolation.
+  const effective: EffectiveApiConfig = {
+    ...config,
+    rateLimiter: config.rateLimiter ?? new FixedWindowRateLimiter(new MemoryRateLimitStore()),
+  };
   return httpCreateServer((req: IncomingMessage, res: ServerResponse) => {
     const sec = newSecurityContext();
-    void route(req, config, sec)
+    void route(req, effective, sec)
       .then((r) => {
         const headers: Record<string, string> = {
           "Content-Type": "application/json; charset=utf-8",
