@@ -10,6 +10,13 @@ export interface MigrationEngine {
   query(sql: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>;
   exec(sql: string): Promise<void>;
   close(): Promise<void>;
+  /**
+   * Serialized, rollback-on-error multi-statement unit. PGlite: native
+   * single-session transaction (in-wasm — still NOT real-PostgreSQL
+   * concurrency evidence). pg Client: BEGIN/COMMIT on the shared client.
+   * Optional so existing engines/mocks keep compiling.
+   */
+  transaction?<T>(fn: (tx: { query(sql: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }> }) => Promise<T>): Promise<T>;
 }
 
 export async function createEngine(connectionString?: string): Promise<MigrationEngine> {
@@ -23,6 +30,15 @@ export async function createEngine(connectionString?: string): Promise<Migration
       },
       exec: async (sql) => { await db.exec(sql); },
       close: async () => { await db.close(); },
+      transaction: async (fn) =>
+        db.transaction(async (tx) =>
+          fn({
+            query: async (sql, params) => {
+              const res = await tx.query(sql, params as never[]);
+              return { rows: res.rows as Record<string, unknown>[] };
+            },
+          }),
+        ),
     };
   }
   const { Client } = await import("pg");
@@ -35,6 +51,22 @@ export async function createEngine(connectionString?: string): Promise<Migration
     },
     exec: async (sql) => { await client.query(sql); },
     close: async () => { await client.end(); },
+    transaction: async (fn) => {
+      await client.query("BEGIN");
+      try {
+        const result = await fn({
+          query: async (sql, params = []) => {
+            const res = await client.query(sql, params as never[]);
+            return { rows: res.rows as Record<string, unknown>[] };
+          },
+        });
+        await client.query("COMMIT");
+        return result;
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      }
+    },
   };
 }
 

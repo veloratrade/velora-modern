@@ -205,17 +205,19 @@ export class TradeService {
     this.newEventUid = deps.newEventUid ?? (() => randomUUID());
   }
 
-  private storedEvent(
-    tradeId: string,
-    type: StoredTradeEvent["type"],
-    actor: StoredTradeEvent["actor"],
-    expectedVersion: number,
-    payload: Record<string, unknown>,
-    at: Date,
-  ): StoredTradeEvent {
+  /**
+   * The stored payload embeds the domain LedgerEvent (foldable replay,
+   * ADR-002 testing requirement) plus interpretation metadata.
+   */
+  private storedEvent(tradeId: string, ledgerEvent: LedgerEvent, meta: Record<string, unknown>, at: Date): StoredTradeEvent {
     return {
       eventUid: this.newEventUid(),
-      tradeId, type, actor, expectedVersion, payload, at: at.toISOString(),
+      tradeId,
+      type: ledgerEvent.type,
+      actor: ledgerEvent.actor,
+      expectedVersion: ledgerEvent.expectedVersion,
+      payload: { event: ledgerEvent, ...meta },
+      at: at.toISOString(),
     };
   }
 
@@ -330,8 +332,8 @@ export class TradeService {
     };
     applyEvent(null, ledgerEvent);
 
-    const stored = this.storedEvent("", "TRADE_CREATED", "user", 0, {
-      input: raw, openTimeUtc: open.iso, closeTimeUtc: close.iso,
+    const stored = this.storedEvent("", ledgerEvent, {
+      openTimeUtc: open.iso, closeTimeUtc: close.iso,
       sourceTzOffset: open.offsetMinutes === null ? null : offsetString(open.offsetMinutes),
       sourceTimeNaive: raw.openTime, pnl,
     }, now);
@@ -432,7 +434,7 @@ export class TradeService {
     };
     try {
       applyEvent(stateOf(record!), ledgerEvent); // version/tombstone/ownership gate
-      const stored = await this.deps.store.editJournaling(id, userId, patch, this.storedEvent(id, "JOURNALING_EDITED", "user", expectedVersion, { patch }, now));
+      const stored = await this.deps.store.editJournaling(id, userId, patch, this.storedEvent(id, ledgerEvent, {}, now));
       if (stored === null) notFoundTrade();
       return this.serialize(stored!);
     } catch (err) {
@@ -451,7 +453,7 @@ export class TradeService {
     };
     try {
       applyEvent(stateOf(record!), ledgerEvent);
-      const stored = await this.deps.store.tombstone(id, userId, this.storedEvent(id, "TOMBSTONE_SET", "user", record!.version, { reason: ledgerEvent.reason }, now));
+      const stored = await this.deps.store.tombstone(id, userId, this.storedEvent(id, ledgerEvent, {}, now));
       if (stored === null) notFoundTrade();
       return { deleted: true };
     } catch (err) {
@@ -514,7 +516,7 @@ export class TradeService {
       applyEvent(stateOf(trade!), ledgerEvent); // allocation + version + tombstone gate
       const created = await this.deps.store.recordExit(
         tradeId, userId, exit,
-        this.storedEvent(tradeId, "EXIT_RECORDED", "user", trade!.version, { ...exit }, now),
+        this.storedEvent(tradeId, ledgerEvent, { exitDetails: exit }, now),
       );
       return { id: created.id, messageKey: "trades.exitCreated", params: {} };
     } catch (err) {
@@ -537,7 +539,7 @@ export class TradeService {
       applyEvent(stateOf(trade!), ledgerEvent); // underflow + version + tombstone gate
       const stored = await this.deps.store.cancelExit(
         exitId, userId,
-        this.storedEvent(trade!.id, "EXIT_CANCELLED", "user", trade!.version, { exitId: exit!.id, volume: exit!.volume }, now),
+        this.storedEvent(trade!.id, ledgerEvent, {}, now),
       );
       if (stored === null) notFoundExit();
       return { deleted: true };
