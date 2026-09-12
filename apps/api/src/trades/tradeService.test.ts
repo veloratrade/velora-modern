@@ -423,6 +423,56 @@ test("journal semantics: null/empty clear, explicit values set; emotion range en
   await expectTradeError(svc.updateTrade(id, OWNER, { notes: "x".repeat(5001) }), 400, "VALIDATION_FAILED", { field: "notes", messageKey: "errors.validation.maxLength" });
 });
 
+test("STRATEGIES regression (inc 5): strategyTag contract — free-form journal field, full lifecycle, ledger-safe", async () => {
+  const { svc, store } = makeService();
+  // create with tag → serialized on the trade, stored as journaling metadata
+  const t = (await svc.createTrade(OWNER, { ...VECTOR_A, strategyTag: "TrendFollowing" })) as Record<string, unknown>;
+  const id = t.id as string;
+  assert.equal(t.strategyTag, "TrendFollowing");
+  // no strategy id/entity semantics: the field is a plain string (null when absent)
+  const bare = (await svc.createTrade(OWNER, { ...VECTOR_A, symbol: "XAUUSD", strategyTag: null })) as Record<string, unknown>;
+  assert.equal(bare.strategyTag, null);
+  // edit via the journal path: event + version bump, financials untouched
+  const edited = (await svc.updateTrade(id, OWNER, { strategyTag: "MeanReversion" })) as Record<string, unknown>;
+  assert.equal(edited.strategyTag, "MeanReversion");
+  assert.equal(edited.version, 1);
+  assert.equal(edited.profitLoss, "493.5");
+  // null and empty-string clear (both lineages); ''→null on create
+  const cleared = (await svc.updateTrade(id, OWNER, { strategyTag: null })) as Record<string, unknown>;
+  assert.equal(cleared.strategyTag, null);
+  const emptied = (await svc.updateTrade(id, OWNER, { strategyTag: "" })) as Record<string, unknown>;
+  assert.equal(emptied.strategyTag, null);
+  const fromEmpty = (await svc.createTrade(OWNER, { ...VECTOR_A, symbol: "GBPUSD", strategyTag: "" })) as Record<string, unknown>;
+  assert.equal(fromEmpty.strategyTag, null);
+  // validation: maxLength 64 (PHP schema AND both services; Remote DB column
+  // 50 is a Remote-internal divergence — Local is consistent at 64)
+  await expectTradeError(svc.updateTrade(id, OWNER, { strategyTag: "x".repeat(65) }), 400, "VALIDATION_FAILED", { field: "strategyTag", messageKey: "errors.validation.maxLength" });
+  await expectTradeError(svc.createTrade(OWNER, { ...VECTOR_A, strategyTag: "y".repeat(65) }), 400, "VALIDATION_FAILED", { field: "strategyTag", messageKey: "errors.validation.maxLength" });
+  // 64 chars is accepted (boundary)
+  const boundary = (await svc.updateTrade(id, OWNER, { strategyTag: "z".repeat(64) })) as Record<string, unknown>;
+  assert.equal((boundary.strategyTag as string).length, 64);
+  // free-form: no charset restriction in either lineage
+  const free = (await svc.updateTrade(id, OWNER, { strategyTag: "ICT #2026 — FVG/ OB" })) as Record<string, unknown>;
+  assert.equal(free.strategyTag, "ICT #2026 — FVG/ OB");
+  // journal search by strategy (inc 4, PHP evidence)
+  const found = (await svc.searchTrades(OWNER, { q: "ICT" })) as { items: unknown[] };
+  assert.equal(found.items.length, 1);
+  // every strategyTag mutation is a JOURNALING_EDITED event; replay reproduces it
+  const { fold } = await import("@velora/domain");
+  const events = store.eventLog().filter((e) => e.tradeId === id).map((e, i) => {
+    const payload = e.payload as { event: import("@velora/domain").LedgerEvent };
+    const ev = { ...payload.event, id: `r-${i}` };
+    if (ev.type === "TRADE_CREATED") ev.trade = { ...ev.trade, id };
+    return ev as import("@velora/domain").LedgerEvent;
+  });
+  const { state } = fold(events);
+  assert.equal(state!.journaling.strategy, "ICT #2026 — FVG/ OB"); // final value derives from the log
+  // tombstone removes strategy data from search (Dashboard projection source)
+  await svc.deleteTrade(id, OWNER);
+  const afterTombstone = (await svc.searchTrades(OWNER, { q: "ICT" })) as { items: unknown[] };
+  assert.equal(afterTombstone.items.length, 0);
+});
+
 test("journal integration script (authorization step 8): create → read → edit → immutability → events → replay → tombstone → 409", async () => {
   const { svc, store } = makeService();
   // 1. create

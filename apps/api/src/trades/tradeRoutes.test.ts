@@ -345,6 +345,32 @@ test("TRADES HTTP: validation envelopes + account ownership on create", async ()
   });
 });
 
+test("STRATEGIES HTTP boundary (inc 5): no /api/v1/strategies route exists — no manufactured CRUD", async () => {
+  await withServer(async (base, { ownerToken }) => {
+    // Neither lineage exposes standalone strategy endpoints; Local must not
+    // invent them. The only strategy surface is strategyTag on trades.
+    for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE"]) {
+      const res = await fetch(`${base}/api/v1/strategies`, {
+        method,
+        headers: method === "GET" || method === "DELETE" ? { Authorization: `Bearer ${ownerToken}` } : { "Content-Type": "application/json", Authorization: `Bearer ${ownerToken}` },
+        ...(method === "GET" || method === "DELETE" ? {} : { body: "{}" }),
+      });
+      assert.equal(res.status, 404, `${method} /api/v1/strategies`);
+      const body = (await res.json()) as Envelope<null>;
+      assert.equal(body.error?.code, "NOT_FOUND");
+    }
+    // sub-resource form likewise absent (no strategy entity to address)
+    const sub = await fetch(`${base}/api/v1/strategies/1`, { headers: { Authorization: `Bearer ${ownerToken}` } });
+    assert.equal(sub.status, 404);
+    // the real strategy surface (strategyTag via trades) keeps working:
+    const t = (await (await fetch(`${base}/api/v1/trades`, {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${ownerToken}` },
+      body: JSON.stringify({ ...VECTOR_A, strategyTag: "TrendFollowing" }),
+    })).json()) as Envelope<{ strategyTag: string }>;
+    assert.equal(t.data.strategyTag, "TrendFollowing");
+  });
+});
+
 test("JOURNAL HTTP: q journal search + order whitelist over real HTTP", async () => {
   await withServer(async (base, { ownerToken, otherToken }) => {
     const auth = { "Content-Type": "application/json", Authorization: `Bearer ${ownerToken}` };
