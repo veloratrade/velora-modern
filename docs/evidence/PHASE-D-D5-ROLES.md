@@ -20,6 +20,24 @@
 
 ## 2. Ownership model (B-4) — stated explicitly, not invented silently
 
+> ### ⚠ EVIDENCE-SCOPE CORRECTION — 2026-09-13 (owner-ratified)
+>
+> **The ownership model described in this section is SUPERSEDED, and it was never exercised by the canonical run.**
+>
+> **What run `34768881278` proves:** the **privilege grid** — P1–P16, 18/18, all negative assertions on SQLSTATE `42501`. That evidence stands and is unchanged.
+>
+> **What it does NOT prove:** the ownership model below. Two reasons, both VERIFIED by inspection and reproduction:
+> 1. The battery harness calls `migrate()` **before** `db/roles-bootstrap.sql`, so `velora_migrator` does not exist when the tables are created; and CI connects as the superuser `velora_test`. Reproducing the CI order locally shows **all 13 tables owned by the superuser** — `velora_migrator` owns nothing.
+> 2. **No test in the battery asserts object ownership** (there is no `tableowner` / `relowner` / `pg_get_userbyid` assertion anywhere in `db/tests/pgRoles.pg.test.ts`).
+>
+> So P13 ("migrator holds no runtime DML") passed under this model only because a **superuser's** `SET ROLE` masks the owner-privilege problem — not because the model achieves least privilege.
+>
+> **Superseded by:** the separated-owner model ratified as an **ADR-010 amendment (2026-09-13)** — `velora_owner` (NOLOGIN) owns application objects; `velora_migrator` is a `NOINHERIT` member that must `SET ROLE velora_owner` for DDL and owns nothing. Rationale: a PostgreSQL owner implicitly holds all privileges on its objects and they cannot be revoked, so "the migrator has no runtime DML" is unsatisfiable while the migrator is the owner. Under the new model the 18 D5 criteria still pass (18/18) and **P13 passes for the correct reason** — the migrator genuinely lacks the privilege.
+>
+> **D5 status: REMAINS CLOSED.** The D5 acceptance criteria (the P1–P16 privilege grid) are satisfied under both models; only the scope of the claim is corrected here. **Ownership verification is a D6 evidence item** — assert `pg_tables.tableowner = 'velora_owner'` and that `velora_migrator` cannot create schema objects — tracked alongside B-3 and login/password authentication.
+>
+> *Historical record retained verbatim below for traceability.*
+
 > **`velora_migrator` owns the application schema. Migrations run as `velora_migrator`. Runtime roles own nothing.**
 
 **Why this model and not another** — established by execution, not assumption:

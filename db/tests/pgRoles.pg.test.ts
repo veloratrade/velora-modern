@@ -275,7 +275,7 @@ test("PG D5 P11: velora_readonly CANNOT INSERT/UPDATE/DELETE → 42501", { skip:
   } finally { await close(); }
 });
 
-// ── P12/P13 — migrator: owns the schema, but is not an app role ────────────
+// ── P12/P13 — migrator: schema DDL authority, but not an app role ──────────
 
 test("PG D5 P12: velora_migrator can perform schema DDL (CREATE/ALTER/DROP)", { skip: SKIP }, async () => {
   const { pool, close } = await harness();

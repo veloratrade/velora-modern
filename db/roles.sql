@@ -94,10 +94,23 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- 2. Schema access. Only the migrator may CREATE.
+-- 2. Schema access. Only the object owner may CREATE.
 -- ---------------------------------------------------------------------------
 GRANT USAGE ON SCHEMA public TO app_readwrite, velora_worker, velora_migrator, velora_readonly;
-GRANT CREATE ON SCHEMA public TO velora_migrator;
+
+-- NOTE — deliberately NO `GRANT CREATE ON SCHEMA public TO velora_migrator`.
+-- Under the separated-owner model (ADR-010 amendment 2026-09-13) objects are
+-- created by and owned by `velora_owner`; `velora_migrator` reaches CREATE only
+-- by an explicit `SET ROLE velora_owner`. A direct CREATE grant here let the
+-- migrator create objects it would then OWN, and a PostgreSQL owner implicitly
+-- holds all privileges on its objects — reintroducing exactly the runtime DML
+-- authority that D5 P13 forbids (VERIFIED: with the grant present, a bare
+-- migrator `CREATE TABLE` produced a migrator-owned table).
+--
+-- The pre-migration bootstrap (`db/roles-bootstrap.sql`) still grants the
+-- migrator `CREATE` so the very first migration can run in environments that do
+-- not use `db/provision.ts` (the CI evidence path); `db/provision.ts` revokes it
+-- again once `velora_owner` exists. This file must not re-grant it afterwards.
 
 -- Deny-by-default hygiene: PostgreSQL grants CREATE on `public` to PUBLIC in
 -- versions < 15. Harmless on 15+ (already revoked); required on older servers.

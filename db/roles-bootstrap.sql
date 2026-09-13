@@ -3,8 +3,18 @@
 --
 -- Why this is a separate file from db/roles.sql:
 --   `db/roles.sql` grants privileges on tables and therefore must run AFTER the
---   migration chain (defect D-1). But the migrator role must EXIST and OWN the
---   schema BEFORE the first migration runs (defect D-5, ownership model B-4).
+--   migration chain (defect D-1). But the migration role must EXIST and be able
+--   to create objects BEFORE the first migration runs (defect D-5).
+--
+--   ⚠ OWNERSHIP (ADR-010 amendment, 2026-09-13): application objects are owned
+--   by `velora_owner` (NOLOGIN), NOT by `velora_migrator`. A PostgreSQL owner
+--   implicitly holds all privileges on its objects and they cannot be revoked,
+--   so a migrator that owned the tables would inherently hold runtime DML —
+--   contradicting D5 P13. `db/provision.ts` creates `velora_owner`, makes
+--   `velora_migrator` a NOINHERIT member (WITH SET TRUE), and revokes the
+--   migrator's direct CREATE. This file keeps that CREATE grant so the
+--   bootstrap remains self-sufficient for the CI evidence path, which does not
+--   run `db/provision.ts`.
 --   Those two requirements sit on opposite sides of `db/migrate.ts`, so they
 --   are two files with an explicit order:
 --
@@ -41,12 +51,15 @@ BEGIN
   END IF;
 END $$;
 
--- 2. The migrator owns and evolves the schema; nobody else may CREATE.
+-- 2. The migrator may create the initial schema; nobody else may CREATE.
+--    (Under db/provision.ts this grant is revoked once velora_owner exists —
+--     objects are then created via `SET ROLE velora_owner`.)
 GRANT USAGE, CREATE ON SCHEMA public TO velora_migrator;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 
 -- 3. Runtime roles may enter the schema (object privileges come from roles.sql).
 GRANT USAGE ON SCHEMA public TO app_readwrite, velora_worker, velora_readonly;
 
--- After this file: connect as velora_migrator and run db/migrate.ts, so that
--- every migrated table is owned by velora_migrator. Then run db/roles.sql.
+-- After this file: connect as velora_migrator and run db/migrate.ts, then run
+-- db/roles.sql. Under the deploy path (db/provision.ts) the migrator assumes
+-- `velora_owner` for DDL, so every migrated table is owned by velora_owner.

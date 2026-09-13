@@ -4,6 +4,10 @@
 
 Accepted — owner decision D-15 (2026-08-29): monorepo/thin-apps/`packages/domain`, immutable-image delivery, DB role separation, backup + restore-drill gate, StoragePort, stateless applications, environment separation approved. **Repository posture: PUBLIC — owner decision D-06 (revised 2026-08-29)**; PRIVATE was originally proposed, the owner explicitly chose to keep the repository public. Public visibility does **not** relax secret-safety requirements (see Decision).
 
+**Amendment — 2026-09-13 (owner ratification, Railway staging preparation): DB role separation extended from four roles to five.** A dedicated `velora_owner` (NOLOGIN) now owns application objects, and `velora_migrator` owns nothing. This amends the "DB role separation" bullet in *Decision → Delivery* only; every other part of D-15 is unchanged. It **supersedes** the ownership model recorded as B-4 in `docs/evidence/PHASE-D-D5-ROLES.md` §2 (*"`velora_migrator` owns the application schema"*).
+
+**Reason (the constraint that forces this):** in PostgreSQL an object's **owner implicitly holds all privileges on that object, and those privileges cannot be revoked from the owner** — ownership also carries the non-grantable right to `ALTER`/`DROP`. Therefore, if `velora_migrator` owns the application tables it inherently holds full runtime DML on them, which directly contradicts the requirement that the migrator hold **no runtime DML authority** (D5 criterion P13). Least privilege for the migrator is unachievable while the migrator is the owner, so ownership and migration authority must be separated into two roles. **VERIFIED by execution:** P13 fails when the migrator owns the tables and passes once ownership moves to `velora_owner` (full D5 battery 18/18 on a non-superuser connection).
+
 ## Context
 
 The modern system needs a delivery model that is reproducible, rollback-safe, and
@@ -46,8 +50,20 @@ owner with secret-safety rules that hold under either visibility.
   (migrations are forward-only; rollback restores from backup — restore drill is a gate).
 - **Environment separation:** staging and production = separate hosts/credentials/
   secret stores (deliberately not repeating the shared-FTP-account risk).
-- **DB role separation:** `app_readwrite` (api), `worker` (jobs/sync), `migrator`
-  (schema), `readonly` (analytics/reports) — least privilege by construction.
+- **DB role separation** (amended 2026-09-13 — five roles, see Status):
+  - `velora_owner` — **NOLOGIN**; owns every application object (tables,
+    sequences, views). Never a connection identity, only an ownership identity.
+  - `velora_migrator` — schema DDL. Owns **no** application objects and holds
+    **no** runtime DML; it is a `NOINHERIT` member of `velora_owner` and reaches
+    DDL only through an explicit `SET ROLE velora_owner`. Membership must be
+    granted `WITH SET TRUE` (in PostgreSQL 16+, `WITH ADMIN OPTION` yields
+    `set_option = false` and `SET ROLE` is refused).
+  - `app_readwrite` (api), `worker` (jobs/sync), `readonly` (analytics/reports)
+    — runtime roles, unchanged.
+
+  Least privilege by construction: runtime roles hold no DDL, the migrator holds
+  no runtime DML, and ledger tables (`trade_events`, `webhook_events`) are
+  append-only for the runtime roles (`UPDATE`/`DELETE`/`TRUNCATE` → `42501`).
 - **Backups:** PITR (WAL archiving) + nightly dumps → encrypted, offsite object
   storage; **restore drill is a release gate, not a hope**.
 - **Object storage behind a port** (`StoragePort`): local-volume implementation

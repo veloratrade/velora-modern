@@ -112,6 +112,23 @@ ALTER DEFAULT PRIVILEGES FOR ROLE velora_owner IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO app_readwrite, velora_worker;
 `;
 
+/**
+ * Re-asserts the migrator's CREATE revocation.
+ *
+ * `db/roles-bootstrap.sql` deliberately grants `velora_migrator` CREATE on the
+ * schema so it stays self-sufficient for environments that never run this file
+ * (the CI evidence path). In the deploy path that grant must not survive: once
+ * `velora_owner` exists, the migrator reaches DDL only via `SET ROLE`. Anything
+ * that re-applies the bootstrap afterwards (a redeploy, or the D5 battery
+ * fixture, which re-runs it per test) would otherwise silently restore CREATE
+ * and let the migrator create objects it would then OWN — reintroducing the
+ * implicit-owner DML that D5 P13 forbids. Re-asserting it here makes the end
+ * state independent of execution order.
+ */
+const REVOKE_MIGRATOR_CREATE_SQL = `
+REVOKE CREATE ON SCHEMA public FROM velora_migrator;
+`;
+
 /** Re-asserts ownership of objects an earlier deploy may have created. */
 const REASSIGN_SQL = `
 DO $$
@@ -175,6 +192,8 @@ export async function provision(opts: ProvisionOptions): Promise<string[]> {
       steps.push("roles.sql");
       await client.query(DEFAULT_PRIVILEGES_SQL);
       steps.push("default-privileges");
+      await client.query(REVOKE_MIGRATOR_CREATE_SQL);
+      steps.push("revoke-migrator-create");
     }
   } finally {
     await client.end();
@@ -195,6 +214,11 @@ export async function verifyGrid(adminUrl: string): Promise<Record<string, boole
       UNION ALL SELECT 'worker_delete_webhook_events', has_table_privilege('velora_worker','webhook_events','DELETE')
       UNION ALL SELECT 'readonly_insert_trades',      has_table_privilege('velora_readonly','trades','INSERT')
       UNION ALL SELECT 'migrator_select_users',       has_table_privilege('velora_migrator','users','SELECT')
+      UNION ALL SELECT 'migrator_create_on_schema',    has_schema_privilege('velora_migrator','public','CREATE')
+      UNION ALL SELECT 'all_objects_owned_by_owner',
+        NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE n.nspname = 'public' AND c.relkind IN ('r','p','v','m','S')
+                      AND pg_get_userbyid(c.relowner) <> 'velora_owner')
     `);
     return Object.fromEntries(res.rows.map((r) => [r.k, r.v]));
   } finally {
@@ -232,6 +256,14 @@ if (process.argv[1] && process.argv[1].endsWith("provision.ts")) {
       worker_delete_webhook_events: false,
       readonly_insert_trades: false,
       migrator_select_users: false,
+      // The migrator must NOT hold a direct CREATE grant: an object it created
+      // would be migrator-OWNED, and an owner implicitly holds all privileges
+      // on its objects (not revocable) — reintroducing the runtime DML that
+      // D5 P13 forbids. DDL is reached only via `SET ROLE velora_owner`.
+      migrator_create_on_schema: false,
+      // Every table/view/sequence in `public` must be owned by velora_owner.
+      // This is the ownership assertion the original D5 battery never made.
+      all_objects_owned_by_owner: true,
     };
     const bad = Object.entries(expected).filter(([k, v]) => grid[k] !== v);
     if (bad.length > 0) {
