@@ -5,7 +5,7 @@
     "buildCommand": "npm run build"
   },
   "deploy": {
-    "startCommand": "npx tsx db/provision.ts --phase pre-migration && npx tsx db/migrate.ts && npx tsx db/provision.ts --phase post-migration && npx tsx apps/api/src/server-main.ts",
+    "startCommand": "npx tsx db/migrate.ts && npx tsx apps/api/src/server-main.ts",
     "healthcheckPath": "/health",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
