@@ -8,10 +8,12 @@
 #        shapes, transaction rollback, row locking (FOR UPDATE + statement
 #        timeout), unique-violation error codes, ON CONFLICT atomic upsert,
 #        and the velora_apply_exit trigger (D1, checks S1–S9);
-#     2. the Phase D D2 store batteries (db/tests/*.pg.test.ts) — the real-pg
-#        UserStore / AccountStore / TradeStore / RateLimitStore adapters,
-#        including CAS conflicts, tombstones, allocation atomicity, ownership
-#        isolation, and concurrent-mutation serialization.
+#     2. the Phase D D2/D3 store batteries (db/tests/*.pg.test.ts) — the
+#        real-pg UserStore / AccountStore / TradeStore / RateLimitStore
+#        adapters (CAS conflicts, tombstones, allocation atomicity, ownership
+#        isolation, concurrent-mutation serialization) plus the D3
+#        transactional account quota (users-row FOR UPDATE, atomic
+#        count+create, concurrent-creation correctness).
 #
 # What this is NOT:
 #   - NOT a deployment pipeline (no deploy steps, no artifacts published,
@@ -42,7 +44,7 @@ concurrency:
 
 jobs:
   pg-evidence:
-    name: PG evidence (D1 smoke + D2 store batteries on real PostgreSQL 16)
+    name: PG evidence (D1 smoke + D2/D3 store batteries on real PostgreSQL 16)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -80,15 +82,16 @@ jobs:
           # Assembled from parts so no literal credential URL exists in the
           # repository (tools/secret-scan.sh URL-credential policy).
           DATABASE_URL: postgres://${{ env.PGTEST_USER }}:${{ env.PGTEST_PASSWORD }}@${{ env.PGTEST_HOST }}:${{ env.PGTEST_PORT }}/${{ env.PGTEST_DB }}
-      - name: D2 real-PostgreSQL store batteries
+      - name: D2/D3 real-PostgreSQL store batteries
         # Sequential (shell &&): each battery migrates idempotently and owns
         # its rows; no cross-file parallelism against the shared test DB.
         run: >
           npx tsx --test db/tests/pgUserStore.pg.test.ts &&
           npx tsx --test db/tests/pgAccountStore.pg.test.ts &&
           npx tsx --test db/tests/pgTradeStore.pg.test.ts &&
-          npx tsx --test db/tests/pgRateLimitStore.pg.test.ts
+          npx tsx --test db/tests/pgRateLimitStore.pg.test.ts &&
+          npx tsx --test db/tests/pgQuota.pg.test.ts
         env:
           DATABASE_URL: postgres://${{ env.PGTEST_USER }}:${{ env.PGTEST_PASSWORD }}@${{ env.PGTEST_HOST }}:${{ env.PGTEST_PORT }}/${{ env.PGTEST_DB }}
       - name: Scope note
-        run: echo "D1 smoke + D2 store batteries only. The PGlite dev battery runs via ci.yml; roles.sql and full-battery real-PG coverage are D5/D6."
+        run: echo "D1 smoke + D2/D3 store batteries only. The PGlite dev battery runs via ci.yml; roles.sql and full-battery real-PG coverage are D5/D6."

@@ -4,7 +4,9 @@
 // with one PostgreSQL-specific divergence: deleteForUser returns a real
 // boolean from the DELETE's rowCount (pg exposes it reliably) instead of the
 // PGlite test adapter's always-true placeholder — the port contract says
-// Promise<boolean>.
+// Promise<boolean>. D3 adds createWithQuotaGuard: the transactional quota
+// guard (users-row FOR UPDATE + count + insert in ONE transaction) — the
+// Remote production mechanism, implemented on direct pg.
 //
 // EVIDENCE: adapter battery = db/tests/pgAccountStore.pg.test.ts, executed
 // only against a real disposable PostgreSQL (postgres-evidence workflow).
@@ -12,8 +14,9 @@
 // (id, user_id) — a miss is indistinguishable from "not yours" (non-disclosing
 // 404 mapping happens in AccountService).
 import type { Pool } from "pg";
-import { poolQuery, iso, type QueryFn } from "../persistence/pg.js";
-import type { AccountStore, AccountRecord } from "./accountStore.js";
+import { poolQuery, withTransaction, iso, type QueryFn } from "../persistence/pg.js";
+import type { AccountStore, AccountRecord, AccountCreatePayload } from "./accountStore.js";
+import { AccountQuotaExceededError } from "./accountStore.js";
 
 interface AccountRow {
   id: string;
@@ -122,6 +125,51 @@ export class PgAccountStore implements AccountStore {
     const row = rows[0];
     if (row === undefined) throw new Error("create: INSERT returned no row");
     return mapAccount(row as unknown as AccountRow);
+  }
+
+  async createWithQuotaGuard(
+    userId: string,
+    input: AccountCreatePayload,
+    now: Date,
+    maxTradingAccounts: number,
+  ): Promise<AccountRecord> {
+    return withTransaction(this.pool, async (q) => {
+      // D3: the users-row lock IS the per-user quota mutex — concurrent creators
+      // for the same user serialize here (cross-process correct; FOR UPDATE
+      // blocking on real PG proven by postgres-evidence smoke S7). A missing
+      // user surfaces through the INSERT's FK (23503), identical to create().
+      await q("SELECT id FROM users WHERE id = $1 FOR UPDATE", [userId]);
+      const countRows = await q(
+        "SELECT COUNT(*)::int AS n FROM trading_accounts WHERE user_id = $1",
+        [userId],
+      );
+      const count = Number(countRows[0]?.n ?? 0);
+      if (count >= maxTradingAccounts) {
+        // withTransaction rolls back — nothing mutated, lock released.
+        throw new AccountQuotaExceededError(count);
+      }
+      const rows = await q(
+        `INSERT INTO trading_accounts
+           (user_id, provider, platform, label, account_number_masked, currency, leverage, timezone, timezone_source, status, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11) RETURNING *`,
+        [
+          userId,
+          input.provider,
+          input.platform,
+          input.label,
+          input.accountNumber,
+          input.currency,
+          input.leverage,
+          input.timezone,
+          input.timezoneSource,
+          input.status,
+          now,
+        ],
+      );
+      const row = rows[0];
+      if (row === undefined) throw new Error("createWithQuotaGuard: INSERT returned no row");
+      return mapAccount(row as unknown as AccountRow);
+    });
   }
 
   async updateTimezone(

@@ -17,14 +17,16 @@
 //    429 ACCOUNT_QUOTA_EXCEEDED with {plan, currentCount, maxAllowed}
 //    (Remote createWithEntitlementCheck).
 //  - concurrency: Remote enforces the quota inside a DB transaction with a
-//    user row lock. The memory/test adapters below use check-then-create —
-//    the DB-level guarantee is DEFERRED to Phase D (real PostgreSQL), not
-//    pretended here.
+//    user row lock. D3 implements exactly that for transactional stores
+//    (store.createWithQuotaGuard: users-row FOR UPDATE + count + insert in
+//    one transaction); memory/PGlite test adapters keep the process-local
+//    serialized path below.
 //  - detect-server: pure static suggestion logic (Remote + PHP identical).
 //  - updateTimezone: IANA tz or empty → null + source 'unknown'.
 //  - delete: hard delete (Remote/PHP observable {deleted:true}); Phase E
 //    ledger work may revisit account archival — trades keep their own history.
 import type { AccountStore, AccountRecord, AccountProvider, AccountStatus } from "./accountStore.js";
+import { AccountQuotaExceededError } from "./accountStore.js";
 
 export class AccountError extends Error {
   constructor(
@@ -164,13 +166,55 @@ export class AccountService {
     }
 
     // Entitlement quota (Remote free=1 / pro|enterprise=unlimited → 429).
-    // The check+create pair runs under a per-user mutex — the Remote-evidenced
-    // memory-path mechanism (repository userLocks) that makes concurrent
-    // creation deterministically [201, 429]. The DB-transactional row-lock
-    // guarantee is Phase D (real PostgreSQL); not pretended here.
+    const plan = userPlan ?? (await this.deps.getPlan?.(userId)) ?? "free";
+    const quota = getPlanQuota(plan);
+
+    // D3 — transactional path (real-PostgreSQL stores): the quota is enforced
+    // ATOMICALLY in the database: one transaction locks the user's row
+    // (SELECT … FOR UPDATE), counts their accounts, and inserts only under
+    // the quota. Cross-process correct WITHOUT any process-local mutex (the
+    // Remote production mechanism, implemented on direct pg).
+    if (!quota.isUnlimited && this.deps.store.createWithQuotaGuard !== undefined) {
+      try {
+        return await this.deps.store.createWithQuotaGuard(
+          userId,
+          {
+            provider,
+            platform: provider,
+            label,
+            accountNumber,
+            currency,
+            leverage,
+            timezone,
+            timezoneSource: timezone !== null ? "user_config" : "unknown",
+            status,
+          },
+          this.now(),
+          quota.maxTradingAccounts,
+        );
+      } catch (err) {
+        if (err instanceof AccountQuotaExceededError) {
+          throw new AccountError(
+            429,
+            "ACCOUNT_QUOTA_EXCEEDED",
+            `Trading account quota exceeded. Free plan allows up to ${quota.maxTradingAccounts} trading account.`,
+            {
+              messageKey: "errors.accounts.quotaExceeded", // Remote-verified (integration test)
+              plan: quota.plan,
+              currentCount: err.currentCount,
+              maxAllowed: quota.maxTradingAccounts,
+            },
+          );
+        }
+        throw err;
+      }
+    }
+
+    // Non-transactional stores (memory/PGlite test adapters): the check+create
+    // pair runs under the per-user mutex — the Remote-evidenced memory-path
+    // mechanism (repository userLocks) that makes concurrent creation
+    // deterministically [201, 429] within one process.
     return this.withUserQuotaLock(userId, async () => {
-      const plan = userPlan ?? (await this.deps.getPlan?.(userId)) ?? "free";
-      const quota = getPlanQuota(plan);
       if (!quota.isUnlimited) {
         const count = await this.deps.store.countByUser(userId);
         if (count >= quota.maxTradingAccounts) {
@@ -209,8 +253,10 @@ export class AccountService {
   /**
    * Per-user serialization of the quota check+create pair — the Remote
    * memory-path mechanism (repository `userLocks` promise chain) that makes
-   * concurrent creation deterministically [201, 429]. Process-local only;
-   * the real-DB transaction + row lock is Phase D.
+   * concurrent creation deterministically [201, 429] within ONE process.
+   * D3: transactional stores enforce the quota at the database instead
+   * (createWithQuotaGuard — users-row FOR UPDATE); this mutex now serves
+   * only non-transactional adapters (memory/PGlite).
    */
   private readonly quotaLocks = new Map<string, Promise<void>>();
 

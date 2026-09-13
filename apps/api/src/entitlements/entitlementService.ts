@@ -17,9 +17,10 @@
 //
 // Concurrency note (evidence-honest): Remote enforces the quota atomically in
 // a DB transaction with a user row lock in production, and serializes its
-// in-memory test path with a per-user mutex. Local ports the per-user mutex
-// (process-local; see AccountService) — real-PostgreSQL transaction/row-lock
-// guarantees remain Phase D and are NOT claimed here.
+// in-memory test path with a per-user mutex. D3 implements the DB-transaction
+// + user-row-lock path for transactional stores (AccountStore
+// createWithQuotaGuard); this module's plan lookup stays transaction-free by
+// design (the quota basis is resolved before the guard runs).
 
 export interface PlanQuota {
   readonly plan: string;
