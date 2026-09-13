@@ -14,6 +14,13 @@
 #        isolation, concurrent-mutation serialization) plus the D3
 #        transactional account quota (users-row FOR UPDATE, atomic
 #        count+create, concurrent-creation correctness).
+#     3. the Phase D D4 trade-concurrency battery — service-level mixed-
+#        operation races (exit vs edit, exit vs tombstone, record vs cancel),
+#        allocation races, rollback/lock-release, duplicate event_uid
+#        honesty, tombstone finality, NUMERIC exactness, and the bounded
+#        projection==replay invariant, through TWO TradeService instances
+#        over one pool (explicit statement/lock timeouts; anti-SKIP count
+#        asserted in-step).
 #
 # What this is NOT:
 #   - NOT a deployment pipeline (no deploy steps, no artifacts published,
@@ -93,5 +100,18 @@ jobs:
           npx tsx --test db/tests/pgQuota.pg.test.ts
         env:
           DATABASE_URL: postgres://${{ env.PGTEST_USER }}:${{ env.PGTEST_PASSWORD }}@${{ env.PGTEST_HOST }}:${{ env.PGTEST_PORT }}/${{ env.PGTEST_DB }}
+      - name: D4 real-PostgreSQL trade-concurrency battery (service-level races)
+        # D4 (owner authorization 2026-09-13): mixed-operation races through
+        # the real TradeService over the real PgTradeStore — two independent
+        # service instances, one shared pool; explicit statement/lock timeouts.
+        # Must FAIL if any test fails OR is skipped (anti-SKIP counts asserted).
+        run: >
+          set -o pipefail;
+          npx tsx --test db/tests/pgTradeConcurrency.pg.test.ts 2>&1 | tee /tmp/d4-battery.log &&
+          grep -q "^# pass 14$" /tmp/d4-battery.log &&
+          grep -q "^# skipped 0$" /tmp/d4-battery.log &&
+          grep -q "^# fail 0$" /tmp/d4-battery.log
+        env:
+          DATABASE_URL: postgres://${{ env.PGTEST_USER }}:${{ env.PGTEST_PASSWORD }}@${{ env.PGTEST_HOST }}:${{ env.PGTEST_PORT }}/${{ env.PGTEST_DB }}
       - name: Scope note
-        run: echo "D1 smoke + D2/D3 store batteries only. The PGlite dev battery runs via ci.yml; roles.sql and full-battery real-PG coverage are D5/D6."
+        run: echo "D1 smoke + D2/D3 store batteries + D4 service-level trade-concurrency battery only. The PGlite dev battery runs via ci.yml; roles.sql and full-battery real-PG coverage are D5/D6."
