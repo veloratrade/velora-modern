@@ -3,10 +3,15 @@
 # What this is:
 #   A manually-dispatched job that boots a throwaway postgres:16-alpine service
 #   container (the same major the repo's infra/docker-compose.yml targets) and
-#   runs tools/pg-smoke.ts against it: migrations 0001–0005, NUMERIC-as-string
-#   driver shapes, transaction rollback, row locking (FOR UPDATE + statement
-#   timeout), unique-violation error codes, ON CONFLICT atomic upsert, and the
-#   velora_apply_exit trigger.
+#   runs, against that real PostgreSQL:
+#     1. tools/pg-smoke.ts — migrations 0001–0005, NUMERIC-as-string driver
+#        shapes, transaction rollback, row locking (FOR UPDATE + statement
+#        timeout), unique-violation error codes, ON CONFLICT atomic upsert,
+#        and the velora_apply_exit trigger (D1, checks S1–S9);
+#     2. the Phase D D2 store batteries (db/tests/*.pg.test.ts) — the real-pg
+#        UserStore / AccountStore / TradeStore / RateLimitStore adapters,
+#        including CAS conflicts, tombstones, allocation atomicity, ownership
+#        isolation, and concurrent-mutation serialization.
 #
 # What this is NOT:
 #   - NOT a deployment pipeline (no deploy steps, no artifacts published,
@@ -36,8 +41,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  d1-pg-smoke:
-    name: D1 pg smoke (migrations + driver shapes + tx/lock/upsert on real PostgreSQL 16)
+  pg-evidence:
+    name: PG evidence (D1 smoke + D2 store batteries on real PostgreSQL 16)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -69,11 +74,21 @@ jobs:
           node-version: 20
       - name: Install dependencies (no cache — ci.yml discipline)
         run: npm ci
-      - name: D1 real-PostgreSQL smoke
+      - name: D1 real-PostgreSQL smoke (S1–S9)
         run: npx tsx tools/pg-smoke.ts
         env:
           # Assembled from parts so no literal credential URL exists in the
           # repository (tools/secret-scan.sh URL-credential policy).
           DATABASE_URL: postgres://${{ env.PGTEST_USER }}:${{ env.PGTEST_PASSWORD }}@${{ env.PGTEST_HOST }}:${{ env.PGTEST_PORT }}/${{ env.PGTEST_DB }}
-      - name: Battery re-run on real PG is NOT in scope
-        run: echo "D1 = smoke only. The existing PGlite battery runs via ci.yml; D5/D6 extend real-PG coverage separately."
+      - name: D2 real-PostgreSQL store batteries
+        # Sequential (shell &&): each battery migrates idempotently and owns
+        # its rows; no cross-file parallelism against the shared test DB.
+        run: >
+          npx tsx --test db/tests/pgUserStore.pg.test.ts &&
+          npx tsx --test db/tests/pgAccountStore.pg.test.ts &&
+          npx tsx --test db/tests/pgTradeStore.pg.test.ts &&
+          npx tsx --test db/tests/pgRateLimitStore.pg.test.ts
+        env:
+          DATABASE_URL: postgres://${{ env.PGTEST_USER }}:${{ env.PGTEST_PASSWORD }}@${{ env.PGTEST_HOST }}:${{ env.PGTEST_PORT }}/${{ env.PGTEST_DB }}
+      - name: Scope note
+        run: echo "D1 smoke + D2 store batteries only. The PGlite dev battery runs via ci.yml; roles.sql and full-battery real-PG coverage are D5/D6."

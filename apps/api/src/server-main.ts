@@ -14,19 +14,25 @@
 // connects lazily and reconnects on loss — the process stays up with RED
 // readiness while the database is unavailable, and there is NO code path that
 // could ever substitute memory persistence in staging/production (the boot
-// gate rejects that configuration outright). The pg runtime dependency lands
-// with Phase D; until then a configured DATABASE_URL without pg installed
-// yields permanently-red readiness (honest failure, never a fabricated "ok").
+// gate rejects that configuration outright). PERSISTENCE=postgres boots the
+// real-PostgreSQL adapters (Phase D D2): `pg` is a declared apps/api
+// dependency and the four Pg* stores in this tree are the durable adapters.
 import { createApp, listen } from "./kernel/server.js";
 import { assertBootable, BootError } from "./kernel/boot.js";
 import { AuthService } from "./auth/authService.js";
 import { JwtService } from "./auth/jwt.js";
 import { VeloraHasher } from "./auth/hashing.js";
 import { MemoryUserStore } from "./auth/memoryUserStore.js";
+import { PgUserStore } from "./auth/pgUserStore.js";
 import { AccountService } from "./accounts/accountService.js";
 import { MemoryAccountStore } from "./accounts/memoryAccountStore.js";
+import { PgAccountStore } from "./accounts/pgAccountStore.js";
 import { TradeService } from "./trades/tradeService.js";
 import { MemoryTradeStore } from "./trades/memoryTradeStore.js";
+import { PgTradeStore } from "./trades/pgTradeStore.js";
+import { FixedWindowRateLimiter } from "./ratelimits/rateLimiter.js";
+import { MemoryRateLimitStore } from "./ratelimits/memoryRateLimitStore.js";
+import { PgRateLimitStore } from "./ratelimits/pgRateLimitStore.js";
 import { EntitlementService } from "./entitlements/entitlementService.js";
 
 type PgClient = import("pg").Client;
@@ -109,36 +115,59 @@ async function main(): Promise<void> {
 
   const dbProbe = makeDbProbe(boot.persistence.databaseUrl);
 
-  // Dev wiring: in-memory adapters only (real-PostgreSQL stores = Phase D).
+  // Persistence wiring (Phase D D2, direct pg — no ORM, owner decision
+  // 2026-09-13): PERSISTENCE=postgres boots the real-PostgreSQL adapters over
+  // ONE shared pool; memory adapters remain the dev-only posture. The S8 boot
+  // gate already rejects memory persistence outside development, so no code
+  // path can substitute memory persistence in staging/production.
+  let pool: import("pg").Pool | undefined;
+  if (boot.persistence.kind === "postgres" && boot.persistence.databaseUrl !== undefined) {
+    const { Pool } = (await import("pg")) as typeof import("pg");
+    pool = new Pool({ connectionString: boot.persistence.databaseUrl });
+    // Idle-client socket errors must never crash the process (S2/S8 posture:
+    // stay up, readiness red, reconnect on the next probe).
+    pool.on("error", (err: Error) => {
+      console.error(
+        JSON.stringify({ level: "error", service: "api", event: "pg_pool_error", message: err.message }),
+      );
+    });
+  }
+  const userStore = pool !== undefined ? new PgUserStore(pool) : new MemoryUserStore();
+  const accountStore = pool !== undefined ? new PgAccountStore(pool) : new MemoryAccountStore();
+  const tradeStore = pool !== undefined ? new PgTradeStore(pool) : new MemoryTradeStore();
+  const rateLimitStore = pool !== undefined ? new PgRateLimitStore(pool) : new MemoryRateLimitStore();
+
   // Without a boot JWT secret every capability route stays fail-closed (503).
-  const memoryUserStore = new MemoryUserStore();
-  const memoryAccountStore = new MemoryAccountStore();
   const capabilities: { auth?: AuthService; accounts?: AccountService; trades?: TradeService } = {};
   if (boot.jwtSecret !== undefined) {
     capabilities.auth = new AuthService({
-      store: memoryUserStore,
+      store: userStore,
       hasher: new VeloraHasher(),
       jwt: JwtService.create(boot.jwtSecret),
     });
     // Plan lookup through the entitlement module — fail-closed (503 on store
     // errors, never a silent 'free') per the Remote EntitlementService invariant.
     const entitlements = new EntitlementService({
-      findUserById: (userId) => memoryUserStore.findUserById(userId),
+      findUserById: (userId) => userStore.findUserById(userId),
     });
     capabilities.accounts = new AccountService({
-      store: memoryAccountStore,
+      store: accountStore,
       getPlan: (userId) => entitlements.getUserPlan(userId),
     });
     capabilities.trades = new TradeService({
-      store: new MemoryTradeStore(),
-      getUserTimezone: async (userId) => (await memoryUserStore.findUserById(userId))?.timezone ?? "UTC",
+      store: tradeStore,
+      getUserTimezone: async (userId) => (await userStore.findUserById(userId))?.timezone ?? "UTC",
       verifyAccountOwnership: async (accountId, userId) =>
-        (await memoryAccountStore.findByIdForUser(accountId, userId)) !== null,
+        (await accountStore.findByIdForUser(accountId, userId)) !== null,
     });
   }
   const app = createApp({
     allowedOrigins: boot.allowedOrigins,
     checks: { database: dbProbe },
+    // D2: the limiter rides the configured persistence (PG store when
+    // PERSISTENCE=postgres; per-app memory store otherwise — identical to the
+    // createApp default in the memory posture).
+    rateLimiter: new FixedWindowRateLimiter(rateLimitStore),
     ...capabilities,
   });
   const bound = await listen(app, boot.port);

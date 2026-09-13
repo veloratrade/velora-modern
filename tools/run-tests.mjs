@@ -13,7 +13,11 @@ function walk(dir, out) {
     const p = join(dir, e);
     const s = statSync(p);
     if (s.isDirectory()) walk(p, out);
-    else if (e.endsWith(".test.ts")) out.push(p);
+    // Phase D evidence separation: *.pg.test.ts batteries run ONLY against a
+    // real disposable PostgreSQL (postgres-evidence workflow, DATABASE_URL).
+    // They are excluded here so the local battery stays PGlite/dev-only and
+    // never reports real-PG skips as if something was verified locally.
+    else if (e.endsWith(".test.ts") && !e.endsWith(".pg.test.ts")) out.push(p);
   }
   return out;
 }
