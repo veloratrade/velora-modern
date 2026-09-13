@@ -283,9 +283,18 @@ test("PG: cancelExit — exit tombstone + allocation decrement + version bump, a
 test("PG: searchTrades — filters, journal q, sort whitelist, pagination total", { skip: SKIP }, async () => {
   const h = await harness();
   try {
+    // Fresh dedicated user: search totals must be immune to the trades that
+    // earlier tests in this file created for the shared owner (run-series
+    // lesson — never assert absolute totals on a user with prior state).
+    const u = await h.pool.query(
+      "INSERT INTO users (email, password_hash) VALUES ($1, 'x') " +
+        "ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING id",
+      ["pgtrade-search@velora.test"],
+    );
+    const searcher = String(u.rows[0].id);
     const mk = async (symbol: string, strategy: string, notes: string, open: string): Promise<TradeRecord> => {
       const t = await h.store.createTrade(
-        newTrade(h.owner, { symbol, strategy, notes, openAtUtc: open }),
+        newTrade(searcher, { symbol, strategy, notes, openAtUtc: open }),
         { ...newEvent("TRADE_CREATED", 0), tradeId: "0" },
       );
       return t;
@@ -296,24 +305,24 @@ test("PG: searchTrades — filters, journal q, sort whitelist, pagination total"
     // foreign-user noise must never leak
     await h.store.createTrade(newTrade(h.other, { symbol: "EURUSD" }), { ...newEvent("TRADE_CREATED", 0), tradeId: "0" });
 
-    const all = await h.store.searchTrades({ userId: h.owner }, 1, 50);
+    const all = await h.store.searchTrades({ userId: searcher }, 1, 50);
     assert.equal(all.total, 3);
 
-    const sym = await h.store.searchTrades({ userId: h.owner, symbol: "eur" }, 1, 50); // contains, case-insensitive
+    const sym = await h.store.searchTrades({ userId: searcher, symbol: "eur" }, 1, 50); // contains, case-insensitive
     assert.equal(sym.total, 2);
     assert.deepEqual(sym.items.map((t) => t.symbol), ["EURJPY", "EURUSD"]); // default sort: open_time DESC
 
-    const q = await h.store.searchTrades({ userId: h.owner, q: "pound" }, 1, 50); // journal contains
+    const q = await h.store.searchTrades({ userId: searcher, q: "pound" }, 1, 50); // journal contains
     assert.equal(q.total, 1);
     assert.equal(q.items[0]!.symbol, "GBPUSD");
 
-    const range = await h.store.searchTrades({ userId: h.owner, from: "2026-09-02T00:00:00.000Z", to: "2026-09-10T23:59:59.000Z" }, 1, 50);
+    const range = await h.store.searchTrades({ userId: searcher, from: "2026-09-02T00:00:00.000Z", to: "2026-09-10T23:59:59.000Z" }, 1, 50);
     assert.equal(range.total, 2, "from/to window on open/close instants");
 
-    const byPnl = await h.store.searchTrades({ userId: h.owner, sort: "profit_loss" }, 1, 50);
+    const byPnl = await h.store.searchTrades({ userId: searcher, sort: "profit_loss" }, 1, 50);
     assert.equal(byPnl.total, 3); // whitelist sort executes on the real planner
 
-    const page = await h.store.searchTrades({ userId: h.owner }, 2, 2);
+    const page = await h.store.searchTrades({ userId: searcher }, 2, 2);
     assert.equal(page.total, 3);
     assert.equal(page.items.length, 1, "pagination window (page 2 of size 2)");
     assert.equal(page.items[0]!.symbol, "EURUSD");

@@ -111,8 +111,9 @@ test("PG: 0004 CHECK constraints surface through the adapter (SQLSTATE 23514)", 
 test("PG: quota count under concurrent creation is exact (count-then-create races still bounded by the real table)", { skip: SKIP }, async () => {
   const h = await harness();
   try {
-    // 8 concurrent creates for one user; the count queries race but every
-    // row lands — proving countByUser reads the real table under concurrency.
+    // Relative counting (run 34732659194 lesson: the shared owner user keeps
+    // rows from earlier tests in this file — absolute counts are not stable).
+    const before = await h.store.countByUser(h.owner);
     const created = await Promise.all(
       Array.from({ length: 8 }, (_, i) =>
         h.store.create(h.owner, {
@@ -123,7 +124,7 @@ test("PG: quota count under concurrent creation is exact (count-then-create race
       ),
     );
     assert.equal(created.length, 8);
-    assert.equal(await h.store.countByUser(h.owner), 8);
+    assert.equal(await h.store.countByUser(h.owner), before + 8, "every concurrent create landed exactly once");
     // NOTE (D3 boundary): deterministic quota ENFORCEMENT under concurrency
     // (user-row FOR UPDATE) is Phase D3 scope — this test proves only exact
     // counting, not quota serialization.

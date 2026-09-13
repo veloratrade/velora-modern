@@ -107,17 +107,19 @@ test("PG: ATOMICITY — 12 concurrent hits on one fresh bucket: no lost or dupli
 test("PG: composition — FixedWindowRateLimiter over the PG store blocks at limit+1 with the right Retry-After", { skip: SKIP }, async () => {
   const h = await harness();
   try {
+    // "auth:login" is a REAL RateLimitKey (limit 8 / windowSec 300, C-14) —
+    // the limiter looks its policy up by key; unknown keys have no policy.
     let now = 1_000_000;
     const limiter = new FixedWindowRateLimiter(h.store, () => now);
     for (let i = 1; i <= 8; i++) {
-      assert.deepEqual(await limiter.hit("pg:rl:auth", "203.0.113.7"), { allowed: true });
+      assert.deepEqual(await limiter.hit("auth:login", "203.0.113.7"), { allowed: true });
     }
-    assert.deepEqual(await limiter.hit("pg:rl:auth", "203.0.113.7"), {
+    assert.deepEqual(await limiter.hit("auth:login", "203.0.113.7"), {
       allowed: false,
       retryAfterSec: 300,
     }, "limit-th attempt allowed, (limit+1)-th blocked (PHP parity)");
     now += 300_001; // past the window → fresh window over the SAME store
-    assert.deepEqual(await limiter.hit("pg:rl:auth", "203.0.113.7"), { allowed: true });
+    assert.deepEqual(await limiter.hit("auth:login", "203.0.113.7"), { allowed: true });
   } finally {
     await h.close();
   }
