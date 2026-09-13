@@ -7,11 +7,31 @@ privileges.
 
 ## The three identities
 
-| Variable | Role | Where it is used | Present in app runtime? |
-|---|---|---|---|
-| `DATABASE_URL` | `app_readwrite` | API/worker runtime | **Yes** |
-| `MIGRATION_DATABASE_URL` | `velora_migrator`, with `?options=-c%20role%3Dvelora_owner` | `db/migrate.ts` | **Yes** |
-| `ADMIN_DATABASE_URL` | bootstrap/superuser | `db/provision.ts` only | **No — never** |
+Two different questions must not be conflated:
+
+- **Available to the deployment process** — the variable is present in the
+  service/deployment environment, so a command run during deployment (such as
+  `db/migrate.ts`) can read it.
+- **Consumed by the long-running application process** — the variable is read by
+  `apps/api/src/server-main.ts` (or the worker) and used by the process that
+  keeps serving traffic after deployment finishes.
+
+| Variable | Role | Consumed by | Available to the deployment process? | Consumed by long-running app runtime? |
+|---|---|---|---|---|
+| `DATABASE_URL` | `app_readwrite` | `apps/api/src/server-main.ts` (API/worker runtime) | Yes | **Yes** |
+| `MIGRATION_DATABASE_URL` | `velora_migrator`, with `?options=-c%20role%3Dvelora_owner` | `db/migrate.ts` only | Yes | **No** |
+| `ADMIN_DATABASE_URL` | bootstrap/superuser | `db/provision.ts` only | **No — never supplied** | **No — never** |
+
+- **`DATABASE_URL` — runtime credential.** The only database credential the
+  long-running API/worker process reads.
+- **`MIGRATION_DATABASE_URL` — deployment/migration credential.** Present in the
+  service configuration so that `db/migrate.ts` can run as the first step of the
+  start command, but **not consumed by `server-main.ts`** and therefore not an
+  application runtime credential. VERIFIED: the only reference to it in this
+  repository is the CLI block of `db/migrate.ts`.
+- **`ADMIN_DATABASE_URL` — privileged operator credential.** Used only by
+  `db/provision.ts`, run out of band by an operator. It must never be supplied to
+  the application service at all.
 
 `velora_owner` is `NOLOGIN`: it is an ownership identity, never a connection
 identity. It is reached only through `SET ROLE`.
