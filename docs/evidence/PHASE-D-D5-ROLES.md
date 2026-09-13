@@ -1,8 +1,6 @@
 # Phase D — D5: PostgreSQL Roles & Privilege Enforcement
 
-**Status: IMPLEMENTED + LOCALLY VERIFIED ON REAL POSTGRESQL — CANONICAL GHA EVIDENCE NOT YET EXECUTED.**
-
-D5 implementation is complete and the battery passes **18/18 (0 fail, 0 skipped) against a real PostgreSQL server**. However, the **canonical** Phase D evidence source — the `postgres-evidence` GitHub Actions workflow on `postgres:16-alpine` — **has not been run**, because no GitHub credential was available in the execution environment (no push, no `workflow_dispatch`). Per Phase D policy and AGENTS.md rule 10, **D5 is NOT claimed CLOSED**. No pass is claimed for anything that did not execute.
+**Status: GREEN — GHA run `34768881278` @ `790535d9` — D5 battery 18/18, 0 fail, 0 skipped, on real PostgreSQL 16.15 (`postgres:16-alpine` service container).** D1 S1–S9 and the D2/D3/D4 batteries (44/44) were re-confirmed GREEN in the same run — 62/62 total, zero failures, zero skips. Production code, schema, migrations, and dependencies are UNCHANGED by D5 (verification-only). D6 and Phases E–P are not started. No pass is claimed for anything that did not execute.
 
 **Authorization:** owner message 2026-09-13 — D5 (roles/privileges, append-only enforcement, least-privilege verification, `roles.sql` defect correction, real-PG evidence, Railway staging preparation). B-2 AUTHORIZED, B-3 DEFERRED TO D6, B-4 AUTHORIZED WITH EXPLICIT OWNERSHIP MODEL.
 
@@ -12,11 +10,11 @@ D5 implementation is complete and the battery passes **18/18 (0 fail, 0 skipped)
 
 | Class | Environment | Status | Admissible as Phase D canonical evidence? |
 |---|---|---|---|
-| **A — Canonical** | GHA `postgres-evidence`, `postgres:16-alpine` (PostgreSQL **16.x**), disposable | **NOT EXECUTED** — no credential | Yes (when run) |
-| **B — Local real PG** | Sandbox-installed **PostgreSQL 17.11** (Debian), disposable cluster in `/tmp` | **EXECUTED — 18/18 pass, 0 fail, 0 skipped** | **No** — supplementary only |
+| **A — Canonical** | GHA `postgres-evidence`, `postgres:16-alpine` — **PostgreSQL 16.15**, disposable | **EXECUTED — run `34768881278`: 18/18 pass, 0 fail, 0 skipped** | **Yes — this is the D5 evidence** |
+| **B — Local real PG** | Sandbox-installed **PostgreSQL 17.11** (Debian), disposable cluster in `/tmp` | EXECUTED — 18/18 pass, 0 fail, 0 skipped (development pass) | No — supplementary only |
 | **C — PGlite/memory** | Local battery 304/304, migrations 5/5 | EXECUTED | No (existing policy) |
 
-**Class B is a genuine PostgreSQL server** — real roles, real `SET ROLE`, real `42501` — so it is materially stronger than PGlite. It is still **not** the canonical class: the version differs (**17.11 local vs 16.15 in CI**) and it was not produced by the audited workflow. Class A must be executed before D5 closes.
+**Class A is now executed and is the operative evidence.** Class B (local 17.11) was the development harness used to build and debug the battery before dispatch; it is retained for transparency but nothing depends on it. Both classes agree exactly: 18/18, 0 fail, 0 skipped.
 
 ---
 
@@ -68,7 +66,7 @@ D5 implementation is complete and the battery passes **18/18 (0 fail, 0 skipped)
 
 ---
 
-## 4. Privilege matrix — results (Class B, local real PostgreSQL 17.11)
+## 4. Privilege matrix — results (Class A, CANONICAL: GHA run `34768881278`, PostgreSQL 16.15)
 
 | Test | Assertion | Result |
 |---|---|---|
@@ -91,7 +89,9 @@ D5 implementation is complete and the battery passes **18/18 (0 fail, 0 skipped)
 | P15b | **Documented residual risk** — a future *ledger* table is **not** append-only automatically | **PASS** (asserts the true state) |
 | P16 | No unnecessary privileges: no CREATE for runtime roles; no role is superuser/CREATEDB/CREATEROLE | **PASS** |
 
-**Totals (Class B): tests 18 · pass 18 · fail 0 · skipped 0.**
+**Totals (Class A, canonical — verbatim from the run log): `# tests 18` · `# pass 18` · `# fail 0` · `# skipped 0` · `# todo 0`.**
+Every one of the 18 subtests reported `ok` individually; the run log contains **zero** `not ok` lines and **zero** non-zero skip counts across all batteries.
+Server under test, verbatim: `PASS S1a server_version = PostgreSQL 16.15 (real server, not PGlite)` — `PostgreSQL 16.15 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit`.
 All negative tests assert **SQLSTATE `42501`**; no assertion matches message text.
 
 ### Battery honesty controls
@@ -101,11 +101,13 @@ All negative tests assert **SQLSTATE `42501`**; no assertion matches message tex
   *Note:* an earlier attempt to sabotage by `GRANT`ing directly on the database did **not** fail the battery — because the fixture re-applies `roles.sql` per test and self-heals. That is correct fixture behaviour; the file-level sabotage above is the valid control. Recorded rather than hidden.
 - **Harness defect found and fixed (not worked around):** P15/P15b initially failed (16/18). Root cause — `SET LOCAL ROLE` expires at `COMMIT`, so the "future" table was created by the connection role, not the migrator, bypassing the default-privilege path under test. Fixed with a dedicated `createAsMigrator` helper (`SET ROLE` + `RESET ROLE`, no rollback). **A test-harness defect, not a privilege defect; no assertion was weakened.**
 
-### Regression (Class B, same database with the privilege layer applied)
+### Regression (Class A, same canonical run `34768881278`)
 
 | Battery | Result |
 |---|---|
 | `pgUserStore` 6/6 · `pgAccountStore` 3/3 · `pgTradeStore` 11/11 · `pgRateLimitStore` 6/6 · `pgQuota` 4/4 · `pgTradeConcurrency` 14/14 | **44/44 pass, 0 fail, 0 skipped** |
+| D1 smoke S1–S9 | re-confirmed PASS on PostgreSQL 16.15 |
+| **Run total** | **62/62 pass, 0 fail, 0 skipped** |
 
 **Existing application behaviour is not broken by the privilege layer.**
 
@@ -129,24 +131,25 @@ All negative tests assert **SQLSTATE `42501`**; no assertion matches message tex
 
 ---
 
-## 6. Canonical evidence — what must still run
+## 6. Canonical evidence — executed
 
-```
-Workflow : postgres-evidence   (workflow_dispatch)
-Branch   : reconcile/foundation-first
-Expected : D5 step asserts  # pass 18 / # fail 0 / # skipped 0
-Record   : run ID + server_version + verbatim totals into §4 above
-```
+| Field | Value |
+|---|---|
+| Workflow | `postgres-evidence` (`workflow_dispatch`) |
+| **Run ID** | **`34768881278`** — conclusion **success**, all 10 steps success |
+| Commit under test | `790535d952f2fb42b021ca9edc94ba597c12d604` |
+| Branch | `reconcile/foundation-first` |
+| Database | disposable `postgres:16-alpine` — **PostgreSQL 16.15** — test-only credentials, destroyed with the job |
+| D5 step | `D5 real-PostgreSQL roles & privilege battery` → success |
+| Anti-SKIP | in-step `grep -q "^# pass 18$"` + `"^# skipped 0$"` + `"^# fail 0$"` with `set -o pipefail` — all satisfied |
+| Verbatim totals | `# tests 18 / # pass 18 / # fail 0 / # skipped 0 / # todo 0` |
 
-**Run ID: NOT YET ASSIGNED. PostgreSQL version under canonical test: NOT YET OBSERVED (expected 16.x).**
-
-⚠️ **Version caveat:** local verification ran on **17.11**; CI runs **16.x**. Nothing used is version-specific (`SET ROLE`, `ALTER DEFAULT PRIVILEGES`, `42501` all long-standing), but the totals must be re-observed on 16.x before D5 closes.
+The version caveat from the pre-dispatch draft is **resolved**: the battery was re-observed on **16.15** and produced identical totals to the 17.11 development run.
 
 ---
 
 ## 7. What is NOT proven
 
-- **Canonical GHA evidence on `postgres:16-alpine` — NOT EXECUTED.** The blocking item.
 - **Login / password authentication — NOT TESTED and NOT CLAIMED.** Privileges were exercised with `SET ROLE`. This proves the **authorization grid**; it does **not** prove `pg_hba`/scram authentication, connection-string wiring, or that the app can *connect* as `app_readwrite`. No test passwords were created (owner instruction). Real login verification requires out-of-band credentials — a separate, later item.
 - **Deployment application of the privilege layer.** `railway.json`'s `startCommand` runs `db/migrate.ts` only; **nothing applies `roles-bootstrap.sql` or `roles.sql` in a deployment**, and migrations there do not run as `velora_migrator`. So a deployed environment would still have no privilege layer. Not silently changed — altering `startCommand` is a deployment-behaviour change beyond D5 verification scope. **Prerequisite for Railway staging.**
 - **Future ledger tables are not automatically append-only** (P15b) — each new append-only table needs an explicit REVOKE in `roles.sql`.
