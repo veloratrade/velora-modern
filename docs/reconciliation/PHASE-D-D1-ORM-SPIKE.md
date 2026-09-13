@@ -3,6 +3,8 @@
 **Date:** 2026-09-13 · **Branch:** `reconcile/foundation-first` · **Base:** `95ab7e06` (unchanged)
 **Authorization:** Phase D explicit owner authorization (this session). Scope of this document: **D1 only** — inspect, decide, and prepare verification apparatus. No store adapters were implemented (that is D2).
 
+**Owner decision (2026-09-13, post-report):** recommendation **APPROVED** — direct `pg` (TypeScript → pg → PostgreSQL); **no ORM in Phase D** (Prisma/Drizzle/Kysely/TypeORM excluded); D1 commit `9f2df9d`. Real-PG S1–S9 evidence is required **before** D2. Decision record: §10 items 2–3; execution status: §11.
+
 ---
 
 ## Verdict
@@ -115,9 +117,23 @@ This is not "no framework because fashion": it is that the framework's surface (
 
 ## 10. Blockers and owner decisions still required
 
-1. **Real-PG execution BLOCKED** (push not authorized; Actions disabled at repo level). The owner must push the branch and enable Actions for a window to dispatch `postgres-evidence`. Until then every S1–S9 claim stays NOT TESTED.
-2. **OD-6 closure requires owner confirmation** of this recommendation (direct `pg`). This document does not silently close OD-6.
-3. **D2 file list** (§8 "planned") is a proposal — owner review before implementation begins, per the D1→D2 gate.
+1. **Real-PG execution: owner-authorized (2026-09-13); still mechanically blocked from this workspace.** S1–S9 must run before D2 (owner execution order). This workspace has 0 git remotes, no `gh` CLI, and no GitHub credentials (re-verified 2026-09-13), so push/enable/dispatch are owner-side operations. S1–S9 remain NOT TESTED until the run executes. See §11.
+2. **RESOLVED — owner approval (2026-09-13):** direct `pg` (TypeScript → pg → PostgreSQL); no ORM in Phase D (Prisma/Drizzle/Kysely/TypeORM excluded); D1 commit `9f2df9d` referenced in the approval. OD-6 closed.
+3. **RESOLVED — owner D2 authorization (2026-09-13), conditional on green real-PG S1–S9:** four real-PG stores (UserStore/AccountStore/TradeStore/RateLimitStore), `pg` declared in `apps/api`, existing ports/PGlite adapters/ADR-001..004, ownership checks, tombstones, CAS, ledger behavior, and transaction boundaries preserved; no unrelated redesign; adapter filenames per §8 unless implementation evidence requires adjustment (any deviation reported, never silent).
+
+---
+
+## 11. Post-approval execution status (2026-09-13)
+
+Owner approved D1 and ordered real-PG S1–S9 via `postgres-evidence` before D2. State verified at that moment:
+
+- Workspace: branch `reconcile/foundation-first`, tree clean, **0 remotes, no `gh` CLI, no credentials** → push/dispatch impossible from this workspace (mechanical, not governance).
+- GitHub (anonymous API, same day): repo public; default branch `main` @ `99e024c829…`; `reconcile/foundation-first` does not exist on GitHub; 20 historical Actions runs (latest: CI run #19 success on main, 2026-09-11T23:14Z); current Actions enable-state not anonymously verifiable (`/actions/permissions` → 401).
+- None of main's 11 workflows has a `schedule:` trigger (all push/PR-filtered or dispatch/call-only) → an enable-window creates no scheduled-run risk; pushing the feature branch auto-triggers nothing (its only workflows: `ci.yml` (push/PR → main) and `postgres-evidence.yml` (dispatch-only)).
+- `workflow_dispatch` requires the workflow file on the **default branch** (GitHub docs) — `postgres-evidence.yml` exists only on this branch, and `main` must not be modified. Owner-side options: (a) temporary default-branch switch → UI dispatch → switch back; (b) authenticated `gh workflow run postgres-evidence.yml --ref reconcile/foundation-first` (reported to work without default-branch presence; not verifiable from here); (c) amend the workflow to also trigger on push to exactly this branch (one commit; owner approval pending).
+- Prepared for owner-side push: `velora-phase-d-foundation-first.bundle` (workspace root, outside the repo) containing the full branch history.
+
+S1–S9 remain **NOT TESTED**.
 
 ---
 
