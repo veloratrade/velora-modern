@@ -43,6 +43,29 @@
 //
 // IDEMPOTENT: safe to run on every deploy (VERIFIED by re-running the whole
 // sequence against an already-provisioned database).
+//
+// WHEN THIS RUNS (deployment contract — 2026-09-14)
+// =================================================
+// This runner is a PRIVILEGED, OUT-OF-BAND operation: it requires
+// `ADMIN_DATABASE_URL`, a bootstrap/superuser connection. It is therefore
+// **NOT** part of the application start command. `railway.json` starts the
+// service with `db/migrate.ts && apps/api/src/server-main.ts` only, so the
+// application runtime never needs — and must never hold — the privileged
+// credential. (Chaining this runner into `startCommand` would force
+// `ADMIN_DATABASE_URL` into the runtime environment of every app instance,
+// defeating the separation this file exists to create.)
+//
+// Provisioning is an operator step run once per environment, and again after
+// any restore (`infra/backup/` strips owners/privileges — VERIFIED in
+// docs/evidence/PHASE-D-D5-ROLES.md §"Privileges survive restore?"):
+//
+//   ADMIN_DATABASE_URL=... ADMIN_DATABASE_ROLE=<bootstrap-role> \
+//     npx tsx db/provision.ts --phase pre-migration
+//   MIGRATION_DATABASE_URL=... npx tsx db/migrate.ts
+//   ADMIN_DATABASE_URL=... ADMIN_DATABASE_ROLE=<bootstrap-role> \
+//     npx tsx db/provision.ts --phase post-migration
+//
+// See docs/deployment-contract.md.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
