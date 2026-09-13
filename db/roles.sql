@@ -20,8 +20,29 @@
 -- doing so is the supported way to (re)assert the privilege grid.
 --
 -- ============================================================================
--- OWNERSHIP MODEL (D5 decision for defect D-5 — owner-authorized B-4)
+-- OWNERSHIP MODEL — SUPERSEDED (Railway staging preparation)
 -- ============================================================================
+-- ⚠ The model described in this block ("velora_migrator OWNS the application
+-- schema") was proven UNSATISFIABLE against D5 requirement P13 and has been
+-- replaced by the separated-owner model implemented in `db/provision.ts`:
+--
+--     velora_owner    owns every application object (NOLOGIN)
+--     velora_migrator NOINHERIT member of velora_owner; must SET ROLE to do
+--                     DDL, therefore holds NO implicit runtime DML
+--
+-- Reason: PostgreSQL grants an object's owner all privileges implicitly and
+-- that cannot be revoked. While the migrator owned the tables, P13
+-- ("velora_migrator holds NO runtime DML") could never pass on a non-superuser
+-- connection. VERIFIED: P13 fails with migrator-as-owner, passes once
+-- ownership moves to velora_owner (full battery 18/18).
+--
+-- The D5 CI evidence (run 34768881278) passes 18/18 because the workflow
+-- connects as a SUPERUSER and applies this file AFTER migrations, so every
+-- table ends up owned by that superuser and a superuser's SET ROLE masks the
+-- owner-privilege problem. That run remains valid as PRIVILEGE-GRID evidence;
+-- it is NOT evidence for the ownership model.
+--
+-- Historical description retained below for traceability:
 -- `velora_migrator` OWNS the application schema. Migrations run as that role,
 -- so every table it creates is owned by it. This is required because the right
 -- to ALTER/DROP an object is inherent in the owner and is NOT grantable
@@ -105,8 +126,11 @@ REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE schema_migrations FROM app_read
 
 -- ---------------------------------------------------------------------------
 -- 5. FUTURE TABLES (defect D-2 fix) — ALTER DEFAULT PRIVILEGES.
---    Keyed to velora_migrator because it owns everything it creates, so any
---    table a future migration adds carries these grants automatically.
+--    Keyed to velora_migrator for the historical/CI path. Under the
+--    separated-owner model velora_owner is the creator, so `db/provision.ts`
+--    applies an EQUIVALENT block keyed to velora_owner after this file.
+--    Without that block a future migration would create tables with NO grants
+--    (VERIFIED: probe table gave app_readwrite SELECT = false).
 --
 --    ⚠ DELIBERATE RESIDUAL RISK (documented, not silently accepted):
 --    default privileges are table-type-wide — a FUTURE ledger/event table would

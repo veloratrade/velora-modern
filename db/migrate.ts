@@ -94,8 +94,22 @@ export async function migrate(engine: MigrationEngine, migrationsDir: string): P
 }
 
 // CLI entry: npm run migrate:dev [-- --url postgres://...]
+//
+// Connection precedence (Railway staging preparation):
+//   MIGRATION_DATABASE_URL — the migrator identity (velora_migrator). Preferred
+//     when present so the schema is evolved by a role that holds NO runtime DML.
+//   DATABASE_URL           — fallback; the dev/CI path and the historical
+//     behaviour, unchanged when MIGRATION_DATABASE_URL is absent.
+//
+// The migrator must OWN nothing itself: objects are owned by `velora_owner`,
+// which the migrator assumes for DDL. That is requested per-connection with
+// `?options=-c role=velora_owner` inside MIGRATION_DATABASE_URL rather than a
+// service-wide PGOPTIONS, so the API/worker runtime can never inherit it.
+// (VERIFIED: a service-wide PGOPTIONS is rejected for app_readwrite —
+// "permission denied to set role" — i.e. it fails closed, but scoping it to the
+// migration connection removes the footgun entirely.)
 if (process.argv[1] && process.argv[1].endsWith("migrate.ts")) {
-  const url = process.env.DATABASE_URL;
+  const url = process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL;
   const engine = await createEngine(url);
   try {
     const ran = await migrate(engine, join(import.meta.dirname, "migrations"));
