@@ -1,12 +1,6 @@
 {
   "name": "velora-modern",
-  "version": "0.1.0",
   "private": true,
-  "description": "Velora modern architecture foundation (Phase 1 — dev/staging only)",
-  "type": "module",
-  "engines": {
-    "node": ">=20 <23"
-  },
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -19,10 +13,18 @@
     "secret-scan": "bash tools/secret-scan.sh",
     "migrate:dev": "tsx db/migrate.ts"
   },
+  "engines": {
+    "node": ">=20 <23"
+  },
+  "dependencies": {
+    "tsx": "^4.19.0"
+  },
+  "description": "Velora modern architecture foundation (Phase 1 \u2014 dev/staging only)",
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
     "@types/node": "^20.14.0",
-    "tsx": "^4.19.0",
     "typescript": "^5.5.4"
-  }
+  },
+  "type": "module",
+  "version": "0.1.0"
 }
