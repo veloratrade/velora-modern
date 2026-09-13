@@ -11,7 +11,13 @@
 // and must NOT be redesigned here. This battery proves, on real PostgreSQL:
 //
 //   A. same-trade mixed mutation races (exit vs edit, exit vs tombstone,
-//      edit vs tombstone) — deterministic winner/loser contracts
+//      edit vs tombstone) — deterministic winner-SET invariants: the service's
+//      pre-read is advisory (unlocked), so a fully-serialized interleaving may
+//      legitimately let BOTH racers succeed (the second re-reads the fresh
+//      version); overlapping attempts yield exactly one winner + exact 409/404
+//      for the loser. Both outcomes are correct ADR-002 behavior — the D4
+//      invariants are: no lost update, no double-apply, version == committed
+//      mutations, one event per committed mutation, allocation exact.
 //   B. different-trade concurrency isolation (no cross-row interference)
 //   C. service-level stale CAS → exact 409 CONFLICT, no event written
 //   D. concurrent exits — exactly-one full-volume winner; partial-exit
@@ -208,12 +214,23 @@ function tenths(k: number): string {
   return `${s.slice(0, -8)}.${s.slice(-8)}`;
 }
 
+/** Normalize a decimal string to scale 8 (the domain fold's zero is "0";
+ *  PostgreSQL renders NUMERIC(20,8) as "0.00000000" — equal values, different
+ *  string forms; comparison must be scale-normalized. Integer math only.) */
+function scale8(s: string): string {
+  const m = /^(-?)(\d+)(?:\.(\d*))?$/.exec(s);
+  assert.ok(m !== null, `scale8: not a plain decimal string: ${JSON.stringify(s)}`);
+  const [, sign, intPart, frac = ""] = m;
+  assert.ok(frac.length <= 8, `scale8: more than 8 fraction digits: ${JSON.stringify(s)}`);
+  return `${sign}${intPart}.${frac.padEnd(8, "0")}`;
+}
+
 /** Every trade raced in this battery, for the final replay invariant (L/M). */
 const racedTradeIds: string[] = [];
 
 // ---- tests -----------------------------------------------------------------
 
-test("PG D4 A1: MIXED RACE — createExit vs updateTrade (two service instances) → exactly one winner, exact contracts, no lost event", { skip: SKIP }, async () => {
+test("PG D4 A1: MIXED RACE — createExit vs updateTrade (two service instances) → winner-set invariants, exact contracts, no lost event", { skip: SKIP }, async () => {
   const h = await harness();
   try {
     const id = await newTrade(h.svcA, h.owner);
@@ -224,32 +241,32 @@ test("PG D4 A1: MIXED RACE — createExit vs updateTrade (two service instances)
       attempt(h.svcB.updateTrade(id, h.owner, { notes: "raced-edit" })),
     ]);
 
-    const wins = [exitRes, editRes].filter((r) => r.ok);
-    assert.equal(wins.length, 1, `exactly one winner (got exit=${exitRes.ok} edit=${editRes.ok})`);
-    // the row stays active ⇒ the loser is ALWAYS an exact 409 (not 404)
-    const loser = exitRes.ok ? editRes : exitRes;
-    assert.ok(isExactConflict(loser), `loser exact 409 CONFLICT, got ${JSON.stringify(loser)}`);
+    const k = [exitRes, editRes].filter((r) => r.ok).length;
+    assert.ok(k === 1 || k === 2, `winner count ∈ {1 overlapping, 2 serialized}, got ${k}`);
+    for (const loser of [exitRes, editRes].filter((r) => !r.ok)) {
+      // the row stays active in this race ⇒ a loser is ALWAYS an exact 409
+      assert.ok(isExactConflict(loser), `loser exact 409 CONFLICT, got ${JSON.stringify(loser)}`);
+    }
 
     const p = await projection(h.pool, id);
-    assert.equal(p.version, "1", "one mutation applied ⇒ version 1");
+    assert.equal(p.version, String(k), "version advanced once per committed mutation");
     assert.equal(p.deletedAt, null, "no tombstone in this race");
+    assert.equal(await countEvents(h.pool, id), 1 + k, "TRADE_CREATED + one event per committed mutation (no lost, no extra)");
     const exits = await activeExits(h.pool, id);
     if (exitRes.ok) {
-      assert.equal(p.allocated, "0.20000000", "exit won ⇒ allocation applied at scale 8");
-      assert.equal(exits.length, 1, "exit won ⇒ one active exit row");
-      assert.equal(p.notes, "d4 probe", "edit lost ⇒ journaling untouched");
+      assert.equal(p.allocated, "0.20000000", "exit committed ⇒ allocation applied at scale 8");
+      assert.equal(exits.length, 1, "exit committed ⇒ one active exit row");
     } else {
-      assert.equal(p.allocated, "0.00000000", "edit won ⇒ no allocation");
-      assert.equal(exits.length, 0, "edit won ⇒ zero exit rows");
-      assert.equal(p.notes, "raced-edit", "edit won ⇒ notes applied");
+      assert.equal(p.allocated, "0.00000000", "exit lost ⇒ no allocation");
+      assert.equal(exits.length, 0, "exit lost ⇒ zero exit rows");
     }
-    assert.equal(await countEvents(h.pool, id), 2, "TRADE_CREATED + exactly one mutation event (no lost event, no extra)");
+    assert.equal(p.notes, editRes.ok ? "raced-edit" : "d4 probe", "journaling reflects exactly whether the edit committed");
   } finally {
     await h.close();
   }
 });
 
-test("PG D4 A2: MIXED RACE — createExit vs deleteTrade (tombstone) → one winner, tombstone/no-tombstone invariants hold", { skip: SKIP }, async () => {
+test("PG D4 A2: MIXED RACE — createExit vs deleteTrade (tombstone) → winner-set invariants; tombstone/no-tombstone consistency", { skip: SKIP }, async () => {
   const h = await harness();
   try {
     const id = await newTrade(h.svcA, h.owner);
@@ -260,32 +277,43 @@ test("PG D4 A2: MIXED RACE — createExit vs deleteTrade (tombstone) → one win
       attempt(h.svcB.deleteTrade(id, h.owner)),
     ]);
 
-    assert.equal([exitRes, tombRes].filter((r) => r.ok).length, 1, "exactly one winner");
-    if (tombRes.ok) {
-      // exit loser: row either still visible-with-new-version (409) or already
-      // tombstoned under its lock (404) — both are correct fail-closed outcomes
-      assert.ok(isExactConflict(exitRes) || isExactTrade404(exitRes),
-        `exit loser ∈ {409 CONFLICT, 404 NOT_FOUND}, got ${JSON.stringify(exitRes)}`);
-    } else {
-      assert.ok(isExactConflict(tombRes), `tombstone loser exact 409 (row stays active), got ${JSON.stringify(tombRes)}`);
+    const k = [exitRes, tombRes].filter((r) => r.ok).length;
+    assert.ok(k === 1 || k === 2, `winner count ∈ {1, 2}, got ${k}`);
+    // loser contracts are determined by WHO won:
+    //  - tombstone won ⇒ the exit attempt fails closed (404 once tombstoned —
+    //    the locked parent filters deleted rows) — never a post-tombstone write
+    //  - exit won ⇒ the tombstone loser saw an active row at a moved version ⇒ 409
+    if (k === 1) {
+      if (tombRes.ok) {
+        assert.ok(exitRes.status === 404 && exitRes.code === "NOT_FOUND",
+          `exit loser after tombstone → exact 404 NOT_FOUND, got ${JSON.stringify(exitRes)}`);
+      } else {
+        assert.ok(isExactConflict(tombRes), `tombstone loser exact 409 (row stays active), got ${JSON.stringify(tombRes)}`);
+      }
     }
 
     const p = await projection(h.pool, id);
-    assert.equal(p.version, "1", "exactly one mutation committed");
-    if (tombRes.ok) {
+    assert.equal(p.version, String(k), "version == committed mutations");
+    assert.equal(await countEvents(h.pool, id), 1 + k, "one event per committed mutation");
+    if (k === 2) {
+      // both committed ⇒ the ONLY legal order is exit-then-tombstone
+      // (an exit after the tombstone is a non-disclosing 404, proven in F/N)
+      assert.notEqual(p.deletedAt, null, "serialized both ⇒ ended tombstoned");
+      assert.equal(p.allocated, "0.20000000", "exit applied before the tombstone");
+      assert.equal((await activeExits(h.pool, id)).length, 1, "exit row preserved under the tombstone (immutable ledger)");
+    } else if (tombRes.ok) {
       assert.notEqual(p.deletedAt, null, "tombstone won ⇒ deleted_at set");
       assert.equal((await activeExits(h.pool, id)).length, 0, "tombstone won ⇒ no exit row (loser rolled back entirely)");
     } else {
       assert.equal(p.deletedAt, null, "exit won ⇒ trade still active");
       assert.equal(p.allocated, "0.20000000", "exit won ⇒ allocation applied");
     }
-    assert.equal(await countEvents(h.pool, id), 2, "exactly one mutation event — no lost, no partial");
   } finally {
     await h.close();
   }
 });
 
-test("PG D4 A3: MIXED RACE — updateTrade vs deleteTrade → one winner; loser exact contract; projection consistent", { skip: SKIP }, async () => {
+test("PG D4 A3: MIXED RACE — updateTrade vs deleteTrade → winner-set invariants; loser exact contract; projection consistent", { skip: SKIP }, async () => {
   const h = await harness();
   try {
     const id = await newTrade(h.svcA, h.owner);
@@ -296,17 +324,26 @@ test("PG D4 A3: MIXED RACE — updateTrade vs deleteTrade → one winner; loser 
       attempt(h.svcB.deleteTrade(id, h.owner)),
     ]);
 
-    assert.equal([editRes, tombRes].filter((r) => r.ok).length, 1, "exactly one winner");
-    if (tombRes.ok) {
-      assert.ok(isExactConflict(editRes) || isExactTrade404(editRes),
-        `edit loser ∈ {409, 404}, got ${JSON.stringify(editRes)}`);
-    } else {
-      assert.ok(isExactConflict(tombRes), `tombstone loser exact 409, got ${JSON.stringify(tombRes)}`);
+    const k = [editRes, tombRes].filter((r) => r.ok).length;
+    assert.ok(k === 1 || k === 2, `winner count ∈ {1, 2}, got ${k}`);
+    if (k === 1) {
+      if (tombRes.ok) {
+        assert.ok(editRes.status === 404 && editRes.code === "NOT_FOUND",
+          `edit loser after tombstone → exact 404, got ${JSON.stringify(editRes)}`);
+      } else {
+        assert.ok(isExactConflict(tombRes), `tombstone loser exact 409, got ${JSON.stringify(tombRes)}`);
+      }
     }
     const p = await projection(h.pool, id);
-    assert.equal(p.version, "1", "one mutation committed");
-    assert.equal(await countEvents(h.pool, id), 2, "no lost events");
-    if (editRes.ok) assert.equal(p.notes, "edit-race", "edit won ⇒ notes applied");
+    assert.equal(p.version, String(k), "version == committed mutations");
+    assert.equal(await countEvents(h.pool, id), 1 + k, "no lost events");
+    if (k === 2) {
+      assert.notEqual(p.deletedAt, null, "serialized both ⇒ edit-then-tombstone");
+      assert.equal(p.notes, "edit-race", "edit committed before the tombstone");
+    } else if (editRes.ok) {
+      assert.equal(p.notes, "edit-race", "edit won ⇒ notes applied");
+      assert.equal(p.deletedAt, null, "edit won ⇒ still active");
+    }
   } finally {
     await h.close();
   }
@@ -417,7 +454,7 @@ test("PG D4 D2: concurrent PARTIAL exits (8 × 0.2, two services) → every fail
   }
 });
 
-test("PG D4 E: createExit vs deleteExit race → one winner; allocation increment/decrement stays exactly consistent", { skip: SKIP }, async () => {
+test("PG D4 E: createExit vs deleteExit race → winner-set invariants; allocation increment/decrement stays exactly consistent", { skip: SKIP }, async () => {
   const h = await harness();
   try {
     const id = await newTrade(h.svcA, h.owner);
@@ -430,21 +467,29 @@ test("PG D4 E: createExit vs deleteExit race → one winner; allocation incremen
       attempt(h.svcB.deleteExit(preExitId, h.owner)),
     ]);
 
-    assert.equal([createRes, cancelRes].filter((r) => r.ok).length, 1, "exactly one winner");
-    const loser = createRes.ok ? cancelRes : createRes;
-    assert.ok(isExactConflict(loser), `loser exact 409 (row active, version moved), got ${JSON.stringify(loser)}`);
+    const k = [createRes, cancelRes].filter((r) => r.ok).length;
+    assert.ok(k === 1 || k === 2, `winner count ∈ {1, 2}, got ${k}`);
+    for (const loser of [createRes, cancelRes].filter((r) => !r.ok)) {
+      // the trade row stays active in this race ⇒ loser is always an exact 409
+      assert.ok(isExactConflict(loser), `loser exact 409, got ${JSON.stringify(loser)}`);
+    }
 
     const p = await projection(h.pool, id);
     const exits = await activeExits(h.pool, id);
-    assert.equal(p.version, "2", "second committed mutation");
-    if (createRes.ok) {
+    assert.equal(p.version, String(1 + k), "version advanced once per committed mutation");
+    if (k === 2) {
+      // serialized both (either order): 0.3 + 0.5 − 0.3 = 0.5 exactly
+      assert.equal(p.allocated, "0.50000000", "increment + decrement both applied exactly (order-independent)");
+      assert.equal(exits.length, 1, "the cancelled exit is tombstoned; the created exit remains");
+      assert.equal(exits[0].volume, "0.50000000", "remaining active exit is the created 0.5");
+    } else if (createRes.ok) {
       assert.equal(p.allocated, "0.80000000", "create won ⇒ 0.3 + 0.5 applied exactly");
       assert.equal(exits.length, 2, "both exits active");
     } else {
       assert.equal(p.allocated, "0.00000000", "cancel won ⇒ 0.3 − 0.3 decremented exactly");
       assert.equal(exits.length, 0, "cancelled exit tombstoned, none active");
     }
-    assert.equal(await countEvents(h.pool, id), 3, "created + first exit + exactly one race winner event");
+    assert.equal(await countEvents(h.pool, id), 2 + k, "created + first exit + one event per committed race mutation");
   } finally {
     await h.close();
   }
@@ -676,7 +721,7 @@ test("PG D4 L/M: no lost events + bounded replay — projection == fold(trade_ev
       )).rows[0] as { version: string; allocated_volume: string; deleted_at: Date | null; notes: string | null; strategy: string | null };
       assert.ok(state !== null, `trade ${tid} folded to a state`);
       assert.equal(String(state.version), String(row.version), `trade ${tid}: replay version == projection version`);
-      assert.equal(state.allocatedVolume, String(row.allocated_volume), `trade ${tid}: replay allocation == projection (scale-8 string)`);
+      assert.equal(scale8(state.allocatedVolume), scale8(String(row.allocated_volume)), `trade ${tid}: replay allocation == projection (scale-8 normalized; domain zero "0" ≡ PG "0.00000000")`);
       assert.equal(state.deletedAt !== null, row.deleted_at !== null, `trade ${tid}: replay tombstone state == projection`);
       assert.equal(state.journaling.notes ?? null, row.notes, `trade ${tid}: replay notes == projection`);
       assert.equal(state.journaling.strategy ?? null, row.strategy, `trade ${tid}: replay strategy == projection`);
