@@ -608,9 +608,14 @@ export function createApp(config: ApiConfig): Server {
   });
 }
 
-export function listen(app: Server, port = 0): Promise<number> {
+export function listen(app: Server, port = 0, host = "127.0.0.1"): Promise<number> {
+  // Host is configurable for deployed environments (Railway/container platforms
+  // require binding the external interface — a loopback bind passes in-container
+  // healthchecks but the edge proxy gets connection-refused → 502; discovered
+  // by the Phase D Railway staging test, 2026-09-13). Default keeps the
+  // established local-dev behavior byte-identical.
   return new Promise((resolvePromise) => {
-    app.listen(port, "127.0.0.1", () => {
+    app.listen(port, host, () => {
       const addr = app.address();
       resolvePromise(typeof addr === "object" && addr ? addr.port : port);
     });

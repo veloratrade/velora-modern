@@ -170,7 +170,9 @@ async function main(): Promise<void> {
     rateLimiter: new FixedWindowRateLimiter(rateLimitStore),
     ...capabilities,
   });
-  const bound = await listen(app, boot.port);
+  // HOST: bind address for deployed environments (container platforms need
+  // 0.0.0.0; default 127.0.0.1 preserves local-dev behavior).
+  const bound = await listen(app, boot.port, process.env.HOST ?? "127.0.0.1");
   console.log(
     JSON.stringify({
       level: "info",
