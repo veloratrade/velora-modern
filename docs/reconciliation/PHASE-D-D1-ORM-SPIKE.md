@@ -133,7 +133,7 @@ Owner approved D1 and ordered real-PG S1–S9 via `postgres-evidence` before D2.
 - `workflow_dispatch` requires the workflow file on the **default branch** (GitHub docs) — `postgres-evidence.yml` exists only on this branch, and `main` must not be modified. Owner-side options: (a) temporary default-branch switch → UI dispatch → switch back; (b) authenticated `gh workflow run postgres-evidence.yml --ref reconcile/foundation-first` (reported to work without default-branch presence; not verifiable from here); (c) amend the workflow to also trigger on push to exactly this branch (one commit; owner approval pending).
 - Prepared for owner-side push: `velora-phase-d-foundation-first.bundle` (workspace root, outside the repo) containing the full branch history.
 
-S1–S9 remain **NOT TESTED**.
+S1–S9 **RESULT (2026-09-13): GREEN — run 34731411400**, S1–S9 all PASS on PostgreSQL 16.15 (`postgres:16-alpine` service container), commit under test `cad84f35`. Full record with verbatim log lines, execution mechanics, and scope boundaries: `docs/evidence/PHASE-D-D1-PG-EVIDENCE.md`. **D1 decision (direct `pg`) confirmed valid; D2 gate open.**
 
 ---
 
