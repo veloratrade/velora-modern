@@ -149,7 +149,7 @@ test("PG: ownership isolation + tombstone semantics (never a physical DELETE)", 
 
     const row = await h.pool.query("SELECT deleted_at IS NOT NULL AS d, version FROM trades WHERE id = $1", [t.id]);
     assert.equal(row.rows[0].d, true, "row still physically present (ADR-002 tombstone law)");
-    assert.equal(row.rows[0].version, 1);
+    assert.equal(Number(row.rows[0].version), 1, "int8 version arrives as string (S3) — compare numerically");
     const events = await h.pool.query("SELECT type FROM trade_events WHERE trade_id = $1 ORDER BY id", [t.id]);
     assert.equal(events.rows.length, 2, "projection + TOMBSTONE_SET events");
   } finally {
@@ -216,7 +216,7 @@ test("PG: recordExit — allocation increments via trigger, version bumps, event
 
     const exits = await h.store.listActiveExitsForTrade(t.id, h.owner);
     assert.equal(exits.length, 1);
-    assert.equal(await h.store.listActiveExitsForTrade(t.id, h.other), [], "ownership-scoped exit listing");
+    assert.deepEqual(await h.store.listActiveExitsForTrade(t.id, h.other), [], "ownership-scoped exit listing");
     const byId = await h.store.findActiveExitByIdForUser(exit.id, h.owner);
     assert.notEqual(byId, null);
     assert.equal(await h.store.findActiveExitByIdForUser(exit.id, h.other), null);

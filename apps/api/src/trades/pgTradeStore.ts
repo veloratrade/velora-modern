@@ -455,7 +455,10 @@ export class PgTradeStore implements TradeStore {
           event.at,
         ],
       );
-      return mapExit(e, "0.00");
+      // Guidance semantics: the returned record carries the tombstone time
+      // (event.at) — the row `e` was read BEFORE the UPDATE and would still
+      // show deleted_at = null. Caught by the real-PG battery (run 34732875535).
+      return { ...mapExit(e, "0.00"), deletedAt: event.at };
     });
   }
 }
