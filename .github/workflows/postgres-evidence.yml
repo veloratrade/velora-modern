@@ -51,7 +51,7 @@ concurrency:
 
 jobs:
   pg-evidence:
-    name: PG evidence (D1 smoke + D2/D3 store batteries on real PostgreSQL 16)
+    name: PG evidence (D1 smoke + D2/D3 stores + D4 concurrency + D5 roles on real PostgreSQL 16)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -113,5 +113,27 @@ jobs:
           grep -q "^# fail 0$" /tmp/d4-battery.log
         env:
           DATABASE_URL: postgres://${{ env.PGTEST_USER }}:${{ env.PGTEST_PASSWORD }}@${{ env.PGTEST_HOST }}:${{ env.PGTEST_PORT }}/${{ env.PGTEST_DB }}
+      - name: D5 real-PostgreSQL roles & privilege battery (least privilege / append-only)
+        # D5 (owner authorization 2026-09-13): applies db/roles-bootstrap.sql +
+        # db/roles.sql to the disposable database and asserts the least-privilege
+        # grid via SET ROLE — append-only enforcement on trade_events /
+        # webhook_events (negative tests assert SQLSTATE 42501, never message
+        # text), readonly restriction, migrator schema-DDL capability, future-table
+        # default privileges, and that the privilege layer does not break the
+        # trigger-driven exit path.
+        #
+        # SCOPE LIMIT recorded in the evidence: this proves PRIVILEGE
+        # AUTHORIZATION, not LOGIN AUTHENTICATION. No test passwords are created,
+        # so pg_hba/scram authentication for these roles is NOT exercised.
+        #
+        # Must FAIL if any test fails OR is skipped (anti-SKIP counts asserted).
+        run: >
+          set -o pipefail;
+          npx tsx --test db/tests/pgRoles.pg.test.ts 2>&1 | tee /tmp/d5-battery.log &&
+          grep -q "^# pass 18$" /tmp/d5-battery.log &&
+          grep -q "^# skipped 0$" /tmp/d5-battery.log &&
+          grep -q "^# fail 0$" /tmp/d5-battery.log
+        env:
+          DATABASE_URL: postgres://${{ env.PGTEST_USER }}:${{ env.PGTEST_PASSWORD }}@${{ env.PGTEST_HOST }}:${{ env.PGTEST_PORT }}/${{ env.PGTEST_DB }}
       - name: Scope note
-        run: echo "D1 smoke + D2/D3 store batteries + D4 service-level trade-concurrency battery only. The PGlite dev battery runs via ci.yml; roles.sql and full-battery real-PG coverage are D5/D6."
+        run: echo "D1 smoke + D2/D3 store batteries + D4 trade-concurrency + D5 roles/privilege battery. The PGlite dev battery runs via ci.yml. D5 proves privilege authorization via SET ROLE, NOT login authentication; full-battery real-PG coverage remains D6."
