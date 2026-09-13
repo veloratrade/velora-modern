@@ -165,15 +165,22 @@ test("PG: verifications — create, count-since, latest, consume, delete-all", {
     });
     const v1 = await h.store.createVerification({ userId: u.id, tokenHash: "th-1", expiresAt: T2, createdAt: T0 });
     const v2 = await h.store.createVerification({ userId: u.id, tokenHash: "th-2", expiresAt: T2, createdAt: T1 });
-    assert.equal(await h.store.countVerificationsSince(u.id, T0), 2);
-    assert.equal(await h.store.countVerificationsSince(u.id, T1), 1);
+    // created_at is DB-generated (DEFAULT now() — same contract as the
+    // PGlite-evidenced adapter; the input createdAt exists for the memory
+    // adapter's deterministic tests). Count boundaries therefore anchor to
+    // the store's OWN returned timestamps, never to a caller-side clock
+    // (run 34732496174 lesson: fixed future-dated boundaries count zero).
+    assert.equal(await h.store.countVerificationsSince(u.id, new Date(0)), 2, "since epoch: both rows");
+    const justAfterFirst = new Date(new Date(v1.createdAt).getTime() + 1);
+    assert.equal(await h.store.countVerificationsSince(u.id, justAfterFirst), 1, ">= boundary excludes the earlier row");
     const latest = await h.store.latestVerification(u.id);
-    assert.equal(latest!.tokenHash, "th-2"); // ORDER BY created_at DESC — T1 after T0
+    assert.equal(latest!.tokenHash, "th-2"); // v2 inserted after v1 — later DB created_at
     assert.equal((await h.store.findVerificationByTokenHash("th-1"))!.id, v1.id);
     await h.store.consumeVerification(v1.id, T2);
     assert.equal((await h.store.findVerificationByTokenHash("th-1"))!.consumedAt, T2.toISOString());
     await h.store.deleteVerifications(u.id);
     assert.equal(await h.store.latestVerification(u.id), null);
+    assert.equal(await h.store.countVerificationsSince(u.id, new Date(0)), 0, "all rows deleted");
     void v2;
   } finally {
     await h.close();
