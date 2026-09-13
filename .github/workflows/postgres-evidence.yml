@@ -1,0 +1,79 @@
+# Phase D real-PostgreSQL evidence — TEST-ONLY workflow (D1 authorization, 2026-09-13).
+#
+# What this is:
+#   A manually-dispatched job that boots a throwaway postgres:16-alpine service
+#   container (the same major the repo's infra/docker-compose.yml targets) and
+#   runs tools/pg-smoke.ts against it: migrations 0001–0005, NUMERIC-as-string
+#   driver shapes, transaction rollback, row locking (FOR UPDATE + statement
+#   timeout), unique-violation error codes, ON CONFLICT atomic upsert, and the
+#   velora_apply_exit trigger.
+#
+# What this is NOT:
+#   - NOT a deployment pipeline (no deploy steps, no artifacts published,
+#     nothing written outside the job).
+#   - NOT production or staging (disposable container; credentials below are
+#     test-only and destroyed with the job; no real user data or secrets).
+#   - NOT triggered automatically: workflow_dispatch only — no push, PR, or
+#     schedule triggers, so it costs nothing until the owner runs it.
+#
+# Execution is BLOCKED until the owner (a) pushes this branch (push NOT
+# authorized in Phase D) and (b) enables GitHub Actions for a window
+# (repository-level disable per owner cost policy). When executed, results land
+# in the Actions log only.
+#
+# Secret-scan policy: this file contains no literal credential-shaped connection
+# URL; DATABASE_URL is assembled from ${...} placeholders (the same pattern
+# infra/docker-compose.yml uses), which are not credentials by design.
+name: postgres-evidence
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pg-evidence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  d1-pg-smoke:
+    name: D1 pg smoke (migrations + driver shapes + tx/lock/upsert on real PostgreSQL 16)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          # Disposable test-only credentials (never production/staging; the
+          # container and its data are destroyed with the job).
+          POSTGRES_USER: velora_test
+          POSTGRES_PASSWORD: velora-test-only
+          POSTGRES_DB: velora_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U velora_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGTEST_USER: velora_test
+      PGTEST_PASSWORD: velora-test-only
+      PGTEST_DB: velora_test
+      PGTEST_HOST: localhost
+      PGTEST_PORT: "5432"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies (no cache — ci.yml discipline)
+        run: npm ci
+      - name: D1 real-PostgreSQL smoke
+        run: npx tsx tools/pg-smoke.ts
+        env:
+          # Assembled from parts so no literal credential URL exists in the
+          # repository (tools/secret-scan.sh URL-credential policy).
+          DATABASE_URL: postgres://${{ env.PGTEST_USER }}:${{ env.PGTEST_PASSWORD }}@${{ env.PGTEST_HOST }}:${{ env.PGTEST_PORT }}/${{ env.PGTEST_DB }}
+      - name: Battery re-run on real PG is NOT in scope
+        run: echo "D1 = smoke only. The existing PGlite battery runs via ci.yml; D5/D6 extend real-PG coverage separately."
