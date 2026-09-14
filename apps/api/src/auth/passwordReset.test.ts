@@ -238,7 +238,7 @@ test("RESET: SUCCESS revokes every active session", async () => {
 
   for (const s of [s1, s2]) {
     await assert.rejects(
-      () => h.service.refresh(s.refreshToken, {}),
+      () => h.service.refresh(s.refreshToken),
       "refresh must fail after a password reset",
     );
   }

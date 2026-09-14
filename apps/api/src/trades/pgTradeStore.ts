@@ -31,6 +31,7 @@ import type {
   StoredTradeEvent,
   TradeSearchFilter,
   TradeExitRecord,
+  TradeFinancialRecompute,
 } from "./tradeStore.js";
 import { TradeVersionConflictError, TradeOverAllocationError, TradeStoreError } from "./tradeStore.js";
 
@@ -363,6 +364,7 @@ export class PgTradeStore implements TradeStore {
     userId: string,
     exit: NewTradeExit,
     event: StoredTradeEvent,
+    recomputed?: TradeFinancialRecompute,
   ): Promise<TradeExitRecord> {
     return withTransaction(this.pool, async (q) => {
       const parent = await this.lockedParent(q, tradeId, userId, event.expectedVersion);
@@ -381,9 +383,16 @@ export class PgTradeStore implements TradeStore {
         }
         throw err;
       }
+      // Version bump + canonical financial recompute in ONE statement, inside
+      // the same transaction as the exit insert and the event append.
       await q(
-        "UPDATE trades SET version = version + 1, updated_at = $1 WHERE id = $2 AND version = $3",
-        [event.at, tradeId, event.expectedVersion],
+        recomputed === undefined
+          ? "UPDATE trades SET version = version + 1, updated_at = $1 WHERE id = $2 AND version = $3"
+          : `UPDATE trades SET version = version + 1, updated_at = $1, net_pnl = $4, r_multiple = $5
+             WHERE id = $2 AND version = $3`,
+        recomputed === undefined
+          ? [event.at, tradeId, event.expectedVersion]
+          : [event.at, tradeId, event.expectedVersion, recomputed.netPnl, recomputed.rMultiple],
       );
       await q(
         `INSERT INTO trade_events (event_uid, trade_id, type, actor, expected_version, payload, at)
@@ -426,6 +435,7 @@ export class PgTradeStore implements TradeStore {
     exitId: string,
     userId: string,
     event: StoredTradeEvent,
+    recomputed?: TradeFinancialRecompute,
   ): Promise<TradeExitRecord | null> {
     return withTransaction(this.pool, async (q) => {
       const rows = await q(
@@ -439,8 +449,13 @@ export class PgTradeStore implements TradeStore {
       if (parent === null) return null;
       await q("UPDATE trade_exits SET deleted_at = $1 WHERE id = $2", [event.at, exitId]);
       await q(
-        "UPDATE trades SET allocated_volume = allocated_volume - $1, version = version + 1, updated_at = $2 WHERE id = $3 AND version = $4",
-        [e.volume, event.at, e.trade_id, event.expectedVersion],
+        recomputed === undefined
+          ? "UPDATE trades SET allocated_volume = allocated_volume - $1, version = version + 1, updated_at = $2 WHERE id = $3 AND version = $4"
+          : `UPDATE trades SET allocated_volume = allocated_volume - $1, version = version + 1, updated_at = $2,
+               net_pnl = $5, r_multiple = $6 WHERE id = $3 AND version = $4`,
+        recomputed === undefined
+          ? [e.volume, event.at, e.trade_id, event.expectedVersion]
+          : [e.volume, event.at, e.trade_id, event.expectedVersion, recomputed.netPnl, recomputed.rMultiple],
       );
       await q(
         `INSERT INTO trade_events (event_uid, trade_id, type, actor, expected_version, payload, at)

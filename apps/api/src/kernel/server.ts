@@ -600,7 +600,15 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
   if (method === "DELETE" && /^\/api\/v1\/trades\/[^/]+$/.test(path)) {
     return tradesRoute(async (trades, claims) => {
       const id = decodeURIComponent(path.split("/")[4] ?? "");
-      return { status: 200, body: ok(await trades.deleteTrade(id, claims.sub)) };
+      // OD-2: optimistic concurrency is mandatory on delete. The expected
+      // version may arrive as `If-Match` or as a JSON body `version`.
+      const ifMatch = req.headers["if-match"];
+      const headerVersion = typeof ifMatch === "string" ? ifMatch.replace(/^W\/|"/g, "").trim() : undefined;
+      const body = await parseJsonBody(req).catch(() => ({}) as Record<string, unknown>);
+      const expected = headerVersion !== undefined && headerVersion !== "" ? headerVersion : body.version;
+      await trades.deleteTrade(id, claims.sub, expected);
+      // OD-2: successful tombstone => 204 No Content (empty body).
+      return { status: 204, body: null };
     });
   }
 
@@ -640,6 +648,15 @@ export function createApp(config: ApiConfig): Server {
           ...SECURITY_HEADERS,
           ...r.headers,
         };
+        // RFC 9110 §15.3.5: a 204 carries no body. OD-2 mandates 204 for a
+        // successful trade tombstone, so the envelope is suppressed (and with
+        // it Content-Type/Content-Length) rather than serialized as "null".
+        if (r.status === 204) {
+          delete headers["Content-Type"];
+          res.writeHead(204, headers);
+          res.end();
+          return;
+        }
         res.writeHead(r.status, headers);
         res.end(JSON.stringify(r.body));
       })

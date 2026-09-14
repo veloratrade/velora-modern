@@ -8,6 +8,7 @@ import {
   type TradeStore, type TradeRecord, type NewTrade, type TradeExitRecord, type NewTradeExit,
   type StoredTradeEvent, type TradeSearchFilter,
   TradeStoreError, TradeVersionConflictError, TradeOverAllocationError,
+  type TradeFinancialRecompute,
 } from "./tradeStore.js";
 import * as D from "@velora/domain";
 
@@ -27,6 +28,19 @@ export class MemoryTradeStore implements TradeStore {
 
   /** All stored events, in append order (test/audit introspection only). */
   readonly eventLog = (): readonly StoredTradeEvent[] => this.events;
+
+  /**
+   * Raw row INCLUDING tombstoned trades (test/audit introspection only).
+   * Proves OD-2: a deleted trade is soft-deleted, never physically removed.
+   * Not part of the TradeStore port — deliberately absent from the interface
+   * so no production code path can read through a tombstone.
+   */
+  readonly debugRow = (id: string): TradeRecord | null => {
+    const t = this.trades.get(id);
+    if (t === undefined) return null;
+    const { userId: _u, ...rest } = t as unknown as TradeRecord & { userId: string };
+    return { ...(rest as TradeRecord), userId: t.userId };
+  };
 
   private withLock<T>(fn: () => Promise<T> | T): Promise<T> {
     const run = this.chain.then(fn);
@@ -153,7 +167,7 @@ export class MemoryTradeStore implements TradeStore {
     });
   }
 
-  async recordExit(tradeId: string, userId: string, exit: NewTradeExit, event: StoredTradeEvent): Promise<TradeExitRecord> {
+  async recordExit(tradeId: string, userId: string, exit: NewTradeExit, event: StoredTradeEvent, recomputed?: TradeFinancialRecompute): Promise<TradeExitRecord> {
     return this.withLock(() => {
       const t = this.activeOwned(tradeId, userId);
       if (t === null) throw new TradeNotFoundError("trade not found");
@@ -169,6 +183,11 @@ export class MemoryTradeStore implements TradeStore {
       };
       this.exits.set(exitId, record);
       t.allocatedVolume = D.toString(alloc);
+      if (recomputed !== undefined) {
+        // Same critical section as the insert: state + financials never diverge.
+        t.netPnl = recomputed.netPnl;
+        t.rMultiple = recomputed.rMultiple;
+      }
       t.version += 1;
       t.updatedAt = event.at;
       this.events.push(event);
@@ -193,7 +212,7 @@ export class MemoryTradeStore implements TradeStore {
     return publicRecord;
   }
 
-  async cancelExit(exitId: string, userId: string, event: StoredTradeEvent): Promise<TradeExitRecord | null> {
+  async cancelExit(exitId: string, userId: string, event: StoredTradeEvent, recomputed?: TradeFinancialRecompute): Promise<TradeExitRecord | null> {
     return this.withLock(() => {
       const e = this.exits.get(exitId);
       if (e === undefined || e.userId !== userId || e.deletedAt !== null) return null;
@@ -204,6 +223,10 @@ export class MemoryTradeStore implements TradeStore {
       if (D.isNeg(freed)) throw new TradeStoreError("exit cancellation would underflow allocated volume");
       e.deletedAt = event.at;
       t.allocatedVolume = D.toString(freed);
+      if (recomputed !== undefined) {
+        t.netPnl = recomputed.netPnl;
+        t.rMultiple = recomputed.rMultiple;
+      }
       t.version += 1;
       t.updatedAt = event.at;
       this.events.push(event);

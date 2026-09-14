@@ -266,12 +266,16 @@ test("TRADES HTTP: exits — create 201, list, cumulative cap 422, cancellation,
   });
 });
 
-test("TRADES HTTP: tombstone — delete {deleted:true}, then 404 everywhere, excluded from search/symbols", async () => {
+test("TRADES HTTP: tombstone — delete 204 (OD-2), then 404 everywhere, excluded from search/symbols", async () => {
   await withServer(async (base, { ownerToken }) => {
     const id = await createTrade(base, ownerToken);
     const del = await fetch(`${base}/api/v1/trades/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${ownerToken}` } });
-    assert.equal(del.status, 200);
-    assert.deepEqual(((await del.json()) as Envelope<{ deleted: boolean }>).data, { deleted: true });
+    // Phase 3B-2 / OD-2: a successful tombstone returns 204 No Content.
+    // This test previously asserted 200 + {deleted:true}; the owner-approved
+    // contract supersedes that shape (outdated test, not a regression).
+    assert.equal(del.status, 204);
+    assert.equal(await del.text(), ""); // RFC 9110: no body on 204
+    assert.equal(del.headers.get("content-type"), null);
 
     const get = await fetch(`${base}/api/v1/trades/${id}`, { headers: { Authorization: `Bearer ${ownerToken}` } });
     assert.equal(get.status, 404);

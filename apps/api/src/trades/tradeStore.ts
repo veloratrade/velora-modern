@@ -95,6 +95,16 @@ export interface TradeSearchFilter {
   readonly sort?: TradeSortKey | undefined;
 }
 
+/**
+ * Canonical financial values recomputed from the realized exit ledger
+ * (Phase 3B-2). `rMultiple` is null whenever risk is undefined (no SL, zero
+ * SL, wrong-side SL) — never a fabricated fallback.
+ */
+export interface TradeFinancialRecompute {
+  readonly netPnl: string; // scale 2
+  readonly rMultiple: string | null; // scale 8
+}
+
 /** Store-level failure modes mapped by the service to HTTP semantics. */
 export class TradeStoreError extends Error {}
 /** CAS miss on trades.version (another mutation landed first). */
@@ -127,12 +137,35 @@ export interface TradeStore {
   ): Promise<TradeRecord | null>;
   /** Set deleted_at + TOMBSTONE_SET event. Null when missing/foreign/already tombstoned. */
   tombstone(id: string, userId: string, event: StoredTradeEvent): Promise<TradeRecord | null>;
-  /** Insert exit + EXIT_RECORDED event + allocation + version bump, atomically. */
-  recordExit(tradeId: string, userId: string, exit: NewTradeExit, event: StoredTradeEvent): Promise<TradeExitRecord>;
+  /**
+   * Insert exit + EXIT_RECORDED event + allocation + version bump, atomically.
+   *
+   * `recomputed` (Phase 3B-2, owner decision): the parent trade's canonical
+   * `net_pnl`/`r_multiple` recomputed from the realized exit ledger. Applied in
+   * the SAME transaction as the insert, so financial state and history can
+   * never diverge. OD-6 is preserved — this rewrites the single canonical
+   * field; no parallel financial column is introduced.
+   */
+  recordExit(
+    tradeId: string,
+    userId: string,
+    exit: NewTradeExit,
+    event: StoredTradeEvent,
+    recomputed?: TradeFinancialRecompute,
+  ): Promise<TradeExitRecord>;
   /** Active exits of an owned trade, exitedAt ascending (lineages agree). */
   listActiveExitsForTrade(tradeId: string, userId: string): Promise<TradeExitRecord[]>;
   /** Active exit by id, owner-scoped through its parent trade; null when missing/foreign/cancelled. */
   findActiveExitByIdForUser(exitId: string, userId: string): Promise<TradeExitRecord | null>;
-  /** Exit tombstone + EXIT_CANCELLED event + allocation decrement + version bump. */
-  cancelExit(exitId: string, userId: string, event: StoredTradeEvent): Promise<TradeExitRecord | null>;
+  /**
+   * Exit tombstone + EXIT_CANCELLED event + allocation decrement + version bump.
+   * `recomputed` re-derives the parent's canonical net_pnl from the exits that
+   * REMAIN after the cancellation, in the same transaction.
+   */
+  cancelExit(
+    exitId: string,
+    userId: string,
+    event: StoredTradeEvent,
+    recomputed?: TradeFinancialRecompute,
+  ): Promise<TradeExitRecord | null>;
 }

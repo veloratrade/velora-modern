@@ -10,6 +10,7 @@ import { computePnl, applyEvent, VersionConflictError, TombstoneError, OverAlloc
 import * as D from "@velora/domain";
 import {
   type TradeStore, type TradeRecord, type NewTrade, type NewTradeExit, type TradeExitType, type StoredTradeEvent, type TradeSearchFilter,
+  type TradeExitRecord, type TradeFinancialRecompute,
   TradeVersionConflictError, TradeOverAllocationError, TradeStoreError,
 } from "./tradeStore.js";
 
@@ -315,7 +316,10 @@ export class TradeService {
       sourceTimezone: timezone.resolved ? timezone.effective : null,
       sourceTimezoneSource: timezone.resolved ? "user_profile" : "unknown",
       sourceCalendar: "unknown",
-      rawOpenText: null, rawCloseText: null,
+      // OD-4: the operator's raw input is retained verbatim, independent of
+      // whether interpretation resolved. Never overwritten by the derived UTC.
+      rawOpenText: raw.openTime,
+      rawCloseText: raw.closeTime,
       source: "manual",
     };
 
@@ -456,14 +460,32 @@ export class TradeService {
     }
   }
 
-  /** DELETE — ADR-002 tombstone (never a physical delete). */
-  async deleteTrade(id: string, userId: string): Promise<{ deleted: boolean }> {
+  /**
+   * DELETE — ADR-002 tombstone (never a physical delete).
+   *
+   * OD-2 makes optimistic concurrency MANDATORY on delete. `expectedVersion`
+   * is supplied by the caller (body `version` or `If-Match`); when it is
+   * omitted the current version is used, preserving the pre-3B-2 behaviour for
+   * existing callers. A stale value fails the CAS => 409 and NO event is
+   * emitted (the append happens in the same transaction as the state change).
+   */
+  async deleteTrade(id: string, userId: string, expected?: unknown): Promise<{ deleted: boolean }> {
     const record = await this.deps.store.findActiveByIdForUser(id, userId);
     if (record === null) notFoundTrade();
+
+    let expectedVersion = record!.version;
+    if (expected !== undefined && expected !== null && expected !== "") {
+      const n = typeof expected === "number" ? expected : Number(expected);
+      if (!Number.isInteger(n) || n < 0) {
+        invalid("version", "errors.validation.numeric", undefined, "Invalid version.");
+      }
+      expectedVersion = n;
+    }
+
     const now = this.now();
     const ledgerEvent: LedgerEvent = {
       id: "pending", type: "TOMBSTONE_SET", actor: "user", at: now.toISOString(),
-      expectedVersion: record!.version, reason: "user-requested deletion",
+      expectedVersion, reason: "user-requested deletion",
     };
     try {
       applyEvent(stateOf(record!), ledgerEvent);
@@ -528,9 +550,17 @@ export class TradeService {
     };
     try {
       applyEvent(stateOf(trade!), ledgerEvent); // allocation + version + tombstone gate
+      // Canonical net_pnl after this exit = realized ledger (existing active
+      // exits + the one being recorded). Applied inside the store transaction.
+      const existing = await this.deps.store.listActiveExitsForTrade(tradeId, userId);
+      const projected = this.recomputeFromExits(trade!, [
+        ...existing,
+        { ...exit, id: "pending", tradeId, recordedAt: now.toISOString(), deletedAt: null },
+      ]);
       const created = await this.deps.store.recordExit(
         tradeId, userId, exit,
-        this.storedEvent(tradeId, ledgerEvent, { exitDetails: exit }, now),
+        this.storedEvent(tradeId, ledgerEvent, { exitDetails: exit, recomputed: projected }, now),
+        projected,
       );
       return { id: created.id, messageKey: "trades.exitCreated", params: {} };
     } catch (err) {
@@ -551,15 +581,53 @@ export class TradeService {
     };
     try {
       applyEvent(stateOf(trade!), ledgerEvent); // underflow + version + tombstone gate
+      // Canonical net_pnl after cancellation = realized ledger MINUS this exit.
+      const remaining = (await this.deps.store.listActiveExitsForTrade(trade!.id, userId))
+        .filter((e) => e.id !== exit!.id);
+      const projected = this.recomputeFromExits(trade!, remaining);
       const stored = await this.deps.store.cancelExit(
         exitId, userId,
-        this.storedEvent(trade!.id, ledgerEvent, {}, now),
+        this.storedEvent(trade!.id, ledgerEvent, { recomputed: projected }, now),
+        projected,
       );
       if (stored === null) notFoundExit();
       return { deleted: true };
     } catch (err) {
       this.rethrowLedger(err);
     }
+  }
+
+  /**
+   * Recompute the trade's canonical net P/L from the REALIZED exit ledger
+   * (Phase 3B-2, owner decision 2026-09-14: "net_pnl = sum of realized exit
+   * P/L").
+   *
+   * Each exit row already carries its own server-computed `pnl`, which is net
+   * of that exit's proportional share of commission and swap (see createExit).
+   * Summing them therefore yields the realized net figure without
+   * double-counting costs. The sum is exact at scale 2 — every addend is
+   * already a scale-2 currency amount, so no rounding is introduced here
+   * (ADR-001 precision policy unchanged).
+   *
+   * R-multiple is re-derived as net/risk against the ORIGINAL risk of the
+   * position (|entry-SL| x volume x contractSize, directional). Risk is a
+   * property of how the position was opened, so it is not re-scaled by how
+   * much has been exited. Undefined risk stays null — never a fallback.
+   */
+  private recomputeFromExits(trade: TradeRecord, exits: readonly TradeExitRecord[]): TradeFinancialRecompute {
+    let net = D.fromString("0.00");
+    for (const e of exits) net = D.add(net, D.fromString(e.pnl));
+    const netPnl = D.toString(D.rescale(net, 2, "half-even"));
+
+    // Risk of the original position — same branch semantics as the PnL engine.
+    const sl = trade.stopLoss;
+    if (sl === null || sl === "" || D.isZero(D.fromString(sl))) return { netPnl, rMultiple: null };
+    const entry = D.fromString(trade.entryPrice);
+    const riskDelta = trade.direction === "buy" ? D.sub(entry, D.fromString(sl)) : D.sub(D.fromString(sl), entry);
+    if (D.cmp(riskDelta, D.fromString("0")) <= 0) return { netPnl, rMultiple: null }; // wrong-side SL
+    const risk = D.rescale(D.mul(D.mul(riskDelta, D.fromString(trade.volume)), D.fromString(trade.contractSize)), 2, "half-even");
+    if (D.isZero(risk)) return { netPnl, rMultiple: null };
+    return { netPnl, rMultiple: D.toString(D.div(D.fromString(netPnl), risk, 8, "half-even")) };
   }
 
   private serializeExit(e: { id: string; tradeId: string; exitType: string; exitPrice: string; volume: string; pnl: string; exitedAt: string; notes: string | null }): Record<string, unknown> {
