@@ -299,3 +299,106 @@ test("0008 ownership: ownership does NOT widen the RBAC role constraint", async 
     );
   } finally { await engine.close(); }
 });
+
+// --- 0010 user_credentials -------------------------------------------------
+// These assert the ENCRYPTION ENVELOPE invariants at the database level, so a
+// future change cannot quietly relax them. NOTE: this is PGlite (the existing
+// convention for this file); the same constraints were additionally verified
+// against real PostgreSQL 17.10 in db/tests/credentialStore.pg.test.ts.
+
+const IV12 = "decode('000102030405060708090a0b','hex')";
+const TAG16 = "decode('000102030405060708090a0b0c0d0e0f','hex')";
+const CT = "decode('deadbeef','hex')";
+
+async function seedCredUser(engine: Awaited<ReturnType<typeof createEngine>>, email: string) {
+  await engine.query(`INSERT INTO users(email, password_hash, role) VALUES ('${email}','x','user')`);
+  const got = await engine.query("SELECT id FROM users WHERE email = $1", [email]);
+  const rows = got.rows as { id: string | number }[];
+  assert.equal(rows.length, 1, "seed user must exist before the constraint is exercised");
+  return String(rows[0]!.id);
+}
+
+test("0010 credentials: the DB refuses any row that is not a well-formed AES-256-GCM envelope", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    const uid = await seedCredUser(engine, "cred@enc.example");
+    const ins = (cols: string, vals: string) =>
+      engine.query(`INSERT INTO user_credentials(user_id, ${cols}) VALUES (${uid}, ${vals})`);
+
+    // A correct envelope is accepted.
+    await ins("provider, key_version, iv, auth_tag, secret_ciphertext",
+      `'METAAPI', 1, ${IV12}, ${TAG16}, ${CT}`);
+
+    // A 12-byte IV is mandatory: GCM nonce misuse is catastrophic, so a
+    // short/long nonce must be impossible to persist at all.
+    await assert.rejects(
+      ins("provider, key_version, iv, auth_tag, secret_ciphertext",
+        `'METAAPI', 1, decode('0001','hex'), ${TAG16}, ${CT}`),
+      /violates check constraint/i, "IV must be exactly 12 bytes");
+
+    // A truncated auth tag would weaken forgery resistance.
+    await assert.rejects(
+      ins("provider, key_version, iv, auth_tag, secret_ciphertext",
+        `'METAAPI', 1, ${IV12}, decode('0001','hex'), ${CT}`),
+      /violates check constraint/i, "auth tag must be exactly 16 bytes");
+
+    // Empty ciphertext would mean "a credential row holding no secret".
+    await assert.rejects(
+      ins("provider, key_version, iv, auth_tag, secret_ciphertext",
+        `'METAAPI', 1, ${IV12}, ${TAG16}, decode('','hex')`),
+      /violates check constraint/i, "ciphertext must be non-empty");
+
+    // The algorithm is pinned: no downgrade to a weaker/unauthenticated cipher.
+    await assert.rejects(
+      ins("provider, key_version, iv, auth_tag, secret_ciphertext, algorithm",
+        `'METAAPI', 1, ${IV12}, ${TAG16}, ${CT}, 'aes-256-cbc'`),
+      /violates check constraint/i, "algorithm must stay aes-256-gcm");
+
+    // key_version must be a real key generation (>= 1).
+    await assert.rejects(
+      ins("provider, key_version, iv, auth_tag, secret_ciphertext",
+        `'METAAPI', 0, ${IV12}, ${TAG16}, ${CT}`),
+      /violates check constraint/i, "key_version must be >= 1");
+
+    // Unknown providers cannot be stored.
+    await assert.rejects(
+      ins("provider, key_version, iv, auth_tag, secret_ciphertext",
+        `'SOMETHING_ELSE', 1, ${IV12}, ${TAG16}, ${CT}`),
+      /violates check constraint/i, "provider is constrained to the known set");
+  } finally { await engine.close(); }
+});
+
+test("0010 credentials: nonce reuse, duplicate provider rows, and owner deletion are all rejected", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    const a = await seedCredUser(engine, "a@nonce.example");
+    const b = await seedCredUser(engine, "b@nonce.example");
+    await engine.query(
+      `INSERT INTO user_credentials(user_id, provider, key_version, iv, auth_tag, secret_ciphertext)
+       VALUES (${a}, 'METAAPI', 1, ${IV12}, ${TAG16}, ${CT})`);
+
+    // Reusing an (iv, key_version) pair breaks AES-GCM's security proof. The DB
+    // makes it impossible even ACROSS users, not merely within one account.
+    await assert.rejects(
+      engine.query(
+        `INSERT INTO user_credentials(user_id, provider, key_version, iv, auth_tag, secret_ciphertext)
+         VALUES (${b}, 'METAAPI', 1, ${IV12}, ${TAG16}, ${CT})`),
+      /duplicate key|unique/i, "the same nonce must never be reused under one key");
+
+    // One credential per (user, provider).
+    await assert.rejects(
+      engine.query(
+        `INSERT INTO user_credentials(user_id, provider, key_version, iv, auth_tag, secret_ciphertext)
+         VALUES (${a}, 'METAAPI', 1, decode('0f0e0d0c0b0a09080706050403','hex'), ${TAG16}, ${CT})`),
+      /duplicate key|unique|violates check constraint/i, "one credential per user+provider");
+
+    // RESTRICT: a user holding stored credentials cannot be deleted out from
+    // under them, which would otherwise orphan undecryptable secret material.
+    await assert.rejects(
+      engine.query(`DELETE FROM users WHERE id = ${a}`),
+      /violates RESTRICT setting|violates foreign key constraint|still referenced/i,
+      "a user with stored credentials must not be deletable");
+  } finally { await engine.close(); }
+});

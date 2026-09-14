@@ -40,6 +40,10 @@ import { MemoryOwnershipStore } from "./auth/memoryOwnershipStore.js";
 import { PgOwnershipStore } from "./auth/pgOwnershipStore.js";
 import { MemoryAuditStore } from "./auth/memoryAuditStore.js";
 import { PgAuditStore } from "./auth/pgAuditStore.js";
+import { resolveCredentialKey } from "./credentials/credentialConfig.js";
+import { MemoryCredentialStore } from "./credentials/memoryCredentialStore.js";
+import { PgCredentialStore } from "./credentials/pgCredentialStore.js";
+import type { CredentialStore } from "./credentials/credentialStore.js";
 import type { MailPort } from "./mail/mailPort.js";
 import { ResendMailProvider } from "./mail/resendMailProvider.js";
 import { LogMailProvider } from "./mail/logMailProvider.js";
@@ -164,6 +168,9 @@ async function main(): Promise<void> {
   console.log(JSON.stringify({ level: "info", event: "mail.provider", provider: mail.name }));
 
   // Without a boot JWT secret every capability route stays fail-closed (503).
+  // C-22: held server-side only; deliberately NOT passed to createApp, because
+  // this phase exposes no credential HTTP surface.
+  let credentialStore: CredentialStore | undefined;
   const capabilities: {
     auth?: AuthService;
     accounts?: AccountService;
@@ -214,6 +221,40 @@ async function main(): Promise<void> {
       getSystemOwnerUserId: async () => (await ownershipStore.getOwnership())?.ownerUserId ?? null,
       audit: auditStore,
     });
+
+    // C-22 encrypted credential store. FAIL-CLOSED: without a valid
+    // CREDENTIAL_MASTER_KEY the capability is simply ABSENT — it is never
+    // constructed with a generated key and never degrades to plaintext, so a
+    // misconfigured deployment cannot silently store unencrypted secrets.
+    // No HTTP route is wired in this phase: this is storage infrastructure for
+    // the future integration chain, reachable only from server-side code.
+    const credentialKey = resolveCredentialKey(process.env);
+    if (credentialKey.key !== null) {
+      credentialStore =
+        pool !== undefined
+          ? new PgCredentialStore(pool, credentialKey.key)
+          : new MemoryCredentialStore(credentialKey.key);
+      // Key VERSION only — never the key, never a credential.
+      console.log(
+        JSON.stringify({
+          level: "info",
+          event: "credentials.enabled",
+          keyVersion: credentialKey.key.version,
+        }),
+      );
+    } else {
+      // CODES and fixed messages only; the configured value is never logged.
+      for (const f of credentialKey.findings) {
+        console.log(
+          JSON.stringify({
+            level: "warn",
+            event: "credentials.disabled",
+            code: f.code,
+            message: f.message,
+          }),
+        );
+      }
+    }
   }
   const app = createApp({
     allowedOrigins: boot.allowedOrigins,

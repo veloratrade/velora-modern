@@ -143,6 +143,17 @@ REVOKE UPDATE, DELETE, TRUNCATE ON TABLE audit_log      FROM app_readwrite, velo
 REVOKE ALL                      ON TABLE audit_log      FROM velora_worker;
 GRANT  INSERT, SELECT           ON TABLE audit_log      TO   app_readwrite;
 
+-- `user_credentials` (C-22, migration 0010) holds AES-256-GCM ciphertext for
+-- third-party integration secrets. The API owns the full lifecycle (create,
+-- read, revoke), so app_readwrite keeps ordinary DML. velora_worker gets NO
+-- access: no background job in this phase reads or writes integration secrets,
+-- and the narrowest grant that satisfies the implementation is the correct one.
+-- When a future worker genuinely needs them (C-29 sync), that phase must grant
+-- exactly what it requires and justify it.
+REVOKE ALL ON TABLE user_credentials FROM velora_worker;
+-- Reporting/analytics must never read credential ciphertext or its envelope.
+REVOKE ALL ON TABLE user_credentials FROM velora_readonly;
+
 -- `schema_migrations` is migrator-owned bookkeeping: runtime roles never write it.
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE schema_migrations FROM app_readwrite, velora_worker;
 
