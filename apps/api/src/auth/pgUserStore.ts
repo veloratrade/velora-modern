@@ -15,6 +15,7 @@ import { poolQuery, isUniqueViolation, iso, isoOrNull, type QueryFn } from "../p
 import type {
   UserStore,
   UserRecord,
+  AppRoleName,
   SessionRecord,
   VerificationRecord,
   EmailPreferences,
@@ -306,6 +307,62 @@ export class PgUserStore implements UserStore {
       [patch.locale ?? null, patch.aiConsentAt ?? null, patch.aiConsentAt === null, now, userId],
     );
     return rows.length === 0 ? null : mapUser(rows[0] as unknown as UserRow);
+  }
+
+  // --- Phase 3B-4: administrative user management ---------------------------
+  // Every value is bound as a parameter; no fragment is ever concatenated from
+  // caller input. The ILIKE needle is bound too, so wildcards supplied by a
+  // caller are matched literally rather than expanding the result set.
+
+  async listUsers(query: {
+    search?: string;
+    role?: AppRoleName;
+    status?: string;
+    limit: number;
+    offset: number;
+  }): Promise<{ items: readonly UserRecord[]; total: number }> {
+    // Containment search WITHOUT LIKE: position() has no metacharacters, so a
+    // needle containing % or _ is matched literally with no escape clause to get
+    // wrong, and the semantics are identical to MemoryUserStore's
+    // `toLowerCase().includes(...)` — the two adapters cannot drift.
+    const search = (query.search ?? "").trim();
+    const needle = search === "" ? null : search.toLowerCase();
+    const where = `WHERE ($1::text IS NULL
+                      OR position($1 in lower(email)) > 0
+                      OR position($1 in lower(full_name)) > 0)
+                     AND ($2::text IS NULL OR role = $2)
+                     AND ($3::text IS NULL OR status = $3)`;
+    const filters = [needle, query.role ?? null, query.status ?? null];
+    const countRows = await this.q(`SELECT COUNT(*)::int AS n FROM users ${where}`, filters);
+    const rows = await this.q(
+      `SELECT * FROM users ${where} ORDER BY created_at DESC, id DESC LIMIT $4 OFFSET $5`,
+      [...filters, query.limit, query.offset],
+    );
+    return {
+      items: rows.map((r) => mapUser(r as unknown as UserRow)),
+      total: Number(countRows[0]?.n ?? 0),
+    };
+  }
+
+  async updateUserRole(userId: string, role: AppRoleName, now: Date): Promise<UserRecord | null> {
+    const rows = await this.q(
+      "UPDATE users SET role = $1, updated_at = $2 WHERE id = $3 RETURNING *",
+      [role, now, userId],
+    );
+    return rows.length === 0 ? null : mapUser(rows[0] as unknown as UserRow);
+  }
+
+  async updateUserStatus(userId: string, status: string, now: Date): Promise<UserRecord | null> {
+    const rows = await this.q(
+      "UPDATE users SET status = $1, updated_at = $2 WHERE id = $3 RETURNING *",
+      [status, now, userId],
+    );
+    return rows.length === 0 ? null : mapUser(rows[0] as unknown as UserRow);
+  }
+
+  async countUsersByRole(role: AppRoleName): Promise<number> {
+    const rows = await this.q("SELECT COUNT(*)::int AS n FROM users WHERE role = $1", [role]);
+    return Number(rows[0]?.n ?? 0);
   }
 
   async getEmailPreferences(userId: string): Promise<EmailPreferences> {

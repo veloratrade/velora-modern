@@ -169,3 +169,63 @@ test("0006 RBAC: pre-existing user/admin rows survive the CHECK widening", async
     assert.equal((after.rows as { role: string }[])[0]!.role, "super_admin");
   } finally { await engine.close(); }
 });
+
+test("0007 status: the CHECK constrains account state and preserves existing rows", async () => {
+  const engine = await createEngine();
+  try {
+    // Apply the full stack; 0007 is part of it.
+    await migrate(engine, MIGRATIONS);
+
+    // Both frozen states are accepted...
+    for (const good of ["active", "suspended"]) {
+      await engine.query(
+        "INSERT INTO users(email, password_hash, status) VALUES ($1,'x',$2)",
+        [`ok-${good}@status.example`, good],
+      );
+    }
+    // ...and everything else is rejected by the DATABASE. This column gates
+    // authentication (login and refresh both require 'active'), so a typo must
+    // not be silently storable.
+    for (const bad of ["deleted", "banned", "Active", "ACTIVE", "pending", ""]) {
+      await assert.rejects(
+        engine.query("INSERT INTO users(email, password_hash, status) VALUES ($1,'x',$2)",
+          [`bad-${bad}@status.example`, bad]),
+        /violates check constraint|users_status_check/i,
+        `status '${bad}' must be rejected by the CHECK`,
+      );
+    }
+
+    // The default is unchanged — a new row without an explicit status is active.
+    await engine.query("INSERT INTO users(email, password_hash) VALUES ('default@status.example','x')");
+    const def = await engine.query("SELECT status FROM users WHERE email = 'default@status.example'");
+    assert.equal((def.rows as { status: string }[])[0]!.status, "active");
+  } finally { await engine.close(); }
+});
+
+test("0007 status: rows predating the constraint survive it", async () => {
+  const engine = await createEngine();
+  try {
+    // Apply 0001 + 0002 only: `status` exists but is UNCONSTRAINED.
+    await engine.exec(readFileSync(join(MIGRATIONS, "0001_core.sql"), "utf8"));
+    await engine.exec(readFileSync(join(MIGRATIONS, "0002_identity_capability.sql"), "utf8"));
+    await engine.query("INSERT INTO users(email, password_hash, status) VALUES ('pre-active@status.example','x','active')");
+    await engine.query("INSERT INTO users(email, password_hash) VALUES ('pre-default@status.example','x')");
+    // At this point an arbitrary value IS storable — the gap 0007 closes.
+    await engine.query("INSERT INTO users(email, password_hash, status) VALUES ('pre-bogus@status.example','x','whatever')");
+    await engine.query("DELETE FROM users WHERE email = 'pre-bogus@status.example'");
+
+    await engine.exec(readFileSync(join(MIGRATIONS, "0007_user_status.sql"), "utf8"));
+
+    const rows = await engine.query(
+      "SELECT email, status FROM users WHERE email LIKE 'pre-%' ORDER BY email");
+    assert.deepEqual((rows.rows as { email: string; status: string }[]).map((r) => r.status),
+      ["active", "active"], "pre-existing rows must remain exactly as they were");
+
+    // Re-running the migration is idempotent.
+    await engine.exec(readFileSync(join(MIGRATIONS, "0007_user_status.sql"), "utf8"));
+    await assert.rejects(
+      engine.query("INSERT INTO users(email, password_hash, status) VALUES ('after@status.example','x','deleted')"),
+      /violates check constraint/i,
+    );
+  } finally { await engine.close(); }
+});

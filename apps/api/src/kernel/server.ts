@@ -22,6 +22,7 @@ import {
 } from "@velora/contracts";
 import { newSecurityContext, buildCsp, SECURITY_HEADERS, originAllowed } from "./security.js";
 import { AuthService, AuthError } from "../auth/authService.js";
+import { AdminUserService } from "../auth/adminUserService.js";
 import { AccountService, AccountError } from "../accounts/accountService.js";
 import { TradeService, TradeError } from "../trades/tradeService.js";
 import { EntitlementError } from "../entitlements/entitlementService.js";
@@ -42,6 +43,8 @@ export interface ApiConfig {
   readonly accounts?: AccountService;
   /** Phase C trades capability (increment 3). Absent → trade routes fail closed (503). */
   readonly trades?: TradeService;
+  /** Phase 3B-4 admin user management. Absent → admin user routes fail closed (503). */
+  readonly adminUsers?: AdminUserService;
   /** Phase C rate limiting (inc 7). Absent → createApp builds a default
    *  fixed-window limiter on a per-process memory store (PHP applies
    *  throttling unconditionally at dispatch; a per-app instance preserves
@@ -703,6 +706,83 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
         permissions: Object.fromEntries(APP_ROLES.map((r) => [r, permissionsFor(r)])),
       }),
     };
+  }
+
+  // ---- Admin user management (Phase 3B-4) --------------------------------
+  // Two independent layers run on every one of these routes:
+  //   1. requirePermission(...)  — may this ROLE reach the operation at all?
+  //   2. AdminUserService guards — is this ACTOR allowed to act on this TARGET?
+  // A permission bit cannot express the pair-rules (self-action, privileged
+  // target, escalation), so neither layer is redundant.
+  const adminUsersRoute = (
+    permission: Permission,
+    fn: (svc: AdminUserService, actor: { id: string; role: AppRole }) => Promise<RouteResult>,
+  ): Promise<RouteResult> => {
+    if (config.auth === undefined || config.adminUsers === undefined) {
+      return Promise.resolve({
+        status: 503,
+        body: fail("SERVICE_UNAVAILABLE", "admin user management not configured", sec.requestId),
+      });
+    }
+    const claims = authenticateRequest(req, config.auth);
+    const denied = requirePermission(claims, permission, sec.requestId);
+    if (denied !== null) return Promise.resolve(denied);
+    return fn(config.adminUsers, { id: claims!.sub, role: claims!.role }).catch(
+      (err: unknown) => {
+        if (err instanceof AuthError) {
+          return {
+            status: err.status,
+            body: fail(err.code, err.message, sec.requestId, err.details),
+          };
+        }
+        throw err;
+      },
+    );
+  };
+
+  if (method === "GET" && path === "/api/v1/admin/users") {
+    return adminUsersRoute("users.view", async (svc) => {
+      const q = url.searchParams;
+      const num = (raw: string | null): number | undefined =>
+        raw === null || raw.trim() === "" || !Number.isFinite(Number(raw))
+          ? undefined
+          : Number(raw);
+      const str = (raw: string | null): string | undefined => (raw === null ? undefined : raw);
+      const result = await svc.listUsers({
+        ...(str(q.get("search")) !== undefined ? { search: str(q.get("search"))! } : {}),
+        ...(str(q.get("role")) !== undefined ? { role: str(q.get("role"))! } : {}),
+        ...(str(q.get("status")) !== undefined ? { status: str(q.get("status"))! } : {}),
+        ...(num(q.get("page")) !== undefined ? { page: num(q.get("page"))! } : {}),
+        ...(num(q.get("perPage")) !== undefined ? { perPage: num(q.get("perPage"))! } : {}),
+      });
+      return { status: 200, body: ok(result) };
+    });
+  }
+
+  if (method === "GET" && /^\/api\/v1\/admin\/users\/[^/]+$/.test(path)) {
+    return adminUsersRoute("users.view", async (svc) => {
+      const id = decodeURIComponent(path.split("/")[5] ?? "");
+      return { status: 200, body: ok({ user: await svc.getUser(id) }) };
+    });
+  }
+
+  // Role assignment is the privilege-granting operation: super_admin only.
+  if (method === "PATCH" && /^\/api\/v1\/admin\/users\/[^/]+\/role$/.test(path)) {
+    return adminUsersRoute("users.change_role", async (svc, actor) => {
+      const id = decodeURIComponent(path.split("/")[5] ?? "");
+      const body = await parseJsonBody(req);
+      const result = await svc.setRole(id, String(body.role ?? ""), actor);
+      return { status: 200, body: ok(result) };
+    });
+  }
+
+  if (method === "PATCH" && /^\/api\/v1\/admin\/users\/[^/]+\/status$/.test(path)) {
+    return adminUsersRoute("users.manage_status", async (svc, actor) => {
+      const id = decodeURIComponent(path.split("/")[5] ?? "");
+      const body = await parseJsonBody(req);
+      const result = await svc.setStatus(id, String(body.status ?? ""), actor);
+      return { status: 200, body: ok(result) };
+    });
   }
 
   return { status: 404, body: fail("NOT_FOUND", "no such route", sec.requestId) };

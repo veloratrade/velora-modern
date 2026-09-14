@@ -46,6 +46,22 @@ export const PERMISSIONS = [
   "admin.panel.access",
   /** Super-admin-only: inspect the effective authority of ANY role. */
   "rbac.matrix.view",
+
+  // --- Phase 3B-4 (user management). Each one guards a REAL endpoint. ---
+  /** List/inspect user accounts through the admin surface (never secrets). */
+  "users.view",
+  /** Suspend or reactivate an account (users.status). */
+  "users.manage_status",
+  /**
+   * Change another user's application role.
+   *
+   * SUPER-ADMIN ONLY, matching the Legacy authorization model where
+   * users.change_role is one of the six super_admin-exclusive permissions
+   * (source-read of api/src/Auth/Role.php, capability reference only). Role
+   * assignment is the privilege-granting operation, so it is deliberately NOT
+   * delegated to `admin`.
+   */
+  "users.change_role",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -57,8 +73,16 @@ export const ROLE_PERMISSIONS: Readonly<Record<AppRole, readonly Permission[]>> 
   // A normal user holds ZERO administrative permissions (Legacy: `user => []`).
   // Ownership of their own resources is a separate mechanism and is unaffected.
   user: ["rbac.self.view"],
-  admin: ["rbac.self.view", "admin.panel.access"],
-  super_admin: ["rbac.self.view", "admin.panel.access", "rbac.matrix.view"],
+  admin: ["rbac.self.view", "admin.panel.access", "users.view", "users.manage_status"],
+  super_admin: [
+    "rbac.self.view",
+    "admin.panel.access",
+    "rbac.matrix.view",
+    "users.view",
+    "users.manage_status",
+    // The one user-management permission an `admin` must NOT hold.
+    "users.change_role",
+  ],
 };
 
 /** True when `value` is one of the three frozen roles. Fails closed. */

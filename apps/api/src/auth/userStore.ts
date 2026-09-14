@@ -3,6 +3,13 @@
 // application-level persistence boundary whose absence was documented in the
 // Phase B S5 follow-up; real-PostgreSQL verification remains deferred to
 // Phase D (PGlite tests are in-wasm evidence, NOT real-PG evidence).
+/**
+ * The frozen application role set (OD-9). Declared here as the single name used
+ * across the persistence port so the union is never re-typed by hand; it is the
+ * same triple enumerated in packages/contracts/src/rbac.ts (AppRole).
+ */
+export type AppRoleName = "user" | "admin" | "super_admin";
+
 export interface UserRecord {
   readonly id: string;
   readonly email: string; // canonical lowercase (ADR-003)
@@ -11,7 +18,7 @@ export interface UserRecord {
   readonly timezone: string;
   readonly locale: "fa" | "en";
   /** Application role (OD-9). NOT a PostgreSQL identity — see contracts/rbac.ts. */
-  readonly role: "user" | "admin" | "super_admin";
+  readonly role: AppRoleName;
   readonly plan: string;
   readonly status: string;
   readonly emailVerifiedAt: string | null;
@@ -145,6 +152,34 @@ export interface UserStore {
   revokeSession(id: string, revokedAt: Date): Promise<void>;
   /** Revoke ALL active sessions of a user (change-password; both lineages). */
   revokeAllSessionsForUser(userId: string, revokedAt: Date): Promise<void>;
+
+  // --- Phase 3B-4: administrative user management ---------------------------
+  // These are ADMIN-surface reads/writes. Authorization is enforced in the
+  // service/route layer (contracts/rbac.ts); the store performs no authority
+  // check of its own and must never be called without one.
+
+  /**
+   * Page through user accounts, newest first, with an optional case-insensitive
+   * email/name substring filter and an optional exact role/status filter.
+   * `limit` is clamped by the caller. Returns the page plus the total count so
+   * the admin surface can paginate without a second round trip.
+   */
+  listUsers(query: {
+    search?: string;
+    role?: AppRoleName;
+    status?: string;
+    limit: number;
+    offset: number;
+  }): Promise<{ items: readonly UserRecord[]; total: number }>;
+
+  /** Set a user's application role. Returns the updated record, or null if absent. */
+  updateUserRole(userId: string, role: AppRoleName, now: Date): Promise<UserRecord | null>;
+
+  /** Set a user's account status. Returns the updated record, or null if absent. */
+  updateUserStatus(userId: string, status: string, now: Date): Promise<UserRecord | null>;
+
+  /** Count users holding a given role (last-super_admin safety evaluation). */
+  countUsersByRole(role: AppRoleName): Promise<number>;
 
   /** Update user preferences; returns the updated record or null if absent. */
   updateUserPreferences(

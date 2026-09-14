@@ -93,3 +93,46 @@ test("the permission map covers every role explicitly (no implicit inheritance)"
   }
   assert.deepEqual(Object.keys(ROLE_PERMISSIONS).sort(), [...APP_ROLES].sort());
 });
+
+// --- Phase 3B-4 additions: user-management permissions -----------------------
+
+test("3B-4: user management permissions are granted to exactly the right roles", () => {
+  // A plain user holds NO user-management authority of any kind.
+  assert.equal(can("user", "users.view"), false);
+  assert.equal(can("user", "users.manage_status"), false);
+  assert.equal(can("user", "users.change_role"), false);
+
+  // An admin may see and suspend, but may NOT assign roles.
+  assert.equal(can("admin", "users.view"), true);
+  assert.equal(can("admin", "users.manage_status"), true);
+  assert.equal(can("admin", "users.change_role"), false);
+
+  // A super_admin holds all three.
+  assert.equal(can("super_admin", "users.view"), true);
+  assert.equal(can("super_admin", "users.manage_status"), true);
+  assert.equal(can("super_admin", "users.change_role"), true);
+});
+
+test("3B-4: users.change_role is the super_admin-exclusive permission", () => {
+  const adminOnly = ROLE_PERMISSIONS.super_admin.filter(
+    (p) => !ROLE_PERMISSIONS.admin.includes(p),
+  );
+  assert.ok(adminOnly.includes("users.change_role"));
+  // The role ordering property still holds after the 3B-4 additions:
+  // every admin grant is still a super_admin grant.
+  for (const p of ROLE_PERMISSIONS.admin) {
+    assert.ok(ROLE_PERMISSIONS.super_admin.includes(p), `super_admin must retain ${p}`);
+  }
+  for (const p of ROLE_PERMISSIONS.user) {
+    assert.ok(ROLE_PERMISSIONS.admin.includes(p), `admin must retain ${p}`);
+  }
+});
+
+test("3B-4: the new permissions still fail closed for unknown roles", () => {
+  for (const p of ["users.view", "users.manage_status", "users.change_role"] as const) {
+    assert.equal(can("root", p), false);
+    assert.equal(can(undefined, p), false);
+    assert.equal(can(null, p), false);
+    assert.equal(can("", p), false);
+  }
+});

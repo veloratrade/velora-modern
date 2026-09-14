@@ -1,0 +1,42 @@
+-- 0007_user_status.sql — Phase 3B-4 (user management: account state).
+--
+-- 0002_identity_capability.sql added:
+--     ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
+-- with NO CHECK constraint, so the column currently accepts ANY string. The
+-- application already treats this column as load-bearing security state:
+-- authService rejects login (authService.ts:251) and refresh (authService.ts:277)
+-- whenever status <> 'active'. An unconstrained column backing an authentication
+-- decision means a typo ('Active', 'actve') silently locks a user out with no
+-- database-level protection. This migration closes that gap.
+--
+-- VOCABULARY — 'active' | 'suspended'. NOT invented: verified by source read of
+-- the Legacy schema (api/database/database.sql), where the same concept is
+-- `status enum('active','suspended') NOT NULL DEFAULT 'active'`. Capability
+-- reference only — no Legacy data is read, copied or migrated (LEGACY IS A TEST
+-- SITE). The two-value model is adopted exactly; no third state is introduced,
+-- because no approved contract defines one.
+--
+-- DELETION IS OUT OF SCOPE: no `deleted_at` column is added here. Legacy has no
+-- user-deletion operation at all (UserManagementController exposes show /
+-- setStatus / setRole / setSubscription / ... and no destroy), so user
+-- soft-delete semantics are UNFROZEN and are reported as a deferred product
+-- decision rather than invented in a migration.
+--
+-- SCOPE / SAFETY:
+--   - Forward-only (ADR-010), additive, idempotent on re-run.
+--   - Adds a CONSTRAINT only. No column is added, dropped, retyped or renamed;
+--     the DEFAULT ('active') is unchanged; no other table is touched.
+--   - No row is read, rewritten, deleted or re-interpreted. Every row written
+--     by 0002's DEFAULT is 'active' and therefore already satisfies the CHECK.
+--   - NOT VALID is deliberately NOT used: the constraint must hold for existing
+--     rows, and any pre-existing violation must fail loudly at migration time
+--     rather than be silently grandfathered into an auth-critical column.
+--   - APPLICATION state only. Unrelated to the ADR-010 PostgreSQL identities in
+--     db/roles.sql, which are NOT modified here.
+--   - No production database exists or is touched by this file.
+--
+-- Follows the DROP/ADD convention established by 0005 and 0006.
+
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_status_check;
+ALTER TABLE users ADD CONSTRAINT users_status_check
+  CHECK (status IN ('active', 'suspended'));

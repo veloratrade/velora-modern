@@ -8,6 +8,7 @@ import {
   type VerificationRecord,
   type PasswordResetRecord,
   type UserStore,
+  type AppRoleName,
   type EmailPreferences,
   DEFAULT_EMAIL_PREFERENCES,
   UserEmailExistsError,
@@ -247,6 +248,62 @@ export class MemoryUserStore implements UserStore {
     };
     this.users.set(userId, updated);
     return updated;
+  }
+
+  // --- Phase 3B-4: administrative user management ---------------------------
+
+  async listUsers(query: {
+    search?: string;
+    role?: AppRoleName;
+    status?: string;
+    limit: number;
+    offset: number;
+  }): Promise<{ items: readonly UserRecord[]; total: number }> {
+    const needle = (query.search ?? "").trim().toLowerCase();
+    const matched = [...this.users.values()]
+      .filter((u) => {
+        if (query.role !== undefined && u.role !== query.role) return false;
+        if (query.status !== undefined && u.status !== query.status) return false;
+        if (needle === "") return true;
+        return (
+          u.email.toLowerCase().includes(needle) || u.fullName.toLowerCase().includes(needle)
+        );
+      })
+      // Newest first; id is a monotonic counter here, so it breaks createdAt ties
+      // deterministically (two users created in the same millisecond in tests).
+      .sort((a, b) =>
+        a.createdAt === b.createdAt
+          ? Number(b.id) - Number(a.id)
+          : a.createdAt < b.createdAt
+            ? 1
+            : -1,
+      );
+    return {
+      items: matched.slice(query.offset, query.offset + query.limit),
+      total: matched.length,
+    };
+  }
+
+  async updateUserRole(userId: string, role: AppRoleName, now: Date): Promise<UserRecord | null> {
+    const u = this.users.get(userId);
+    if (u === undefined) return null;
+    const updated: UserRecord = { ...u, role, updatedAt: iso(now) };
+    this.users.set(userId, updated);
+    return updated;
+  }
+
+  async updateUserStatus(userId: string, status: string, now: Date): Promise<UserRecord | null> {
+    const u = this.users.get(userId);
+    if (u === undefined) return null;
+    const updated: UserRecord = { ...u, status, updatedAt: iso(now) };
+    this.users.set(userId, updated);
+    return updated;
+  }
+
+  async countUsersByRole(role: AppRoleName): Promise<number> {
+    let n = 0;
+    for (const u of this.users.values()) if (u.role === role) n += 1;
+    return n;
   }
 
   async getEmailPreferences(userId: string): Promise<EmailPreferences> {
