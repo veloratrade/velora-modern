@@ -26,6 +26,7 @@
 import type { PasswordHasher } from "@velora/domain";
 import { AuthError } from "./authService.js";
 import type { UserStore } from "./userStore.js";
+import type { AuditStore } from "./auditStore.js";
 import {
   type OwnershipRecord,
   type OwnershipStore,
@@ -49,6 +50,13 @@ export interface OwnershipServiceDeps {
   readonly users: UserStore;
   readonly hasher: PasswordHasher;
   readonly now?: () => Date;
+  /**
+   * Append-only security audit trail (C-34). REQUIRED for the same reason as
+   * the owner resolver elsewhere: an omitted store would silently stop
+   * recording the single most privileged action in the system, with no runtime
+   * signal. Append errors propagate — never swallowed.
+   */
+  readonly audit: AuditStore;
 }
 
 export class OwnershipService {
@@ -92,6 +100,8 @@ export class OwnershipService {
     confirm: string;
     ipAddress?: string | null;
     userAgent?: string | null;
+    /** Correlation id from the per-request security context (audit metadata). */
+    requestId?: string | null;
   }): Promise<OwnershipClaimView> {
     // 1. Permanently closed after bootstrap, whatever the caller's role.
     const existing = await this.deps.ownership.getOwnership();
@@ -132,13 +142,38 @@ export class OwnershipService {
     }
 
     try {
-      const claimed: OwnershipRecord = await this.deps.ownership.claimOwnership({
-        ownerUserId: actor.id,
-        claimedByUserId: actor.id,
-        claimedIp: input.ipAddress ?? null,
-        claimedUserAgent: input.userAgent ?? null,
-        now: this.now(),
-      });
+      const now = this.now();
+      // C-34: the audit row is written by the STORE, inside the same
+      // transaction as the singleton INSERT. It is reached ONLY when that
+      // INSERT succeeds, so a duplicate or racing claim (which throws and is
+      // mapped to 409 below) can never produce a successful OWNERSHIP_CLAIMED
+      // record. The actor is the re-authenticated server-side identity; this is
+      // a self-claim, so the target is the same account. Errors propagate — if
+      // the audit write fails the claim rolls back and ownership stays
+      // unclaimed rather than committing with no trail.
+      const claimed: OwnershipRecord = await this.deps.ownership.claimOwnership(
+        {
+          ownerUserId: actor.id,
+          claimedByUserId: actor.id,
+          claimedIp: input.ipAddress ?? null,
+          claimedUserAgent: input.userAgent ?? null,
+          now,
+        },
+        async (tx) => {
+          await this.deps.audit.append(
+            {
+              action: "OWNERSHIP_CLAIMED",
+              actorUserId: actor.id,
+              targetUserId: actor.id, // self-claim: actor and new owner are the same account
+              beforeState: null, // ownership was unclaimed: there is no prior state
+              afterState: "claimed",
+              requestId: input.requestId ?? null,
+              occurredAt: now,
+            },
+            tx,
+          );
+        },
+      );
       return { ownerUserId: claimed.ownerUserId, claimedAt: claimed.claimedAt };
     } catch (err: unknown) {
       // Lost a concurrent race: the database singleton rejected this INSERT.

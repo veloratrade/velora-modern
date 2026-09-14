@@ -133,6 +133,15 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public TO velora_readonly;
 -- ---------------------------------------------------------------------------
 REVOKE UPDATE, DELETE, TRUNCATE ON TABLE trade_events   FROM app_readwrite, velora_worker;
 REVOKE UPDATE, DELETE, TRUNCATE ON TABLE webhook_events FROM app_readwrite, velora_worker;
+-- `audit_log` (C-34, migration 0009) is the security audit trail: the API
+-- appends and reads it, and must never be able to rewrite or erase history.
+-- This is the DATABASE layer of the append-only guarantee; the application
+-- layer enforces the same rule independently by exposing no update/delete
+-- method on the AuditStore port. velora_worker gets no access at all: no
+-- background job records or reads privileged-action history.
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE audit_log      FROM app_readwrite, velora_worker;
+REVOKE ALL                      ON TABLE audit_log      FROM velora_worker;
+GRANT  INSERT, SELECT           ON TABLE audit_log      TO   app_readwrite;
 
 -- `schema_migrations` is migrator-owned bookkeeping: runtime roles never write it.
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE schema_migrations FROM app_readwrite, velora_worker;

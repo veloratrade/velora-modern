@@ -9,12 +9,19 @@
 // EVIDENCE: the singleton behaviour is exercised in db/tests/migrations.test.ts
 // against PGlite (in-wasm). NOT verified against a real PostgreSQL server.
 import type { Pool } from "pg";
-import { poolQuery, iso, isUniqueViolation, type QueryFn } from "../persistence/pg.js";
+import {
+  poolQuery,
+  withTransaction,
+  iso,
+  isUniqueViolation,
+  type QueryFn,
+} from "../persistence/pg.js";
 import {
   type OwnershipRecord,
   type OwnershipStore,
   OwnershipAlreadyClaimedError,
 } from "./ownershipStore.js";
+import type { AuditWrite } from "./auditStore.js";
 
 interface OwnershipRow {
   owner_user_id: string | number;
@@ -37,37 +44,57 @@ function mapOwnership(r: OwnershipRow): OwnershipRecord {
 export class PgOwnershipStore implements OwnershipStore {
   private readonly q: QueryFn;
 
-  constructor(pool: Pool) {
+  constructor(private readonly pool: Pool) {
     this.q = poolQuery(pool);
   }
 
   async getOwnership(): Promise<OwnershipRecord | null> {
-    const rows = await this.q("SELECT * FROM installation_ownership WHERE id = TRUE", []);
-    return rows.length === 0 ? null : mapOwnership(rows[0] as unknown as OwnershipRow);
+    const rows = await this.q(
+      "SELECT * FROM installation_ownership WHERE id = TRUE",
+      [],
+    );
+    return rows.length === 0
+      ? null
+      : mapOwnership(rows[0] as unknown as OwnershipRow);
   }
 
-  async claimOwnership(input: {
-    ownerUserId: string;
-    claimedByUserId: string;
-    claimedIp: string | null;
-    claimedUserAgent: string | null;
-    now: Date;
-  }): Promise<OwnershipRecord> {
+  async claimOwnership(
+    input: {
+      ownerUserId: string;
+      claimedByUserId: string;
+      claimedIp: string | null;
+      claimedUserAgent: string | null;
+      now: Date;
+    },
+    audit?: AuditWrite,
+  ): Promise<OwnershipRecord> {
+    // C-34: with an audit callback the claim INSERT and the audit INSERT share
+    // ONE transaction, so a failed audit write rolls the claim back and
+    // ownership stays unclaimed. Without one, the original single-statement
+    // autocommit behaviour is preserved exactly.
+    const run: <T>(fn: (q: QueryFn) => Promise<T>) => Promise<T> =
+      audit === undefined
+        ? (fn) => fn(this.q)
+        : (fn) => withTransaction(this.pool, fn);
     try {
-      const rows = await this.q(
-        `INSERT INTO installation_ownership
+      return await run(async (q) => {
+        const rows = await q(
+          `INSERT INTO installation_ownership
            (id, owner_user_id, claimed_by_user_id, claimed_at, claimed_ip, claimed_user_agent)
          VALUES (TRUE, $1, $2, $3, $4, $5)
          RETURNING *`,
-        [
-          input.ownerUserId,
-          input.claimedByUserId,
-          input.now,
-          input.claimedIp,
-          input.claimedUserAgent,
-        ],
-      );
-      return mapOwnership(rows[0] as unknown as OwnershipRow);
+          [
+            input.ownerUserId,
+            input.claimedByUserId,
+            input.now,
+            input.claimedIp,
+            input.claimedUserAgent,
+          ],
+        );
+        const record = mapOwnership(rows[0] as unknown as OwnershipRow);
+        if (audit !== undefined) await audit(q);
+        return record;
+      });
     } catch (err: unknown) {
       // The singleton PK rejects the second claim — including a concurrent one.
       if (isUniqueViolation(err)) throw new OwnershipAlreadyClaimedError();

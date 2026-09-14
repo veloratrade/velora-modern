@@ -13,6 +13,7 @@ import {
   DEFAULT_EMAIL_PREFERENCES,
   UserEmailExistsError,
 } from "./userStore.js";
+import type { AuditWrite } from "./auditStore.js";
 
 const iso = (d: Date): string => d.toISOString();
 
@@ -284,17 +285,32 @@ export class MemoryUserStore implements UserStore {
     };
   }
 
-  async updateUserRole(userId: string, role: AppRoleName, now: Date): Promise<UserRecord | null> {
+  async updateUserRole(
+    userId: string,
+    role: AppRoleName,
+    now: Date,
+    audit?: AuditWrite,
+  ): Promise<UserRecord | null> {
     const u = this.users.get(userId);
     if (u === undefined) return null;
+    // C-34 atomicity, in-memory equivalent: the audit write runs BEFORE the map
+    // is mutated, so if it throws the user record is left untouched — the same
+    // observable outcome as the PG adapter's ROLLBACK.
+    if (audit !== undefined) await audit(undefined);
     const updated: UserRecord = { ...u, role, updatedAt: iso(now) };
     this.users.set(userId, updated);
     return updated;
   }
 
-  async updateUserStatus(userId: string, status: string, now: Date): Promise<UserRecord | null> {
+  async updateUserStatus(
+    userId: string,
+    status: string,
+    now: Date,
+    audit?: AuditWrite,
+  ): Promise<UserRecord | null> {
     const u = this.users.get(userId);
     if (u === undefined) return null;
+    if (audit !== undefined) await audit(undefined);
     const updated: UserRecord = { ...u, status, updatedAt: iso(now) };
     this.users.set(userId, updated);
     return updated;

@@ -8,6 +8,8 @@
 // ownership deletion and successor selection are out of scope by product
 // decision, and an absent method cannot be called by mistake.
 
+import type { AuditWrite } from "./auditStore.js";
+
 /** The installation ownership record. At most one exists, ever. */
 export interface OwnershipRecord {
   readonly ownerUserId: string;
@@ -40,11 +42,19 @@ export interface OwnershipStore {
    * installation; every later call throws OwnershipAlreadyClaimedError,
    * including under concurrent execution.
    */
-  claimOwnership(input: {
-    ownerUserId: string;
-    claimedByUserId: string;
-    claimedIp: string | null;
-    claimedUserAgent: string | null;
-    now: Date;
-  }): Promise<OwnershipRecord>;
+  claimOwnership(
+    input: {
+      ownerUserId: string;
+      claimedByUserId: string;
+      claimedIp: string | null;
+      claimedUserAgent: string | null;
+      now: Date;
+    },
+    /**
+     * C-34: executed by the store INSIDE the same transaction as the claim
+     * INSERT. If it throws, the claim is rolled back and ownership remains
+     * unclaimed, so a committed claim always has its audit row.
+     */
+    audit?: AuditWrite,
+  ): Promise<OwnershipRecord>;
 }

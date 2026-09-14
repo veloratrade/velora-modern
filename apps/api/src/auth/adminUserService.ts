@@ -24,6 +24,7 @@
 import { normalizeRole, type AppRole } from "@velora/contracts";
 import { AuthError } from "./authService.js";
 import type { UserRecord, UserStore, AppRoleName } from "./userStore.js";
+import type { AuditStore, AuditEntry, AuditTx } from "./auditStore.js";
 
 /** Account states (0007_user_status.sql; Legacy parity: enum('active','suspended')). */
 export const USER_STATUSES = ["active", "suspended"] as const;
@@ -95,6 +96,19 @@ export interface AdminUserServiceDeps {
    * ownership capability. It is NEVER derived from a token, header or body.
    */
   readonly getSystemOwnerUserId: () => Promise<string | null>;
+  /**
+   * Append-only security audit trail (C-34).
+   *
+   * REQUIRED, deliberately — same rule as getSystemOwnerUserId. A construction
+   * site that omitted it would silently stop recording privileged role/status
+   * changes with no runtime signal; making it mandatory turns that into a
+   * COMPILE-TIME error instead. A caller that genuinely has no audit capability
+   * must say so explicitly by passing a MemoryAuditStore.
+   *
+   * Append errors PROPAGATE (see setRole/setStatus): the audit write is part of
+   * the operation, not best-effort telemetry.
+   */
+  readonly audit: AuditStore;
 }
 
 export interface ActorContext {
@@ -105,6 +119,14 @@ export interface ActorContext {
    * from storage by the caller; never from a client-supplied value.
    */
   readonly isSystemOwner?: boolean;
+  /**
+   * Correlation id from the per-request security context (kernel/security.ts),
+   * recorded on audit entries. Optional: service-level callers without an HTTP
+   * request have none. It is metadata only — it never affects authorization,
+   * and like every other field here it is supplied by the server, not the
+   * client.
+   */
+  readonly requestId?: string;
 }
 
 export class AdminUserService {
@@ -220,7 +242,24 @@ export class AdminUserService {
     await this.assertSuperAdminRemains(target, newRole !== "super_admin");
 
     const now = this.now();
-    const updated = await this.deps.store.updateUserRole(targetId, newRole, now);
+    const previousRole = target.role; // captured BEFORE the mutation
+    // C-34: the audit row is written by the STORE, inside the same transaction
+    // as the UPDATE. Only a SUCCESSFUL change is recorded — every rejection
+    // above threw before reaching this point. The actor is the server-derived
+    // authenticated identity, never a client-supplied id. Errors propagate
+    // deliberately (no catch-and-ignore): if the audit write fails the role
+    // change rolls back rather than committing without a trail.
+    const updated = await this.deps.store.updateUserRole(targetId, newRole, now, (tx) =>
+      this.recordAudit(tx, {
+        action: "USER_ROLE_CHANGED",
+        actorUserId: actor.id,
+        targetUserId: targetId,
+        beforeState: previousRole,
+        afterState: newRole,
+        requestId: actor.requestId ?? null,
+        occurredAt: now,
+      }),
+    );
     if (updated === null) throw notFound();
     await this.deps.store.revokeAllSessionsForUser(targetId, now);
     return { user: toAdminUser(updated), sessionsRevoked: true };
@@ -276,7 +315,20 @@ export class AdminUserService {
     await this.assertSuperAdminRemains(target, newStatus !== "active");
 
     const now = this.now();
-    const updated = await this.deps.store.updateUserStatus(targetId, newStatus, now);
+    const previousStatus = target.status; // captured BEFORE the mutation
+    // C-34: successful status changes only (rejections threw above), written
+    // transactionally by the store together with the UPDATE.
+    const updated = await this.deps.store.updateUserStatus(targetId, newStatus, now, (tx) =>
+      this.recordAudit(tx, {
+        action: "USER_STATUS_CHANGED",
+        actorUserId: actor.id,
+        targetUserId: targetId,
+        beforeState: previousStatus,
+        afterState: newStatus,
+        requestId: actor.requestId ?? null,
+        occurredAt: now,
+      }),
+    );
     if (updated === null) throw notFound();
 
     // Reactivation must NOT revoke sessions (there are none to protect against);
@@ -286,6 +338,15 @@ export class AdminUserService {
       return { user: toAdminUser(updated), sessionsRevoked: true };
     }
     return { user: toAdminUser(updated), sessionsRevoked: false };
+  }
+
+  /**
+   * Append one audit record, enlisted in the caller's transaction when the
+   * store provides one. Errors are NOT caught: the store rolls the mutation
+   * back, which is the whole point of writing it here.
+   */
+  private async recordAudit(tx: AuditTx | undefined, entry: AuditEntry): Promise<void> {
+    await this.deps.audit.append(entry, tx);
   }
 
   /**

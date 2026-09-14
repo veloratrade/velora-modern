@@ -38,6 +38,8 @@ import { AdminUserService } from "./auth/adminUserService.js";
 import { OwnershipService } from "./auth/ownershipService.js";
 import { MemoryOwnershipStore } from "./auth/memoryOwnershipStore.js";
 import { PgOwnershipStore } from "./auth/pgOwnershipStore.js";
+import { MemoryAuditStore } from "./auth/memoryAuditStore.js";
+import { PgAuditStore } from "./auth/pgAuditStore.js";
 import type { MailPort } from "./mail/mailPort.js";
 import { ResendMailProvider } from "./mail/resendMailProvider.js";
 import { LogMailProvider } from "./mail/logMailProvider.js";
@@ -199,14 +201,18 @@ async function main(): Promise<void> {
     // can never be suspended or demoted through user management.
     const ownershipStore =
       pool !== undefined ? new PgOwnershipStore(pool) : new MemoryOwnershipStore();
+    // C-34: one append-only audit trail shared by every privileged mutation.
+    const auditStore = pool !== undefined ? new PgAuditStore(pool) : new MemoryAuditStore();
     capabilities.ownership = new OwnershipService({
       ownership: ownershipStore,
       users: userStore,
       hasher: new VeloraHasher(),
+      audit: auditStore,
     });
     capabilities.adminUsers = new AdminUserService({
       store: userStore,
       getSystemOwnerUserId: async () => (await ownershipStore.getOwnership())?.ownerUserId ?? null,
+      audit: auditStore,
     });
   }
   const app = createApp({

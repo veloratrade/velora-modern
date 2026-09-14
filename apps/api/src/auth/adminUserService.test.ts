@@ -17,6 +17,7 @@ import {
 } from "./adminUserService.js";
 import type { AppRole } from "@velora/contracts";
 import type { UserRecord } from "./userStore.js";
+import { MemoryAuditStore } from "./memoryAuditStore.js";
 
 const NOW = new Date("2026-09-14T12:00:00.000Z");
 
@@ -50,6 +51,7 @@ function makeService(store: MemoryUserStore): AdminUserService {
     // rather than omitted, so owner protection is deliberately inert here and
     // cannot be lost by accident elsewhere.
     getSystemOwnerUserId: async () => null,
+    audit: new MemoryAuditStore(),
   });
 }
 
@@ -65,7 +67,7 @@ function makeService(store: MemoryUserStore): AdminUserService {
  */
 function _ownerResolverIsRequiredAtCompileTime(store: MemoryUserStore): void {
   // @ts-expect-error - getSystemOwnerUserId is required; omitting it must not compile.
-  void new AdminUserService({ store, now: () => NOW });
+  void new AdminUserService({ store, now: () => NOW, audit: new MemoryAuditStore() });
 }
 void _ownerResolverIsRequiredAtCompileTime;
 

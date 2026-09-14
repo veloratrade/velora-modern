@@ -18,6 +18,7 @@ import { MemoryTradeStore } from "../trades/memoryTradeStore.js";
 import { OwnershipService } from "../auth/ownershipService.js";
 import { PERMISSIONS } from "@velora/contracts";
 import type { AppRoleName } from "../auth/userStore.js";
+import { MemoryAuditStore } from "../auth/memoryAuditStore.js";
 
 const SECRET = "system-owner-routes-secret-0123456789ab"; // test-only
 const NOW = new Date("2026-09-14T12:00:00.000Z");
@@ -48,12 +49,14 @@ async function withServer(
     users,
     hasher,
     now: () => NOW,
+    audit: new MemoryAuditStore(),
   });
   // Wired exactly as the composition root wires it.
   const adminUsers = new AdminUserService({
     store: users,
     now: () => NOW,
     getSystemOwnerUserId: async () => (await ownershipStore.getOwnership())?.ownerUserId ?? null,
+    audit: new MemoryAuditStore(),
   });
   // REAL trades capability: the IDOR test must exercise the actual trade
   // authorization path, not a fail-closed 503.

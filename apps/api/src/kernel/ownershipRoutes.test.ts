@@ -15,6 +15,7 @@ import { JwtService } from "../auth/jwt.js";
 import { OwnershipService, OWNERSHIP_CLAIM_CONFIRMATION } from "../auth/ownershipService.js";
 import { AdminUserService } from "../auth/adminUserService.js";
 import type { AppRoleName } from "../auth/userStore.js";
+import { MemoryAuditStore } from "../auth/memoryAuditStore.js";
 
 const SECRET = "ownership-routes-test-secret-0123456789"; // test-only
 const NOW = new Date("2026-09-14T12:00:00.000Z");
@@ -47,6 +48,7 @@ async function withServer(
     users,
     hasher,
     now: () => NOW,
+    audit: new MemoryAuditStore(),
   });
   const adminUsers = new AdminUserService({
     store: users,
@@ -54,6 +56,7 @@ async function withServer(
     // Wired to the REAL ownership store, exactly as the composition root does,
     // so owner protection is live for whatever these tests claim.
     getSystemOwnerUserId: async () => (await ownershipStore.getOwnership())?.ownerUserId ?? null,
+    audit: new MemoryAuditStore(),
   });
   const app = createApp({
     allowedOrigins: ["https://veloratrade.ir"],

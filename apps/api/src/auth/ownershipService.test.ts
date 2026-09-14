@@ -14,6 +14,7 @@ import {
   OWNERSHIP_CLAIM_CONFIRMATION,
 } from "./ownershipService.js";
 import type { AppRoleName } from "./userStore.js";
+import { MemoryAuditStore } from "./memoryAuditStore.js";
 
 const NOW = new Date("2026-09-14T12:00:00.000Z");
 const PASSWORD = "correct horse battery staple 9";
@@ -32,6 +33,7 @@ async function fixture(): Promise<Fixture> {
     users,
     hasher: new VeloraHasher(),
     now: () => NOW,
+    audit: new MemoryAuditStore(),
   });
   return { users, ownership, svc };
 }

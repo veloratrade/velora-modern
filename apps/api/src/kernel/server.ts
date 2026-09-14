@@ -758,6 +758,9 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
           id: authority!.sub,
           role: authority!.role,
           isSystemOwner: authority!.isSystemOwner,
+          // C-34 correlation id — server-generated per request, audit metadata
+          // only. Never read from the client.
+          requestId: sec.requestId,
         });
       })
       .catch(
@@ -872,6 +875,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
           config.trustedProxyCidrs ?? [],
         ),
         userAgent: typeof ua === "string" ? ua : null,
+        requestId: sec.requestId, // C-34 correlation id (server-generated)
       });
       return { status: 201, body: ok(result) };
     } catch (err: unknown) {

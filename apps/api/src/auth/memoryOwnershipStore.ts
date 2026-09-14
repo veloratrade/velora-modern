@@ -10,6 +10,7 @@ import {
   type OwnershipStore,
   OwnershipAlreadyClaimedError,
 } from "./ownershipStore.js";
+import type { AuditWrite } from "./auditStore.js";
 
 export class MemoryOwnershipStore implements OwnershipStore {
   private record: OwnershipRecord | null = null;
@@ -18,16 +19,23 @@ export class MemoryOwnershipStore implements OwnershipStore {
     return this.record;
   }
 
-  async claimOwnership(input: {
-    ownerUserId: string;
-    claimedByUserId: string;
-    claimedIp: string | null;
-    claimedUserAgent: string | null;
-    now: Date;
-  }): Promise<OwnershipRecord> {
+  async claimOwnership(
+    input: {
+      ownerUserId: string;
+      claimedByUserId: string;
+      claimedIp: string | null;
+      claimedUserAgent: string | null;
+      now: Date;
+    },
+    audit?: AuditWrite,
+  ): Promise<OwnershipRecord> {
     // Check-and-set with no await between them: equivalent to the DB's
     // single-row PRIMARY KEY, so a concurrent second claim cannot slip through.
     if (this.record !== null) throw new OwnershipAlreadyClaimedError();
+    // C-34 atomicity, in-memory equivalent: the audit write happens BEFORE the
+    // singleton is set, so a failing audit leaves ownership unclaimed — the
+    // same observable outcome as the PG adapter's ROLLBACK.
+    if (audit !== undefined) await audit(undefined);
     this.record = {
       ownerUserId: input.ownerUserId,
       claimedByUserId: input.claimedByUserId,

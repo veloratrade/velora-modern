@@ -11,7 +11,8 @@
 // proof (Phase D evidence policy).
 import type { Pool } from "pg";
 import { normalizeRole } from "@velora/contracts";
-import { poolQuery, isUniqueViolation, iso, isoOrNull, type QueryFn } from "../persistence/pg.js";
+import { poolQuery, withTransaction, isUniqueViolation, iso, isoOrNull, type QueryFn } from "../persistence/pg.js";
+import type { AuditWrite } from "./auditStore.js";
 import type {
   UserStore,
   UserRecord,
@@ -344,20 +345,58 @@ export class PgUserStore implements UserStore {
     };
   }
 
-  async updateUserRole(userId: string, role: AppRoleName, now: Date): Promise<UserRecord | null> {
-    const rows = await this.q(
+  async updateUserRole(
+    userId: string,
+    role: AppRoleName,
+    now: Date,
+    audit?: AuditWrite,
+  ): Promise<UserRecord | null> {
+    return this.mutateUser(
       "UPDATE users SET role = $1, updated_at = $2 WHERE id = $3 RETURNING *",
       [role, now, userId],
+      audit,
     );
-    return rows.length === 0 ? null : mapUser(rows[0] as unknown as UserRow);
   }
 
-  async updateUserStatus(userId: string, status: string, now: Date): Promise<UserRecord | null> {
-    const rows = await this.q(
+  async updateUserStatus(
+    userId: string,
+    status: string,
+    now: Date,
+    audit?: AuditWrite,
+  ): Promise<UserRecord | null> {
+    return this.mutateUser(
       "UPDATE users SET status = $1, updated_at = $2 WHERE id = $3 RETURNING *",
       [status, now, userId],
+      audit,
     );
-    return rows.length === 0 ? null : mapUser(rows[0] as unknown as UserRow);
+  }
+
+  /**
+   * Shared privileged-mutation path (C-34). With an `audit` callback the UPDATE
+   * and the audit INSERT run in ONE transaction (persistence/pg.ts
+   * withTransaction): if the audit write throws, withTransaction issues
+   * ROLLBACK and the user row is never changed, so a committed privileged
+   * mutation always has its audit row. Without a callback it autocommits,
+   * preserving the previous behaviour exactly.
+   *
+   * A missing target row returns null BEFORE the audit write, so a no-op never
+   * produces an audit record.
+   */
+  private async mutateUser(
+    sql: string,
+    params: readonly unknown[],
+    audit?: AuditWrite,
+  ): Promise<UserRecord | null> {
+    if (audit === undefined) {
+      const rows = await this.q(sql, params);
+      return rows.length === 0 ? null : mapUser(rows[0] as unknown as UserRow);
+    }
+    return withTransaction(this.pool, async (q) => {
+      const rows = await q(sql, params);
+      if (rows.length === 0) return null;
+      await audit(q);
+      return mapUser(rows[0] as unknown as UserRow);
+    });
   }
 
   async countUsersByRole(role: AppRoleName): Promise<number> {

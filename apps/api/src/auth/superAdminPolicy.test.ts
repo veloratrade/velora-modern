@@ -11,6 +11,7 @@ import { AuthError } from "./authService.js";
 import { AdminUserService } from "./adminUserService.js";
 import type { AppRole } from "@velora/contracts";
 import type { AppRoleName } from "./userStore.js";
+import { MemoryAuditStore } from "./memoryAuditStore.js";
 
 const NOW = new Date("2026-09-14T12:00:00.000Z");
 
@@ -40,6 +41,7 @@ const svcFor = (store: MemoryUserStore): AdminUserService =>
     // Peer / last-admin invariants are under test here, not ownership: the
     // installation is explicitly unowned.
     getSystemOwnerUserId: async () => null,
+    audit: new MemoryAuditStore(),
   });
 
 async function expectError(fn: () => Promise<unknown>): Promise<AuthError> {

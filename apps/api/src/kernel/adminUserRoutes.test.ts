@@ -14,6 +14,7 @@ import { VeloraHasher } from "../auth/hashing.js";
 import { JwtService } from "../auth/jwt.js";
 import { AdminUserService } from "../auth/adminUserService.js";
 import type { AppRole } from "@velora/contracts";
+import { MemoryAuditStore } from "../auth/memoryAuditStore.js";
 
 const SECRET = "admin-users-routes-test-secret-0123456789"; // test-only
 const NOW = new Date("2026-09-14T12:00:00.000Z");
@@ -42,7 +43,8 @@ async function withServer(
   const adminUsers = new AdminUserService({
     store: userStore,
     now: () => NOW,
-    getSystemOwnerUserId: async () => null, // no ownership claimed in this suite
+    getSystemOwnerUserId: async () => null, // no ownership claimed in this suite,
+    audit: new MemoryAuditStore(),
   });
   const app = createApp({
     allowedOrigins: ["https://veloratrade.ir"],

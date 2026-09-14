@@ -8,6 +8,8 @@
  * across the persistence port so the union is never re-typed by hand; it is the
  * same triple enumerated in packages/contracts/src/rbac.ts (AppRole).
  */
+import type { AuditWrite } from "./auditStore.js";
+
 export type AppRoleName = "user" | "admin" | "super_admin";
 
 export interface UserRecord {
@@ -172,11 +174,28 @@ export interface UserStore {
     offset: number;
   }): Promise<{ items: readonly UserRecord[]; total: number }>;
 
-  /** Set a user's application role. Returns the updated record, or null if absent. */
-  updateUserRole(userId: string, role: AppRoleName, now: Date): Promise<UserRecord | null>;
+  /**
+   * Set a user's application role. Returns the updated record, or null if absent.
+   *
+   * `audit` (C-34) is executed by the store INSIDE the same transaction as the
+   * UPDATE, mirroring the existing pgTradeStore.createTrade(record, event)
+   * convention. If it throws, the role change is rolled back and never commits,
+   * so a committed role change always has its audit row.
+   */
+  updateUserRole(
+    userId: string,
+    role: AppRoleName,
+    now: Date,
+    audit?: AuditWrite,
+  ): Promise<UserRecord | null>;
 
-  /** Set a user's account status. Returns the updated record, or null if absent. */
-  updateUserStatus(userId: string, status: string, now: Date): Promise<UserRecord | null>;
+  /** Set a user's account status. Same transactional audit contract as updateUserRole. */
+  updateUserStatus(
+    userId: string,
+    status: string,
+    now: Date,
+    audit?: AuditWrite,
+  ): Promise<UserRecord | null>;
 
   /** Count users holding a given role (any status). */
   countUsersByRole(role: AppRoleName): Promise<number>;

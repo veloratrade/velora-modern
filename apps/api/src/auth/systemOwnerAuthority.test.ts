@@ -21,6 +21,7 @@ import {
   type Permission,
 } from "@velora/contracts";
 import type { AppRoleName } from "./userStore.js";
+import { MemoryAuditStore } from "./memoryAuditStore.js";
 
 const NOW = new Date("2026-09-14T12:00:00.000Z");
 
@@ -49,6 +50,7 @@ function svcWithOwner(store: MemoryUserStore, owner: MemoryOwnershipStore): Admi
     store,
     now: () => NOW,
     getSystemOwnerUserId: async () => (await owner.getOwnership())?.ownerUserId ?? null,
+    audit: new MemoryAuditStore(),
   });
 }
 
