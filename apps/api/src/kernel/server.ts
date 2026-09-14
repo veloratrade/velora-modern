@@ -19,10 +19,13 @@ import {
   can,
   normalizeRole,
   permissionsFor,
+  canAct,
+  authorityPermissions,
+  type AuthorityContext,
 } from "@velora/contracts";
 import { newSecurityContext, buildCsp, SECURITY_HEADERS, originAllowed } from "./security.js";
 import { AuthService, AuthError } from "../auth/authService.js";
-import { AdminUserService } from "../auth/adminUserService.js";
+import { AdminUserService, type ActorContext } from "../auth/adminUserService.js";
 import { OwnershipService } from "../auth/ownershipService.js";
 import { AccountService, AccountError } from "../accounts/accountService.js";
 import { TradeService, TradeError } from "../trades/tradeService.js";
@@ -122,28 +125,38 @@ function authenticateRequest(
   return { sub: payload.sub, role: normalizeRole(payload.role) };
 }
 
-/**
- * Server-side authorization guard (Phase 3B-3, OD-9).
- *
- * Distinguishes the two failure modes deliberately:
- *   - not authenticated       => 401 UNAUTHENTICATED
- *   - authenticated, no grant => 403 FORBIDDEN
- * This is an ADMINISTRATIVE authority check. It is NOT a substitute for
- * resource ownership: ownership-scoped routes keep their non-disclosing 404
- * semantics and are untouched by this guard.
- */
-function requirePermission(
+async function resolveAuthority(
   claims: { sub: string; role: AppRole } | null,
+  ownership: OwnershipService | undefined,
+): Promise<(AuthorityContext & { sub: string }) | null> {
+  if (claims === null) return null;
+  let isSystemOwner = false;
+  if (ownership !== undefined) {
+    const state = await ownership.status();
+    isSystemOwner = state.claimed && state.ownerUserId === claims.sub;
+  }
+  return { sub: claims.sub, role: claims.role, isSystemOwner };
+}
+
+/**
+ * Owner-aware authorization guard.
+ *
+ * Identical to requirePermission for ordinary roles; the System Owner satisfies
+ * every permission, including ones that do not exist yet, because ownership is
+ * the highest application authority rather than an enumerated role.
+ */
+function requireAuthority(
+  authority: (AuthorityContext & { sub: string }) | null,
   permission: Permission,
   requestId: string,
 ): RouteResult | null {
-  if (claims === null) {
+  if (authority === null) {
     return { status: 401, body: fail("UNAUTHENTICATED", "Authentication required.", requestId) };
   }
-  if (!can(claims.role, permission)) {
+  if (!canAct(authority, permission)) {
     return { status: 403, body: fail("FORBIDDEN", "Insufficient role.", requestId) };
   }
-  return null; // authorized
+  return null;
 }
 
 function validationFailure(error: z.ZodError, requestId: string): RouteResult {
@@ -685,11 +698,16 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
       return { status: 503, body: fail("SERVICE_UNAVAILABLE", "auth not configured", sec.requestId) };
     }
     const claims = authenticateRequest(req, config.auth);
-    const denied = requirePermission(claims, "rbac.self.view", sec.requestId);
+    const authority = await resolveAuthority(claims, config.ownership);
+    const denied = requireAuthority(authority, "rbac.self.view", sec.requestId);
     if (denied !== null) return denied;
     return {
       status: 200,
-      body: ok({ role: claims!.role, permissions: permissionsFor(claims!.role) }),
+      body: ok({
+        role: authority!.role,
+        isSystemOwner: authority!.isSystemOwner,
+        permissions: authorityPermissions(authority!),
+      }),
     };
   }
 
@@ -700,7 +718,8 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
       return { status: 503, body: fail("SERVICE_UNAVAILABLE", "auth not configured", sec.requestId) };
     }
     const claims = authenticateRequest(req, config.auth);
-    const denied = requirePermission(claims, "rbac.matrix.view", sec.requestId);
+    const authority = await resolveAuthority(claims, config.ownership);
+    const denied = requireAuthority(authority, "rbac.matrix.view", sec.requestId);
     if (denied !== null) return denied;
     return {
       status: 200,
@@ -713,13 +732,14 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
 
   // ---- Admin user management (Phase 3B-4) --------------------------------
   // Two independent layers run on every one of these routes:
-  //   1. requirePermission(...)  — may this ROLE reach the operation at all?
+  //   1. requireAuthority(...)  — may this AUTHORITY (role, or System Owner)
+  //      reach the operation at all?
   //   2. AdminUserService guards — is this ACTOR allowed to act on this TARGET?
   // A permission bit cannot express the pair-rules (self-action, privileged
   // target, escalation), so neither layer is redundant.
   const adminUsersRoute = (
     permission: Permission,
-    fn: (svc: AdminUserService, actor: { id: string; role: AppRole }) => Promise<RouteResult>,
+    fn: (svc: AdminUserService, actor: ActorContext) => Promise<RouteResult>,
   ): Promise<RouteResult> => {
     if (config.auth === undefined || config.adminUsers === undefined) {
       return Promise.resolve({
@@ -728,9 +748,19 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
       });
     }
     const claims = authenticateRequest(req, config.auth);
-    const denied = requirePermission(claims, permission, sec.requestId);
-    if (denied !== null) return Promise.resolve(denied);
-    return fn(config.adminUsers, { id: claims!.sub, role: claims!.role }).catch(
+    // Ownership is resolved from storage; the System Owner passes every
+    // permission check even though their stored RBAC role may be `admin`.
+    return resolveAuthority(claims, config.ownership)
+      .then((authority) => {
+        const denied = requireAuthority(authority, permission, sec.requestId);
+        if (denied !== null) return denied;
+        return fn(config.adminUsers!, {
+          id: authority!.sub,
+          role: authority!.role,
+          isSystemOwner: authority!.isSystemOwner,
+        });
+      })
+      .catch(
       (err: unknown) => {
         if (err instanceof AuthError) {
           return {

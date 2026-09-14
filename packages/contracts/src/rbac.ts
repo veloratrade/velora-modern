@@ -108,6 +108,55 @@ export function permissionsFor(role: unknown): readonly Permission[] {
 }
 
 /**
+ * Authorization context: ordinary RBAC role PLUS installation ownership.
+ *
+ * `isSystemOwner` MUST be resolved server-side from the installation ownership
+ * record (installation_ownership, migration 0008) keyed by the authenticated
+ * subject. It must NEVER be read from a token claim, a header, a query
+ * parameter or a request body: a JWT saying `systemOwner=true` is not evidence,
+ * and a JWT saying `role=super_admin` is not evidence when storage disagrees.
+ */
+export interface AuthorityContext {
+  readonly role: AppRole;
+  readonly isSystemOwner: boolean;
+}
+
+/**
+ * The authorization predicate used by administrative operations.
+ *
+ * SYSTEM OWNER IS THE HIGHEST APPLICATION AUTHORITY. Ownership is not an RBAC
+ * role and is not enumerated in ROLE_PERMISSIONS; instead the owner satisfies
+ * EVERY permission, including permissions that do not exist yet. That is
+ * deliberate and is the whole point of modelling ownership separately: a new
+ * capability added in a future phase cannot accidentally exclude the owner
+ * because their stored role happens to be `admin`, and no hardcoded
+ * owner-permission list can drift out of date.
+ *
+ * SCOPE OF "FULL AUTHORITY" — this grants the highest APPLICATION authority.
+ * It is NOT a bypass of anything else:
+ *   - authentication still applies (an unauthenticated caller has no context);
+ *   - per-user data ownership (IDOR) boundaries are a separate mechanism and
+ *     are NOT affected — owner does not gain access to another user's rows;
+ *   - system safety invariants (e.g. the last-active-super-admin rule) are not
+ *     waived merely because the caller is the owner;
+ *   - PostgreSQL identities (ADR-010) are untouched — an owner gains no
+ *     database privilege whatsoever.
+ */
+export function canAct(ctx: AuthorityContext | null | undefined, permission: Permission): boolean {
+  if (ctx === null || ctx === undefined) return false;
+  if (ctx.isSystemOwner) return true; // highest authority, present and future
+  return can(ctx.role, permission);
+}
+
+/**
+ * Effective permissions for an authority context: the complete permission set
+ * for the system owner, otherwise the role's enumerated grants.
+ */
+export function authorityPermissions(ctx: AuthorityContext): readonly Permission[] {
+  return ctx.isSystemOwner ? PERMISSIONS : permissionsFor(ctx.role);
+}
+
+/**
  * Normalize a role value arriving from storage or a verified token.
  *
  * Anything unrecognised degrades to the LEAST privileged role rather than

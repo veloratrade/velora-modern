@@ -112,10 +112,40 @@ automatic recovery owner are **not implemented**. Consequently **no ownership
 recovery path exists**; see the open product decisions recorded in the phase
 report.
 
-### Ownership state vs runtime authority
+### Ownership state vs runtime authority (RESOLVED — enforced)
 
-System Ownership is currently **recorded state, not a runtime permission**. The
-owner's day-to-day authority is still whatever their RBAC role grants. Whether
-System Owner should outrank Super Admin at runtime — and whether the owner's
-account should be protected from suspension or demotion — are **product
-decisions that remain open** and were not assumed by this implementation.
+System Owner is the **highest application authority** and this is now enforced
+in code, not merely documented.
+
+**Authority.** Authorization for administrative operations is evaluated through
+`canAct(ctx, permission)` over an `AuthorityContext { role, isSystemOwner }`.
+The owner satisfies **every** permission — including permissions that do not
+exist yet — so a capability added in a future phase cannot accidentally exclude
+the owner because their stored role happens to be `admin`. There is deliberately
+no hardcoded owner-permission list to drift out of date.
+
+`isSystemOwner` is resolved **server-side** from `installation_ownership` keyed
+by the authenticated subject. A validly signed JWT carrying `systemOwner=true`,
+or claiming `role=super_admin` when storage disagrees, grants nothing.
+
+**"Full authority" is bounded.** It is the highest *application* authority, not
+a bypass of every mechanism. It does **not** bypass authentication, per-user
+data-ownership (IDOR) boundaries, system safety invariants, or the ADR-010
+PostgreSQL identities.
+
+**Immutability.** The owner cannot be suspended, demoted or otherwise disabled
+through user management: `SYSTEM_OWNER_PROTECTED` (403) is enforced in
+`AdminUserService` before every other target rule. The service layer is the
+correct chokepoint because `updateUserRole` and `updateUserStatus` have exactly
+one caller each, both in that class. The owner's stored RBAC role is
+**unchanged** by ownership — no fourth role exists.
+
+| Protection | Mechanism |
+|---|---|
+| Owner cannot be suspended / demoted | `SYSTEM_OWNER_PROTECTED` in `AdminUserService.setRole` / `setStatus` |
+| Owner cannot be deleted | No application delete path exists; `ON DELETE RESTRICT` blocks row deletion |
+| Owner authority is storage-derived | `resolveAuthority()` reads `installation_ownership`; tokens are never trusted for ownership |
+| Owner is not excluded by super-admin-only guards | `hasSuperAuthority(actor)` — owner counts as at least super-admin authority |
+
+**Still unresolved:** ownership transfer and recovery remain out of scope, so
+**no recovery path exists** if the owner loses access or is compromised.

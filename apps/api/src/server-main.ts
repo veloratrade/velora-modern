@@ -34,6 +34,10 @@ import { FixedWindowRateLimiter } from "./ratelimits/rateLimiter.js";
 import { MemoryRateLimitStore } from "./ratelimits/memoryRateLimitStore.js";
 import { PgRateLimitStore } from "./ratelimits/pgRateLimitStore.js";
 import { EntitlementService } from "./entitlements/entitlementService.js";
+import { AdminUserService } from "./auth/adminUserService.js";
+import { OwnershipService } from "./auth/ownershipService.js";
+import { MemoryOwnershipStore } from "./auth/memoryOwnershipStore.js";
+import { PgOwnershipStore } from "./auth/pgOwnershipStore.js";
 
 type PgClient = import("pg").Client;
 
@@ -138,7 +142,13 @@ async function main(): Promise<void> {
   const rateLimitStore = pool !== undefined ? new PgRateLimitStore(pool) : new MemoryRateLimitStore();
 
   // Without a boot JWT secret every capability route stays fail-closed (503).
-  const capabilities: { auth?: AuthService; accounts?: AccountService; trades?: TradeService } = {};
+  const capabilities: {
+    auth?: AuthService;
+    accounts?: AccountService;
+    trades?: TradeService;
+    adminUsers?: AdminUserService;
+    ownership?: OwnershipService;
+  } = {};
   if (boot.jwtSecret !== undefined) {
     capabilities.auth = new AuthService({
       store: userStore,
@@ -159,6 +169,20 @@ async function main(): Promise<void> {
       getUserTimezone: async (userId) => (await userStore.findUserById(userId))?.timezone ?? "UTC",
       verifyAccountOwnership: async (accountId, userId) =>
         (await accountStore.findByIdForUser(accountId, userId)) !== null,
+    });
+    // Installation ownership (System Owner) and the admin user surface. The
+    // admin service resolves the owner from AUTHORITATIVE STORAGE so the owner
+    // can never be suspended or demoted through user management.
+    const ownershipStore =
+      pool !== undefined ? new PgOwnershipStore(pool) : new MemoryOwnershipStore();
+    capabilities.ownership = new OwnershipService({
+      ownership: ownershipStore,
+      users: userStore,
+      hasher: new VeloraHasher(),
+    });
+    capabilities.adminUsers = new AdminUserService({
+      store: userStore,
+      getSystemOwnerUserId: async () => (await ownershipStore.getOwnership())?.ownerUserId ?? null,
     });
   }
   const app = createApp({

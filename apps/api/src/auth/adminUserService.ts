@@ -82,11 +82,25 @@ export interface AdminUserServiceDeps {
   readonly store: UserStore;
   /** Injectable clock (service convention). */
   readonly now?: () => Date;
+  /**
+   * Resolves the installation's System Owner user id from authoritative
+   * storage (installation_ownership), or null when ownership is unclaimed.
+   *
+   * Optional so that existing wiring keeps working; when it is absent the
+   * service behaves exactly as before (no owner exists to protect). It is NEVER
+   * derived from a token, header or request body.
+   */
+  readonly getSystemOwnerUserId?: () => Promise<string | null>;
 }
 
 export interface ActorContext {
   readonly id: string;
   readonly role: AppRole;
+  /**
+   * Whether this actor is the installation System Owner. Resolved server-side
+   * from storage by the caller; never from a client-supplied value.
+   */
+  readonly isSystemOwner?: boolean;
 }
 
 export class AdminUserService {
@@ -164,7 +178,13 @@ export class AdminUserService {
     const target = await this.deps.store.findUserById(targetId);
     if (target === null) throw notFound();
 
-    if (actor.role !== "super_admin" && isPrivilegedRole(target.role)) {
+    // OWNER IMMUTABILITY — checked before every other target rule so that NO
+    // ordinary actor (admin, super_admin, or even the owner themselves through
+    // this surface) can suspend, demote or otherwise disable the System Owner.
+    // Resolved from authoritative storage, never from a client value.
+    await this.assertNotSystemOwner(targetId);
+
+    if (!hasSuperAuthority(actor) && isPrivilegedRole(target.role)) {
       throw new AuthError(403, "PRIVILEGED_TARGET", "Cannot modify a privileged user.");
     }
     // PEER PROTECTION: super admins are peers, with no hierarchy between them.
@@ -176,7 +196,7 @@ export class AdminUserService {
         "A super admin cannot modify another super admin.",
       );
     }
-    if (isPrivilegedRole(newRole) && actor.role !== "super_admin") {
+    if (isPrivilegedRole(newRole) && !hasSuperAuthority(actor)) {
       throw new AuthError(
         403,
         "PRIVILEGE_ESCALATION_DENIED",
@@ -226,7 +246,13 @@ export class AdminUserService {
     const target = await this.deps.store.findUserById(targetId);
     if (target === null) throw notFound();
 
-    if (actor.role !== "super_admin" && isPrivilegedRole(target.role)) {
+    // OWNER IMMUTABILITY — checked before every other target rule so that NO
+    // ordinary actor (admin, super_admin, or even the owner themselves through
+    // this surface) can suspend, demote or otherwise disable the System Owner.
+    // Resolved from authoritative storage, never from a client value.
+    await this.assertNotSystemOwner(targetId);
+
+    if (!hasSuperAuthority(actor) && isPrivilegedRole(target.role)) {
       throw new AuthError(403, "PRIVILEGED_TARGET", "Cannot modify a privileged user.");
     }
     // PEER PROTECTION: one super admin may never suspend another.
@@ -259,6 +285,33 @@ export class AdminUserService {
   }
 
   /**
+   * Reject any ordinary user-management mutation whose TARGET is the System
+   * Owner.
+   *
+   * The owner's stored RBAC role is ordinarily `admin`, so neither
+   * PRIVILEGED_TARGET nor the super-admin peer rule would protect them: without
+   * this guard a super_admin could suspend the owner and leave an installation
+   * whose owner cannot authenticate (the ownership row would survive, because
+   * ON DELETE RESTRICT protects row deletion only, not account state).
+   *
+   * Enforced at the SERVICE layer, which is the single chokepoint: both
+   * updateUserRole and updateUserStatus have exactly one caller each, and both
+   * are in this class (verified by route audit).
+   */
+  private async assertNotSystemOwner(targetId: string): Promise<void> {
+    const resolve = this.deps.getSystemOwnerUserId;
+    if (resolve === undefined) return; // no ownership capability wired in
+    const ownerId = await resolve();
+    if (ownerId !== null && ownerId === targetId) {
+      throw new AuthError(
+        403,
+        "SYSTEM_OWNER_PROTECTED",
+        "The system owner cannot be modified through user management.",
+      );
+    }
+  }
+
+  /**
    * Enforce "the installation always retains at least one ACTIVE super admin".
    *
    * Deliberately separate from peer protection: peer protection is about WHO
@@ -283,6 +336,23 @@ export class AdminUserService {
       );
     }
   }
+}
+
+/**
+ * Whether the actor wields at least super-admin authority.
+ *
+ * The System Owner is the highest application authority, so they satisfy this
+ * even when their stored RBAC role is only `admin`. Without this, a guard
+ * written as `actor.role !== "super_admin"` would silently exclude the owner —
+ * exactly the "a future capability accidentally excludes the owner" failure
+ * mode that ownership is modelled separately to avoid.
+ *
+ * This widens who may ACT. It never widens who may be acted UPON: owner
+ * immutability, super-admin peer protection and the last-active-super-admin
+ * invariant are all enforced independently and are unaffected.
+ */
+function hasSuperAuthority(actor: ActorContext): boolean {
+  return actor.role === "super_admin" || actor.isSystemOwner === true;
 }
 
 function isAppRoleName(v: string): v is AppRoleName {

@@ -7,7 +7,8 @@ import assert from "node:assert/strict";
 import {
   APP_ROLES, PERMISSIONS, ROLE_PERMISSIONS,
   can, isAppRole, permissionsFor, normalizeRole,
-  type AppRole, type Permission,
+  canAct, authorityPermissions,
+  type AppRole, type Permission, type AuthorityContext,
 } from "./rbac.js";
 
 test("OD-9: exactly three application roles, least → most privileged", () => {
@@ -135,4 +136,41 @@ test("3B-4: the new permissions still fail closed for unknown roles", () => {
     assert.equal(can(null, p), false);
     assert.equal(can("", p), false);
   }
+});
+
+// --- System Owner: highest application authority ------------------------------
+
+test("owner authority: the System Owner satisfies every permission", () => {
+  const owner: AuthorityContext = { role: "admin", isSystemOwner: true };
+  for (const p of PERMISSIONS) assert.equal(canAct(owner, p), true);
+  assert.deepEqual([...authorityPermissions(owner)], [...PERMISSIONS]);
+});
+
+test("owner authority: ownership is orthogonal to the RBAC role", () => {
+  // Ownership is NOT a role: APP_ROLES stays exactly three values, and
+  // 'system_owner' is not among them.
+  assert.deepEqual(APP_ROLES, ["user", "admin", "super_admin"]);
+  assert.equal(isAppRole("system_owner"), false);
+  assert.equal(normalizeRole("system_owner"), "user");
+});
+
+test("owner authority: non-owners are evaluated by ordinary RBAC, unchanged", () => {
+  for (const role of APP_ROLES) {
+    const ctx: AuthorityContext = { role, isSystemOwner: false };
+    for (const p of PERMISSIONS) assert.equal(canAct(ctx, p), can(role, p));
+    assert.deepEqual([...authorityPermissions(ctx)], [...permissionsFor(role)]);
+  }
+});
+
+test("owner authority: fails closed for a missing context", () => {
+  for (const p of PERMISSIONS) {
+    assert.equal(canAct(null, p), false);
+    assert.equal(canAct(undefined, p), false);
+  }
+});
+
+test("owner authority: a permission that does not exist yet still resolves for the owner", () => {
+  const future = "some.future.capability" as unknown as Permission;
+  assert.equal(canAct({ role: "admin", isSystemOwner: true }, future), true);
+  assert.equal(canAct({ role: "super_admin", isSystemOwner: false }, future), false);
 });
