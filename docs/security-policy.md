@@ -53,3 +53,69 @@ operational need, full env contents.
 - Suspected secret leak → immediate rotation path documented per secret class.
 - Security events (token reuse, webhook reject storms, authz denials) alert to the owner channel.
 - Post-incident: threat-model row added/updated in the same session (PHP BR culture, ported).
+
+---
+
+## Administrative role hierarchy and System Ownership
+
+Conceptual model:
+
+```
+    SYSTEM OWNER
+          ↓
+    SUPER ADMIN ↔ SUPER ADMIN ↔ SUPER ADMIN   (peers, no hierarchy between them)
+          ↓
+        ADMIN
+          ↓
+        USER
+```
+
+### Product principles (binding)
+
+1. **System Owner is the highest ownership/governance authority** of a Velora
+   installation.
+2. **System Ownership is established exactly once, during initial bootstrap**,
+   by an explicit claim. It is installation-level state, not an RBAC role.
+3. **The first registered user is NOT automatically System Owner.** Ownership
+   never derives from registration, account creation order, the first database
+   row, first login, email address, plan, or any client-supplied field.
+4. **Ownership cannot be claimed through normal RBAC after bootstrap.** There is
+   deliberately no `system_owner.assign` / `system_owner.promote` permission, and
+   `system_owner` is not a valid `users.role` value. Admin → Owner, Super Admin →
+   Owner and User → Owner are all rejected once ownership exists.
+5. **Super Admins are peers.** There is no hierarchy between Super Admin
+   accounts.
+6. **A Super Admin cannot demote or suspend another Super Admin**, nor otherwise
+   revoke a peer's administrative authority, through normal user management.
+7. **The installation must always retain at least one ACTIVE Super Admin**
+   (`role = 'super_admin' AND status = 'active'`). Counting by role alone is
+   insufficient: a suspended super admin cannot authenticate.
+
+### Implementation
+
+| Concern | Mechanism |
+|---|---|
+| Ownership state | `installation_ownership` (migration `0008`), single row pinned by `id BOOLEAN PRIMARY KEY CHECK (id = TRUE)` |
+| One-time guarantee | Database singleton — a concurrent second claim fails with a unique violation, mapped to `409 OWNERSHIP_ALREADY_CLAIMED` |
+| Owner row protection | `owner_user_id REFERENCES users(id) ON DELETE RESTRICT` (protects row **deletion** only) |
+| Bootstrap claim | `POST /api/v1/admin/ownership/claim` — role/status/verification re-read from storage, explicit confirmation phrase, password re-authentication via the existing hasher |
+| Ownership status | `GET /api/v1/admin/ownership/status` |
+| Peer protection | `SUPER_ADMIN_PEER_PROTECTED` (403) in `AdminUserService.setRole` / `setStatus` |
+| Last active super admin | `LAST_SUPER_ADMIN` (409) via `countActiveUsersByRole` |
+
+### Deliberately out of scope
+
+Ownership transfer, ownership deletion, successor selection, "next Super Admin
+becomes Owner", multiple System Owners, primary/secondary Super Admin ranking,
+owner voting, two-person transfer, hidden emergency owner, database backdoor and
+automatic recovery owner are **not implemented**. Consequently **no ownership
+recovery path exists**; see the open product decisions recorded in the phase
+report.
+
+### Ownership state vs runtime authority
+
+System Ownership is currently **recorded state, not a runtime permission**. The
+owner's day-to-day authority is still whatever their RBAC role grants. Whether
+System Owner should outrank Super Admin at runtime — and whether the owner's
+account should be protected from suspension or demotion — are **product
+decisions that remain open** and were not assumed by this implementation.

@@ -229,3 +229,73 @@ test("0007 status: rows predating the constraint survive it", async () => {
     );
   } finally { await engine.close(); }
 });
+
+test("0008 ownership: the installation ownership row is a DATABASE-enforced singleton", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    await engine.query("INSERT INTO users(email, password_hash, role) VALUES ('owner@own.example','x','admin')");
+    await engine.query("INSERT INTO users(email, password_hash, role) VALUES ('other@own.example','x','admin')");
+    const ids = await engine.query("SELECT id FROM users WHERE email LIKE '%@own.example' ORDER BY id");
+    const [a, b] = (ids.rows as { id: string | number }[]).map((r) => String(r.id));
+
+    // First claim succeeds.
+    await engine.query(
+      "INSERT INTO installation_ownership(owner_user_id, claimed_by_user_id) VALUES ($1,$1)", [a]);
+
+    // A SECOND claim is impossible — the singleton PK rejects it. This is the
+    // guarantee the application relies on for concurrent claims.
+    await assert.rejects(
+      engine.query("INSERT INTO installation_ownership(owner_user_id, claimed_by_user_id) VALUES ($1,$1)", [b]),
+      /duplicate key|unique/i,
+      "a second ownership row must be impossible",
+    );
+
+    // Even explicitly forcing id=FALSE is rejected by the CHECK.
+    await assert.rejects(
+      engine.query("INSERT INTO installation_ownership(id, owner_user_id, claimed_by_user_id) VALUES (FALSE,$1,$1)", [b]),
+      /violates check constraint/i,
+      "the singleton key must be pinned to TRUE",
+    );
+
+    const rows = await engine.query("SELECT owner_user_id FROM installation_ownership");
+    assert.equal(rows.rows.length, 1, "exactly one ownership row may exist");
+  } finally { await engine.close(); }
+});
+
+test("0008 ownership: the owner's user row cannot be deleted (ON DELETE RESTRICT)", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    await engine.query("INSERT INTO users(email, password_hash, role) VALUES ('keep@own.example','x','admin')");
+    const got = await engine.query("SELECT id FROM users WHERE email = 'keep@own.example'");
+    const id = String((got.rows as { id: string | number }[])[0]!.id);
+    await engine.query(
+      "INSERT INTO installation_ownership(owner_user_id, claimed_by_user_id) VALUES ($1,$1)", [id]);
+
+    // RESTRICT guarantees the referenced ROW cannot be deleted while referenced.
+    // NOTE: this says nothing about suspension or role change, which remain
+    // ordinary account-state operations.
+    await assert.rejects(
+      engine.query("DELETE FROM users WHERE id = $1", [id]),
+      /violates RESTRICT setting|violates foreign key constraint|still referenced/i,
+      "the owner's user row must not be deletable while ownership references it",
+    );
+    const still = await engine.query("SELECT COUNT(*)::int AS n FROM installation_ownership");
+    assert.equal((still.rows as { n: number }[])[0]!.n, 1);
+  } finally { await engine.close(); }
+});
+
+test("0008 ownership: ownership does NOT widen the RBAC role constraint", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    // 'system_owner' is NOT a role. The 0006 CHECK must still reject it, which
+    // is what makes ownership unreachable through role assignment.
+    await assert.rejects(
+      engine.query("INSERT INTO users(email, password_hash, role) VALUES ('so@own.example','x','system_owner')"),
+      /violates check constraint|users_role_check/i,
+      "system_owner must never be a valid users.role value",
+    );
+  } finally { await engine.close(); }
+});

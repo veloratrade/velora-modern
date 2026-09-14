@@ -365,6 +365,15 @@ export class PgUserStore implements UserStore {
     return Number(rows[0]?.n ?? 0);
   }
 
+  async countActiveUsersByRole(role: AppRoleName, excludeUserId?: string): Promise<number> {
+    const rows = await this.q(
+      `SELECT COUNT(*)::int AS n FROM users
+        WHERE role = $1 AND status = 'active' AND ($2::text IS NULL OR id <> $2::bigint)`,
+      [role, excludeUserId ?? null],
+    );
+    return Number(rows[0]?.n ?? 0);
+  }
+
   async getEmailPreferences(userId: string): Promise<EmailPreferences> {
     const rows = await this.q("SELECT * FROM email_preferences WHERE user_id = $1", [userId]);
     if (rows.length === 0) return DEFAULT_EMAIL_PREFERENCES;

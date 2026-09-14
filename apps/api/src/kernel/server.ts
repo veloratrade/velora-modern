@@ -23,6 +23,7 @@ import {
 import { newSecurityContext, buildCsp, SECURITY_HEADERS, originAllowed } from "./security.js";
 import { AuthService, AuthError } from "../auth/authService.js";
 import { AdminUserService } from "../auth/adminUserService.js";
+import { OwnershipService } from "../auth/ownershipService.js";
 import { AccountService, AccountError } from "../accounts/accountService.js";
 import { TradeService, TradeError } from "../trades/tradeService.js";
 import { EntitlementError } from "../entitlements/entitlementService.js";
@@ -45,6 +46,8 @@ export interface ApiConfig {
   readonly trades?: TradeService;
   /** Phase 3B-4 admin user management. Absent → admin user routes fail closed (503). */
   readonly adminUsers?: AdminUserService;
+  /** System Owner bootstrap. Absent → ownership routes fail closed (503). */
+  readonly ownership?: OwnershipService;
   /** Phase C rate limiting (inc 7). Absent → createApp builds a default
    *  fixed-window limiter on a per-process memory store (PHP applies
    *  throttling unconditionally at dispatch; a per-app instance preserves
@@ -783,6 +786,70 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
       const result = await svc.setStatus(id, String(body.status ?? ""), actor);
       return { status: 200, body: ok(result) };
     });
+  }
+
+  // ---- System Owner bootstrap (installation-level ownership) --------------
+  // Ownership is NOT an RBAC role and is NOT reachable through role assignment.
+  // There is deliberately no permission that grants ownership: the ONLY path is
+  // this one-time claim, which the database permanently closes after it wins.
+
+  // Whether ownership has been claimed. Readable by any authenticated caller so
+  // a setup UI can branch; exposes no secret and no password state.
+  if (method === "GET" && path === "/api/v1/admin/ownership/status") {
+    if (config.auth === undefined || config.ownership === undefined) {
+      return {
+        status: 503,
+        body: fail("SERVICE_UNAVAILABLE", "ownership not configured", sec.requestId),
+      };
+    }
+    const claims = authenticateRequest(req, config.auth);
+    if (claims === null) {
+      return { status: 401, body: fail("UNAUTHENTICATED", "Authentication required.", sec.requestId) };
+    }
+    return { status: 200, body: ok(await config.ownership.status()) };
+  }
+
+  // The one-time claim. Authorization is NOT a permission check: eligibility is
+  // re-derived from the PERSISTED user row inside the service, so a stale or
+  // forged JWT role cannot influence it. Only the token SUBJECT is trusted here.
+  if (method === "POST" && path === "/api/v1/admin/ownership/claim") {
+    if (config.auth === undefined || config.ownership === undefined) {
+      return {
+        status: 503,
+        body: fail("SERVICE_UNAVAILABLE", "ownership not configured", sec.requestId),
+      };
+    }
+    const claims = authenticateRequest(req, config.auth);
+    if (claims === null) {
+      return { status: 401, body: fail("UNAUTHENTICATED", "Authentication required.", sec.requestId) };
+    }
+    const body = await parseJsonBody(req);
+    const xff = req.headers["x-forwarded-for"];
+    const ua = req.headers["user-agent"];
+    try {
+      // Only actorId (from the verified token), password and confirm are read.
+      // Any client-supplied role / ownerUserId / system_owner field in the body
+      // is ignored entirely — it is never passed on and never consulted.
+      const result = await config.ownership.claim({
+        actorId: claims.sub,
+        password: typeof body.password === "string" ? body.password : "",
+        confirm: typeof body.confirm === "string" ? body.confirm : "",
+        ipAddress: resolveClientIp(
+          {
+            remoteAddress: req.socket.remoteAddress,
+            xForwardedFor: Array.isArray(xff) ? xff[0] : xff,
+          },
+          config.trustedProxyCidrs ?? [],
+        ),
+        userAgent: typeof ua === "string" ? ua : null,
+      });
+      return { status: 201, body: ok(result) };
+    } catch (err: unknown) {
+      if (err instanceof AuthError) {
+        return { status: err.status, body: fail(err.code, err.message, sec.requestId, err.details) };
+      }
+      throw err;
+    }
   }
 
   return { status: 404, body: fail("NOT_FOUND", "no such route", sec.requestId) };

@@ -1,0 +1,40 @@
+// In-memory OwnershipStore (tests and local development).
+//
+// Mirrors the database singleton exactly: the second claim throws, so the
+// one-time invariant is provable without PostgreSQL. Node runs this on a single
+// thread, and claimOwnership performs its check-and-set with no interleaved
+// await, so the write is atomic here in the same way the DB constraint is
+// atomic there.
+import {
+  type OwnershipRecord,
+  type OwnershipStore,
+  OwnershipAlreadyClaimedError,
+} from "./ownershipStore.js";
+
+export class MemoryOwnershipStore implements OwnershipStore {
+  private record: OwnershipRecord | null = null;
+
+  async getOwnership(): Promise<OwnershipRecord | null> {
+    return this.record;
+  }
+
+  async claimOwnership(input: {
+    ownerUserId: string;
+    claimedByUserId: string;
+    claimedIp: string | null;
+    claimedUserAgent: string | null;
+    now: Date;
+  }): Promise<OwnershipRecord> {
+    // Check-and-set with no await between them: equivalent to the DB's
+    // single-row PRIMARY KEY, so a concurrent second claim cannot slip through.
+    if (this.record !== null) throw new OwnershipAlreadyClaimedError();
+    this.record = {
+      ownerUserId: input.ownerUserId,
+      claimedByUserId: input.claimedByUserId,
+      claimedAt: input.now.toISOString(),
+      claimedIp: input.claimedIp,
+      claimedUserAgent: input.claimedUserAgent,
+    };
+    return this.record;
+  }
+}

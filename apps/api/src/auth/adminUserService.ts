@@ -167,6 +167,15 @@ export class AdminUserService {
     if (actor.role !== "super_admin" && isPrivilegedRole(target.role)) {
       throw new AuthError(403, "PRIVILEGED_TARGET", "Cannot modify a privileged user.");
     }
+    // PEER PROTECTION: super admins are peers, with no hierarchy between them.
+    // One super admin may never demote another through normal user management.
+    if (target.role === "super_admin") {
+      throw new AuthError(
+        403,
+        "SUPER_ADMIN_PEER_PROTECTED",
+        "A super admin cannot modify another super admin.",
+      );
+    }
     if (isPrivilegedRole(newRole) && actor.role !== "super_admin") {
       throw new AuthError(
         403,
@@ -180,6 +189,11 @@ export class AdminUserService {
     if (target.role === newRole) {
       return { user: toAdminUser(target), sessionsRevoked: false };
     }
+
+    // LAST-ACTIVE-SUPER-ADMIN INVARIANT (independent of peer protection).
+    // Demoting an active super admin must never leave zero active super admins.
+    // Evaluated on ACTIVE accounts only, excluding the target itself.
+    await this.assertSuperAdminRemains(target, newRole !== "super_admin");
 
     const now = this.now();
     const updated = await this.deps.store.updateUserRole(targetId, newRole, now);
@@ -215,9 +229,21 @@ export class AdminUserService {
     if (actor.role !== "super_admin" && isPrivilegedRole(target.role)) {
       throw new AuthError(403, "PRIVILEGED_TARGET", "Cannot modify a privileged user.");
     }
+    // PEER PROTECTION: one super admin may never suspend another.
+    if (target.role === "super_admin") {
+      throw new AuthError(
+        403,
+        "SUPER_ADMIN_PEER_PROTECTED",
+        "A super admin cannot modify another super admin.",
+      );
+    }
     if (target.status === newStatus) {
       return { user: toAdminUser(target), sessionsRevoked: false };
     }
+
+    // LAST-ACTIVE-SUPER-ADMIN INVARIANT: suspending an active super admin must
+    // never leave zero active super admins.
+    await this.assertSuperAdminRemains(target, newStatus !== "active");
 
     const now = this.now();
     const updated = await this.deps.store.updateUserStatus(targetId, newStatus, now);
@@ -230,6 +256,32 @@ export class AdminUserService {
       return { user: toAdminUser(updated), sessionsRevoked: true };
     }
     return { user: toAdminUser(updated), sessionsRevoked: false };
+  }
+
+  /**
+   * Enforce "the installation always retains at least one ACTIVE super admin".
+   *
+   * Deliberately separate from peer protection: peer protection is about WHO
+   * may act on whom, this is a system-wide invariant that must hold no matter
+   * who acts — including when the actor is the target, and including any future
+   * caller that bypasses the peer rule. Counting active accounts only is
+   * essential: a suspended super_admin cannot authenticate, so counting by role
+   * alone could leave the installation with no usable administrator.
+   */
+  private async assertSuperAdminRemains(
+    target: UserRecord,
+    losesActiveSuperAdmin: boolean,
+  ): Promise<void> {
+    if (!losesActiveSuperAdmin) return;
+    if (target.role !== "super_admin" || target.status !== "active") return;
+    const remaining = await this.deps.store.countActiveUsersByRole("super_admin", target.id);
+    if (remaining === 0) {
+      throw new AuthError(
+        409,
+        "LAST_SUPER_ADMIN",
+        "The installation must retain at least one active super admin.",
+      );
+    }
   }
 }
 

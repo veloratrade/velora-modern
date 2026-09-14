@@ -178,8 +178,19 @@ export interface UserStore {
   /** Set a user's account status. Returns the updated record, or null if absent. */
   updateUserStatus(userId: string, status: string, now: Date): Promise<UserRecord | null>;
 
-  /** Count users holding a given role (last-super_admin safety evaluation). */
+  /** Count users holding a given role (any status). */
   countUsersByRole(role: AppRoleName): Promise<number>;
+
+  /**
+   * Count users holding a given role AND status='active'.
+   *
+   * The last-Super-Admin invariant is defined over ACTIVE super admins: a
+   * suspended super_admin cannot log in (authService rejects status !== active
+   * at both login and refresh), so counting by role alone would let the
+   * installation reach zero usable administrators while the count still looked
+   * healthy. `excludeUserId` omits the target of the operation being evaluated.
+   */
+  countActiveUsersByRole(role: AppRoleName, excludeUserId?: string): Promise<number>;
 
   /** Update user preferences; returns the updated record or null if absent. */
   updateUserPreferences(

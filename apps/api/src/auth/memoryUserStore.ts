@@ -306,6 +306,14 @@ export class MemoryUserStore implements UserStore {
     return n;
   }
 
+  async countActiveUsersByRole(role: AppRoleName, excludeUserId?: string): Promise<number> {
+    let n = 0;
+    for (const u of this.users.values()) {
+      if (u.role === role && u.status === "active" && u.id !== excludeUserId) n += 1;
+    }
+    return n;
+  }
+
   async getEmailPreferences(userId: string): Promise<EmailPreferences> {
     return this.emailPrefs.get(userId) ?? DEFAULT_EMAIL_PREFERENCES;
   }
