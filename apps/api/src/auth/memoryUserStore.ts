@@ -6,6 +6,7 @@ import {
   type UserRecord,
   type SessionRecord,
   type VerificationRecord,
+  type PasswordResetRecord,
   type UserStore,
   type EmailPreferences,
   DEFAULT_EMAIL_PREFERENCES,
@@ -18,6 +19,7 @@ export class MemoryUserStore implements UserStore {
   private readonly users = new Map<string, UserRecord>();
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly verifications = new Map<string, VerificationRecord>();
+  private readonly passwordResets = new Map<string, PasswordResetRecord>();
   private readonly sessionsByRefreshHash = new Map<string, string>();
   private readonly emailPrefs = new Map<string, EmailPreferences>();
   private idCounter = 0;
@@ -121,6 +123,42 @@ export class MemoryUserStore implements UserStore {
   async consumeVerification(id: string, consumedAt: Date): Promise<void> {
     const v = this.verifications.get(id);
     if (v) this.verifications.set(id, { ...v, consumedAt: iso(consumedAt) });
+  }
+
+  // --- Password reset (Phase 3B-1) -----------------------------------------
+
+  async deletePasswordResets(userId: string): Promise<void> {
+    for (const [id, r] of this.passwordResets) {
+      if (r.userId === userId) this.passwordResets.delete(id);
+    }
+  }
+
+  async createPasswordReset(input: {
+    userId: string;
+    tokenHash: string;
+    expiresAt: Date;
+    createdAt: Date;
+  }): Promise<PasswordResetRecord> {
+    const record: PasswordResetRecord = {
+      id: String(++this.idCounter),
+      userId: input.userId,
+      tokenHash: input.tokenHash,
+      expiresAt: iso(input.expiresAt),
+      consumedAt: null,
+      createdAt: iso(input.createdAt),
+    };
+    this.passwordResets.set(record.id, record);
+    return record;
+  }
+
+  async findPasswordResetByTokenHash(tokenHash: string): Promise<PasswordResetRecord | null> {
+    for (const r of this.passwordResets.values()) if (r.tokenHash === tokenHash) return r;
+    return null;
+  }
+
+  async consumePasswordReset(id: string, consumedAt: Date): Promise<void> {
+    const r = this.passwordResets.get(id);
+    if (r) this.passwordResets.set(id, { ...r, consumedAt: iso(consumedAt) });
   }
 
   async createSession(input: {

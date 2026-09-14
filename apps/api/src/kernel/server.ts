@@ -55,6 +55,11 @@ export const THROTTLED_AUTH_ROUTES: Readonly<Record<string, RateLimitKey>> = {
   "POST /api/v1/auth/refresh": "auth:refresh",
   "POST /api/v1/auth/verify-email": "auth:verify-email",
   "POST /api/v1/auth/change-password": "auth:change-password",
+  // Phase 3B-1. Values are the owner-approved defaults already declared in
+  // packages/contracts (resend-verification = 4/3600 per OD-14).
+  "POST /api/v1/auth/resend-verification": "auth:resend-verification",
+  "POST /api/v1/auth/forgot-password": "auth:forgot-password",
+  "POST /api/v1/auth/reset-password": "auth:reset-password",
 };
 
 type RouteResult = { status: number; body: unknown; headers?: Record<string, string> };
@@ -301,6 +306,43 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
       const parsed = z.object({ token: z.string().min(20) }).safeParse(body);
       if (!parsed.success) return validationFailure(parsed.error, sec.requestId);
       const result = await auth.verifyEmail(parsed.data.token);
+      return { status: 200, body: ok(result) };
+    });
+  }
+
+  // --- Phase 3B-1: password reset + verification resend ---------------------
+
+  if (method === "POST" && path === "/api/v1/auth/resend-verification") {
+    return authRouteResult(async (auth) => {
+      const body = await parseJsonBody(req);
+      const parsed = z.object({ email: z.string().email() }).safeParse(body);
+      if (!parsed.success) return validationFailure(parsed.error, sec.requestId);
+      const result = await auth.resendVerification({ email: parsed.data.email });
+      return { status: 200, body: ok(result) };
+    });
+  }
+
+  if (method === "POST" && path === "/api/v1/auth/forgot-password") {
+    return authRouteResult(async (auth) => {
+      const body = await parseJsonBody(req);
+      const parsed = z.object({ email: z.string().email() }).safeParse(body);
+      if (!parsed.success) return validationFailure(parsed.error, sec.requestId);
+      const result = await auth.forgotPassword({ email: parsed.data.email });
+      return { status: 200, body: ok(result) };
+    });
+  }
+
+  if (method === "POST" && path === "/api/v1/auth/reset-password") {
+    return authRouteResult(async (auth) => {
+      const body = await parseJsonBody(req);
+      const parsed = z
+        .object({ token: z.string().min(20), newPassword: z.string().min(1) })
+        .safeParse(body);
+      if (!parsed.success) return validationFailure(parsed.error, sec.requestId);
+      const result = await auth.resetPassword({
+        token: parsed.data.token,
+        newPassword: parsed.data.newPassword,
+      });
       return { status: 200, body: ok(result) };
     });
   }

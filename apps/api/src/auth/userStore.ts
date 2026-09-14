@@ -40,6 +40,21 @@ export interface VerificationRecord {
   readonly createdAt: string;
 }
 
+/**
+ * Password-reset token record (Phase 3B-1). Mirrors VerificationRecord: the
+ * raw token NEVER reaches persistence — only its sha256 hash — and single-use
+ * is enforced via consumed_at (schema: 0001_core.sql password_resets, which
+ * already carries token_hash UNIQUE + expires_at + consumed_at).
+ */
+export interface PasswordResetRecord {
+  readonly id: string;
+  readonly userId: string;
+  readonly tokenHash: string;
+  readonly expiresAt: string;
+  readonly consumedAt: string | null;
+  readonly createdAt: string;
+}
+
 /** PHP email-preference categories (BUG-A9; 6 keys, all default ON — PHP shape). */
 export interface EmailPreferences {
   readonly welcomeEmail: boolean;
@@ -93,6 +108,18 @@ export interface UserStore {
   }): Promise<VerificationRecord>;
   findVerificationByTokenHash(tokenHash: string): Promise<VerificationRecord | null>;
   consumeVerification(id: string, consumedAt: Date): Promise<void>;
+
+  // --- Password reset (Phase 3B-1) -----------------------------------------
+  /** Invalidate outstanding reset tokens before issuing a new one. */
+  deletePasswordResets(userId: string): Promise<void>;
+  createPasswordReset(input: {
+    userId: string;
+    tokenHash: string;
+    expiresAt: Date;
+    createdAt: Date;
+  }): Promise<PasswordResetRecord>;
+  findPasswordResetByTokenHash(tokenHash: string): Promise<PasswordResetRecord | null>;
+  consumePasswordReset(id: string, consumedAt: Date): Promise<void>;
 
   createSession(input: {
     userId: string;

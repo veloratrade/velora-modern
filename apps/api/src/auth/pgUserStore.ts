@@ -17,6 +17,7 @@ import type {
   SessionRecord,
   VerificationRecord,
   EmailPreferences,
+  PasswordResetRecord,
 } from "./userStore.js";
 import { UserEmailExistsError, DEFAULT_EMAIL_PREFERENCES } from "./userStore.js";
 
@@ -56,6 +57,17 @@ function mapUser(r: UserRow): UserRecord {
 }
 
 function mapVerification(r: Record<string, unknown>): VerificationRecord {
+  return {
+    id: String(r.id),
+    userId: String(r.user_id),
+    tokenHash: String(r.token_hash),
+    expiresAt: iso(r.expires_at as Date | string),
+    consumedAt: isoOrNull(r.consumed_at as Date | string | null),
+    createdAt: iso(r.created_at as Date | string),
+  };
+}
+
+function mapPasswordReset(r: Record<string, unknown>): PasswordResetRecord {
   return {
     id: String(r.id),
     userId: String(r.user_id),
@@ -178,6 +190,36 @@ export class PgUserStore implements UserStore {
 
   async consumeVerification(id: string, consumedAt: Date): Promise<void> {
     await this.q("UPDATE email_verifications SET consumed_at = $1 WHERE id = $2", [consumedAt, id]);
+  }
+
+  // --- Password reset (Phase 3B-1; table exists since 0001_core.sql) --------
+
+  async deletePasswordResets(userId: string): Promise<void> {
+    await this.q("DELETE FROM password_resets WHERE user_id = $1", [userId]);
+  }
+
+  async createPasswordReset(input: {
+    userId: string;
+    tokenHash: string;
+    expiresAt: Date;
+    createdAt: Date;
+  }): Promise<PasswordResetRecord> {
+    const rows = await this.q(
+      "INSERT INTO password_resets (user_id, token_hash, expires_at) VALUES ($1, $2, $3) RETURNING *",
+      [input.userId, input.tokenHash, input.expiresAt],
+    );
+    const row = rows[0];
+    if (row === undefined) throw new Error("createPasswordReset: INSERT returned no row");
+    return mapPasswordReset(row);
+  }
+
+  async findPasswordResetByTokenHash(tokenHash: string): Promise<PasswordResetRecord | null> {
+    const rows = await this.q("SELECT * FROM password_resets WHERE token_hash = $1", [tokenHash]);
+    return rows.length === 0 ? null : mapPasswordReset(rows[0]!);
+  }
+
+  async consumePasswordReset(id: string, consumedAt: Date): Promise<void> {
+    await this.q("UPDATE password_resets SET consumed_at = $1 WHERE id = $2", [consumedAt, id]);
   }
 
   async createSession(input: {

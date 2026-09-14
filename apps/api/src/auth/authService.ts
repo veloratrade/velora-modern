@@ -22,12 +22,18 @@ import { passwordSchema } from "@velora/contracts";
 import type { UserStore, UserRecord, EmailPreferences } from "./userStore.js";
 import { DEFAULT_EMAIL_PREFERENCES } from "./userStore.js";
 import type { JwtService, JwtPayload } from "./jwt.js";
+import type { MailPort } from "../mail/mailPort.js";
 
 export const ACCESS_TOKEN_TTL_SECONDS = 900;
 export const REFRESH_TOKEN_TTL_SECONDS = 2_592_000;
 export const VERIFICATION_TOKEN_TTL_MS = 86_400 * 1000;
 export const VERIFICATION_MAX_PER_DAY = 3;
 export const VERIFICATION_RETRY_INTERVAL_MS = 60 * 1000;
+/**
+ * Password-reset token TTL (Phase 3B-1). 1 hour: shorter than the 24h
+ * verification TTL because a reset token is a full account-takeover primitive.
+ */
+export const PASSWORD_RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
 const USER_AGENT_MAX_CHARS = 250;
 
 export class AuthError extends Error {
@@ -79,6 +85,15 @@ export interface AuthDeps {
    * default is the CSPRNG (32 bytes hex). Never weakens production entropy.
    */
   readonly generateVerificationToken?: () => string;
+  /**
+   * Outbound transactional email (Phase 3B-1, OD-12). Optional so existing
+   * call sites keep working: when absent, flows that would send email still
+   * complete with identical observable behavior (anti-enumeration), they
+   * simply dispatch nothing.
+   */
+  readonly mail?: MailPort;
+  /** Base URL used to build verification/reset links (no trailing slash). */
+  readonly appOrigin?: string;
 }
 
 function sha256(data: string): string {
@@ -163,6 +178,8 @@ export class AuthService {
         expiresAt: new Date(now.getTime() + VERIFICATION_TOKEN_TTL_MS),
         createdAt: now,
       });
+      // Phase 3B-1: actually dispatch the token the flow already minted.
+      await this.sendVerificationMail(existing.email, token);
       return { verificationRequired: true, email, messageKey: "auth.verificationResent", params: {} };
     }
 
@@ -182,6 +199,8 @@ export class AuthService {
       expiresAt: new Date(now.getTime() + VERIFICATION_TOKEN_TTL_MS),
       createdAt: now,
     });
+    // Phase 3B-1: actually dispatch the token the flow already minted.
+    await this.sendVerificationMail(user.email, token);
     return { verificationRequired: true, email };
   }
 
@@ -368,6 +387,206 @@ export class AuthService {
     await this.deps.store.updateUserPasswordHash(userId, newHash, this.now());
     await this.deps.store.revokeAllSessionsForUser(userId, this.now());
     return { changed: true, messageKey: "auth.passwordChanged", params: {} };
+  }
+
+  // ===========================================================================
+  // Phase 3B-1 — password reset + verification resend (owner-approved contract)
+  // ===========================================================================
+
+  /**
+   * Request a password reset.
+   *
+   * ANTI-ENUMERATION (approved contract): the response is IDENTICAL whether or
+   * not the address exists — same status, same body, no timing-relevant early
+   * return that reveals existence, and no error when mail dispatch fails. An
+   * unknown address performs no work and reports success.
+   */
+  async forgotPassword(input: { email: string }): Promise<{
+    requested: true;
+    messageKey: "auth.passwordResetRequested";
+    params: Record<string, never>;
+  }> {
+    const email = input.email.trim().toLowerCase();
+    const user = await this.deps.store.findUserByEmail(email);
+    const uniform = {
+      requested: true,
+      messageKey: "auth.passwordResetRequested",
+      params: {},
+    } as const;
+
+    if (user === null) return uniform; // unknown address — indistinguishable
+
+    const now = this.now();
+    const token = this.newVerificationToken();
+    // Supersede any outstanding token: only the newest may be redeemed.
+    await this.deps.store.deletePasswordResets(user.id);
+    await this.deps.store.createPasswordReset({
+      userId: user.id,
+      tokenHash: sha256(token),
+      expiresAt: new Date(now.getTime() + PASSWORD_RESET_TOKEN_TTL_MS),
+      createdAt: now,
+    });
+
+    // Delivery failure must NOT change the response (it would leak existence).
+    await this.sendMailSafely({
+      to: user.email,
+      subject: "Reset your VELORA TRADE password",
+      text:
+        `A password reset was requested for your account.\n\n` +
+        `${this.resetLink(token)}\n\n` +
+        `This link can be used once and expires in 60 minutes. ` +
+        `If you did not request it, no action is needed.`,
+    });
+
+    return uniform;
+  }
+
+  /**
+   * Complete a password reset.
+   *
+   * Token rules (approved contract): single-use, TTL-bounded, hash-compared.
+   * Distinct failures are reported distinctly here — unlike forgot-password,
+   * the caller already holds a token, so status codes leak nothing about
+   * account existence:
+   *   invalid  → 400 INVALID_TOKEN
+   *   expired  → 410 TOKEN_EXPIRED
+   *   reused   → 409 TOKEN_ALREADY_USED
+   * On success ALL sessions are revoked (an attacker-held session must not
+   * survive the recovery it may have provoked).
+   */
+  async resetPassword(input: { token: string; newPassword: string }): Promise<{
+    reset: true;
+    messageKey: "auth.passwordReset";
+    params: Record<string, never>;
+  }> {
+    const record = await this.deps.store.findPasswordResetByTokenHash(sha256(input.token));
+    if (record === null) {
+      throw new AuthError(400, "INVALID_TOKEN", "Invalid token.");
+    }
+    if (record.consumedAt !== null) {
+      throw new AuthError(409, "TOKEN_ALREADY_USED", "This reset link has already been used.");
+    }
+    if (new Date(record.expiresAt) <= this.now()) {
+      throw new AuthError(410, "TOKEN_EXPIRED", "This reset link has expired.");
+    }
+
+    const policy = passwordSchema.safeParse(input.newPassword);
+    if (!policy.success) {
+      throw new AuthError(400, "VALIDATION_FAILED", "New password does not meet the password policy.", {
+        newPassword: policy.error.issues[0]?.message ?? "invalid password",
+      });
+    }
+
+    const user = await this.deps.store.findUserById(record.userId);
+    if (user === null) throw new AuthError(400, "INVALID_TOKEN", "Invalid token.");
+
+    const now = this.now();
+    const newHash = await this.deps.hasher.hash(input.newPassword);
+    await this.deps.store.updateUserPasswordHash(user.id, newHash, now);
+    // Consume BEFORE reporting success — the token must never be replayable.
+    await this.deps.store.consumePasswordReset(record.id, now);
+    await this.deps.store.revokeAllSessionsForUser(user.id, now);
+
+    return { reset: true, messageKey: "auth.passwordReset", params: {} };
+  }
+
+  /**
+   * Resend the verification email (single canonical endpoint — OD-14).
+   *
+   * Anti-enumeration: unknown address and already-verified account both return
+   * the uniform response. The per-24h cap and 60s retry interval from the
+   * registration path are reused so this endpoint cannot be used to bypass
+   * them; the 4/hour dispatch-level limit is enforced in the router.
+   */
+  async resendVerification(input: { email: string }): Promise<{
+    requested: true;
+    messageKey: "auth.verificationResent";
+    params: Record<string, never>;
+  }> {
+    const email = input.email.trim().toLowerCase();
+    const uniform = {
+      requested: true,
+      messageKey: "auth.verificationResent",
+      params: {},
+    } as const;
+
+    const user = await this.deps.store.findUserByEmail(email);
+    if (user === null || user.emailVerifiedAt !== null) return uniform;
+
+    const now = this.now();
+    const dayAgo = new Date(now.getTime() - 86_400 * 1000);
+    if ((await this.deps.store.countVerificationsSince(user.id, dayAgo)) >= VERIFICATION_MAX_PER_DAY) {
+      throw new AuthError(400, "VERIFICATION_LIMIT", "Verification email limit reached.", {
+        email: "Verification email limit reached (max 3 per 24 hours).",
+      });
+    }
+    const latest = await this.deps.store.latestVerification(user.id);
+    if (
+      latest !== null &&
+      new Date(latest.createdAt).getTime() > now.getTime() - VERIFICATION_RETRY_INTERVAL_MS
+    ) {
+      throw new AuthError(400, "VERIFICATION_RETRY_DELAY", "Verification retry interval not elapsed.", {
+        email: "Please wait at least 1 minute before requesting another verification email.",
+      });
+    }
+
+    const token = this.newVerificationToken();
+    await this.deps.store.deleteVerifications(user.id);
+    await this.deps.store.createVerification({
+      userId: user.id,
+      tokenHash: sha256(token),
+      expiresAt: new Date(now.getTime() + VERIFICATION_TOKEN_TTL_MS),
+      createdAt: now,
+    });
+
+    await this.sendVerificationMail(user.email, token);
+
+    return uniform;
+  }
+
+  /** Single source of truth for the verification email body. */
+  private async sendVerificationMail(to: string, token: string): Promise<void> {
+    await this.sendMailSafely({
+      to,
+      subject: "Verify your VELORA TRADE email address",
+      text:
+        `Confirm your email address to activate your account.\n\n` +
+        `${this.verificationLink(token)}\n\n` +
+        `This link expires in 24 hours.`,
+    });
+  }
+
+  /** Link builders — origin comes from configuration, never user input. */
+  private resetLink(token: string): string {
+    return `${this.origin()}/reset-password#token=${token}`;
+  }
+
+  private verificationLink(token: string): string {
+    return `${this.origin()}/verify-email#token=${token}`;
+  }
+
+  private origin(): string {
+    return (this.deps.appOrigin ?? "").replace(/\/+$/, "");
+  }
+
+  /**
+   * Dispatch mail without ever letting a provider outcome become observable.
+   * MailPort already returns a result instead of throwing; this also swallows
+   * unexpected adapter errors so no flow can leak provider state. Nothing is
+   * logged here: reset links are bearer-equivalent secrets (§7).
+   */
+  private async sendMailSafely(message: {
+    to: string;
+    subject: string;
+    text: string;
+  }): Promise<void> {
+    const mail = this.deps.mail;
+    if (mail === undefined) return;
+    try {
+      await mail.send(message);
+    } catch {
+      /* deliberately ignored — see doc comment */
+    }
   }
 
   /** Update preferences (Remote + PHP): locale (fa|en) and/or ai_consent. */

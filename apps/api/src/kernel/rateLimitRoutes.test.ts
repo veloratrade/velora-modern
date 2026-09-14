@@ -57,6 +57,11 @@ test("THROTTLED_AUTH_ROUTES maps exactly the implemented auth routes to the C-14
     "POST /api/v1/auth/refresh",
     "POST /api/v1/auth/verify-email",
     "POST /api/v1/auth/change-password",
+    // Phase 3B-1 — now implemented, so they join the exact-match guard.
+    // resend-verification is 4/3600 per the owner-approved OD-14 contract.
+    "POST /api/v1/auth/resend-verification",
+    "POST /api/v1/auth/forgot-password",
+    "POST /api/v1/auth/reset-password",
   ]);
   for (const routeKey of Object.values(THROTTLED_AUTH_ROUTES)) {
     assert.ok(routeKey in RATE_LIMIT_DEFAULTS);
@@ -64,6 +69,15 @@ test("THROTTLED_AUTH_ROUTES maps exactly the implemented auth routes to the C-14
   // PHP dispatch list: logout, me, preferences, accounts, trades are NOT limited
   assert.equal("POST /api/v1/auth/logout" in THROTTLED_AUTH_ROUTES, false);
   assert.equal("POST /api/v1/accounts" in THROTTLED_AUTH_ROUTES, false);
+
+  // OD-14: exactly ONE canonical resend endpoint — the Legacy
+  // `/auth/resend-verification-email` alias is deliberately not reproduced.
+  assert.equal("POST /api/v1/auth/resend-verification-email" in THROTTLED_AUTH_ROUTES, false);
+  // OD-14 approved limit: 4 per hour.
+  assert.deepEqual(RATE_LIMIT_DEFAULTS[THROTTLED_AUTH_ROUTES["POST /api/v1/auth/resend-verification"]!], {
+    limit: 4,
+    windowSec: 3600,
+  });
 });
 
 test("register: 5 attempts pass, the 6th is 429 TOO_MANY_REQUESTS with the PHP envelope + Retry-After", async () => {
