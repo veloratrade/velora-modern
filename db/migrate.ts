@@ -19,8 +19,46 @@ export interface MigrationEngine {
   transaction?<T>(fn: (tx: { query(sql: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }> }) => Promise<T>): Promise<T>;
 }
 
-export async function createEngine(connectionString?: string): Promise<MigrationEngine> {
-  if (!connectionString) {
+/** Fixed, secret-free CLI messages. Never interpolate a connection string. */
+export const MIGRATION_URL_REQUIRED =
+  "Migration database URL is required. Set MIGRATION_DATABASE_URL or DATABASE_URL " +
+  "to a non-empty PostgreSQL connection string.";
+export const MIGRATION_CONNECTION_FAILED = "Migration database connection failed.";
+const BLANK_ENGINE_URL =
+  "createEngine received a blank connection string. Pass a real PostgreSQL URL, " +
+  "or call createPgliteEngine() explicitly for disposable test engines.";
+
+/**
+ * Resolve the migration connection string from the environment, FAIL-CLOSED.
+ *
+ * Deliberately NOT nullish-coalescing: `??` only catches null/undefined, so an
+ * empty or whitespace-only MIGRATION_DATABASE_URL used to win the selection and
+ * then silently degrade to an in-memory engine. Blank is treated as ABSENT at
+ * every step, and "nothing configured" is an ERROR rather than a fallback.
+ */
+export function resolveMigrationUrl(env: {
+  MIGRATION_DATABASE_URL?: string | undefined;
+  DATABASE_URL?: string | undefined;
+}): { url: string; source: "MIGRATION_DATABASE_URL" | "DATABASE_URL" } | { error: string } {
+  const migration = env.MIGRATION_DATABASE_URL?.trim();
+  if (migration !== undefined && migration !== "") {
+    return { url: migration, source: "MIGRATION_DATABASE_URL" };
+  }
+  const database = env.DATABASE_URL?.trim();
+  if (database !== undefined && database !== "") {
+    return { url: database, source: "DATABASE_URL" };
+  }
+  return { error: MIGRATION_URL_REQUIRED };
+}
+
+/**
+ * Disposable in-memory PGlite engine — EXPLICIT test/dev use only.
+ *
+ * This is the only way to obtain PGlite. It is never selected by environment
+ * configuration, so no deployment path can reach it by accident.
+ */
+export async function createPgliteEngine(): Promise<MigrationEngine> {
+  {
     const { PGlite } = await import("@electric-sql/pglite");
     const db = new PGlite();
     return {
@@ -40,6 +78,25 @@ export async function createEngine(connectionString?: string): Promise<Migration
           }),
         ),
     };
+  }
+}
+
+/**
+ * Create a migration engine.
+ *
+ * No argument → the explicit PGlite test engine (the long-standing contract
+ * used by the disposable in-wasm suites).
+ * A string    → a REAL PostgreSQL connection. A blank string is rejected
+ *               rather than silently downgraded to PGlite: that downgrade was
+ *               the root cause of a migration reporting success while writing
+ *               to no database at all.
+ */
+export async function createEngine(connectionString?: string): Promise<MigrationEngine> {
+  if (connectionString === undefined) {
+    return createPgliteEngine();
+  }
+  if (connectionString.trim() === "") {
+    throw new Error(BLANK_ENGINE_URL);
   }
   const { Client } = await import("pg");
   const client = new Client({ connectionString });
@@ -68,6 +125,31 @@ export async function createEngine(connectionString?: string): Promise<Migration
       }
     },
   };
+}
+
+/**
+ * The migration head recorded in the DATABASE (highest applied name), or null
+ * when the tracking table is absent/empty. Single source of truth for "what
+ * schema is actually live" — callers must not re-derive it.
+ */
+export async function currentHead(engine: MigrationEngine): Promise<string | null> {
+  try {
+    const rows = (
+      await engine.query("SELECT name FROM schema_migrations ORDER BY name DESC LIMIT 1")
+    ).rows;
+    const row = rows[0];
+    return row === undefined ? null : String(row.name);
+  } catch {
+    return null; // tracking table does not exist yet
+  }
+}
+
+/** The migration head on DISK (highest .sql filename) — what SHOULD be applied. */
+export function expectedHead(migrationsDir: string): string | null {
+  const files = readdirSync(migrationsDir)
+    .filter((f) => f.endsWith(".sql"))
+    .sort();
+  return files.length === 0 ? null : (files[files.length - 1] as string);
 }
 
 export async function migrate(engine: MigrationEngine, migrationsDir: string): Promise<string[]> {
@@ -108,12 +190,29 @@ export async function migrate(engine: MigrationEngine, migrationsDir: string): P
 // (VERIFIED: a service-wide PGOPTIONS is rejected for app_readwrite —
 // "permission denied to set role" — i.e. it fails closed, but scoping it to the
 // migration connection removes the footgun entirely.)
+// FAIL-CLOSED (deploy safety). The CLI runs as the first half of the deployment
+// start command, so a "success" it prints is taken as proof the schema is live.
+// It therefore REQUIRES a real PostgreSQL URL and never falls back to PGlite:
+// previously a blank MIGRATION_DATABASE_URL produced `applied: 0001…0010` and
+// exit 0 while the real database received zero tables.
 if (process.argv[1] && process.argv[1].endsWith("migrate.ts")) {
-  const url = process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL;
-  const engine = await createEngine(url);
+  const resolved = resolveMigrationUrl(process.env);
+  if ("error" in resolved) {
+    console.error(resolved.error);
+    process.exit(1);
+  }
+  let engine: MigrationEngine;
+  try {
+    engine = await createEngine(resolved.url);
+  } catch {
+    // Driver errors can embed the connection string — never surface them.
+    console.error(MIGRATION_CONNECTION_FAILED);
+    process.exit(1);
+  }
   try {
     const ran = await migrate(engine, join(import.meta.dirname, "migrations"));
     console.log(ran.length ? `applied: ${ran.join(", ")}` : "up to date");
+    console.log(`migration head: ${await currentHead(engine)}`);
   } finally {
     await engine.close();
   }

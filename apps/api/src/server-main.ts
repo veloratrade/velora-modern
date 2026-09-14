@@ -44,54 +44,11 @@ import { resolveCredentialKey } from "./credentials/credentialConfig.js";
 import { MemoryCredentialStore } from "./credentials/memoryCredentialStore.js";
 import { PgCredentialStore } from "./credentials/pgCredentialStore.js";
 import type { CredentialStore } from "./credentials/credentialStore.js";
+import { makeDbProbe } from "./kernel/dbProbe.js";
 import type { MailPort } from "./mail/mailPort.js";
 import { ResendMailProvider } from "./mail/resendMailProvider.js";
 import { LogMailProvider } from "./mail/logMailProvider.js";
 
-type PgClient = import("pg").Client;
-
-/** Lazily-connecting, self-healing database probe. Never fabricates "ok". */
-function makeDbProbe(databaseUrl: string | undefined): () => Promise<"ok" | "fail"> {
-  if (databaseUrl === undefined) {
-    return async () => "fail"; // memory (dev-only) — readiness honestly red
-  }
-  let client: PgClient | null = null;
-  let connected = false;
-  return async () => {
-    if (client === null) {
-      try {
-        const { Client } = (await import("pg")) as typeof import("pg");
-        client = new Client({ connectionString: databaseUrl });
-      } catch {
-        return "fail"; // pg not installed (Phase D dependency) — fail closed
-      }
-    }
-    if (!connected) {
-      try {
-        await client.connect();
-        connected = true;
-      } catch {
-        return "fail";
-      }
-    }
-    try {
-      await client.query("SELECT 1");
-      return "ok";
-    } catch {
-      // Connection lost: mark dead, retry on the next probe. Readiness stays
-      // red until the durable store returns — NO memory fallback exists.
-      connected = false;
-      const dead = client;
-      client = null;
-      try {
-        await dead.end();
-      } catch {
-        // already dead — nothing to clean up
-      }
-      return "fail";
-    }
-  };
-}
 
 async function main(): Promise<void> {
   let boot;
