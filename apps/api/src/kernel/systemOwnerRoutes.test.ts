@@ -12,6 +12,8 @@ import { MemoryOwnershipStore } from "../auth/memoryOwnershipStore.js";
 import { VeloraHasher } from "../auth/hashing.js";
 import { JwtService } from "../auth/jwt.js";
 import { AdminUserService } from "../auth/adminUserService.js";
+import { TradeService } from "../trades/tradeService.js";
+import { MemoryTradeStore } from "../trades/memoryTradeStore.js";
 import { OwnershipService } from "../auth/ownershipService.js";
 import { PERMISSIONS } from "@velora/contracts";
 import type { AppRoleName } from "../auth/userStore.js";
@@ -31,7 +33,7 @@ const sign = (claims: Record<string, string | number | boolean>): string =>
 async function withServer(
   fn: (
     base: string,
-    ctx: { users: MemoryUserStore; ownership: MemoryOwnershipStore },
+    ctx: { users: MemoryUserStore; ownership: MemoryOwnershipStore; trades: TradeService },
   ) => Promise<void>,
 ): Promise<void> {
   const users = new MemoryUserStore();
@@ -50,16 +52,25 @@ async function withServer(
     now: () => NOW,
     getSystemOwnerUserId: async () => (await ownershipStore.getOwnership())?.ownerUserId ?? null,
   });
+  // REAL trades capability: the IDOR test must exercise the actual trade
+  // authorization path, not a fail-closed 503.
+  const tradeStore = new MemoryTradeStore();
+  const trades = new TradeService({
+    store: tradeStore,
+    getUserTimezone: async () => "UTC",
+    verifyAccountOwnership: async () => false,
+  });
   const app = createApp({
     allowedOrigins: ["https://veloratrade.ir"],
     checks: { database: async () => "ok" as const },
     auth,
     adminUsers,
     ownership,
+    trades,
   });
   const port = await listen(app);
   try {
-    await fn(`http://127.0.0.1:${port}`, { users, ownership: ownershipStore });
+    await fn(`http://127.0.0.1:${port}`, { users, ownership: ownershipStore, trades });
   } finally {
     await new Promise<void>((r) => app.close(() => r()));
   }
@@ -243,17 +254,61 @@ test("H8: ownership is installation-scoped — one record, bound to the owner", 
 });
 
 test("H9: owner authority does NOT bypass per-user data ownership boundaries", async () => {
-  // Full authority is the highest APPLICATION authority, not an IDOR bypass.
-  // Trades are ownership-scoped; the owner gets the same non-disclosing 404.
-  await withServer(async (base, { users, ownership }) => {
+  // Full authority is the highest APPLICATION authority, NOT an IDOR bypass.
+  // This exercises the REAL trade authorization path: a trade genuinely owned
+  // by another user is created through TradeService, then requested by the
+  // System Owner over HTTP. The application's ownership-boundary contract is a
+  // non-disclosing 404 (tradeService.getTrade -> findActiveByIdForUser -> null
+  // -> notFoundTrade), and the owner must receive exactly that.
+  await withServer(async (base, { users, ownership, trades }) => {
     const ownerId = await seed(users, "owner@example.com", "admin");
     await claimFor(ownership, ownerId);
-    const res = await fetch(`${base}/api/v1/trades/some-other-users-trade`, {
+    const victimId = await seed(users, "victim@example.com", "user");
+
+    // A real trade belonging to the victim.
+    const created = (await trades.createTrade(victimId, {
+      // Field names match the established trade contract (see tradeRoutes.test).
+      symbol: "EURUSD",
+      direction: "buy",
+      entryPrice: "1.1000",
+      exitPrice: "1.1050",
+      volume: "1.0",
+      contractSize: "100000",
+      openTime: "2026-09-10 10:00:00",
+      closeTime: "2026-09-10 12:00:00",
+    })) as { trade?: { id?: string }; id?: string };
+    const tradeId = String(created.trade?.id ?? created.id);
+    assert.ok(tradeId !== "undefined", "fixture must create a real trade");
+
+    // Sanity: the victim CAN read their own trade, so the route is live and the
+    // 404 below is an authorization outcome, not a misconfigured fixture.
+    const ownRead = await fetch(`${base}/api/v1/trades/${tradeId}`, {
+      headers: hdrs(sign({ sub: victimId, role: "user" })),
+    });
+    assert.equal(ownRead.status, 200, "owner-of-record must be able to read it");
+
+    // The System Owner requests another user's trade.
+    const res = await fetch(`${base}/api/v1/trades/${tradeId}`, {
       headers: hdrs(sign({ sub: ownerId, role: "admin" })),
     });
-    // trades capability is not configured in this app => fail-closed 503,
-    // never a silent success for the owner.
-    assert.ok(res.status === 503 || res.status === 404, `expected 503/404, got ${res.status}`);
+    assert.equal(res.status, 404, "owner authority must NOT widen data scope");
+    const body = (await res.json()) as Envelope;
+    assert.equal(body.error?.code, "NOT_FOUND");
+    // Non-disclosing: the response must not leak the trade's contents.
+    const raw = JSON.stringify(body);
+    assert.equal(raw.includes("EURUSD"), false, "must not disclose the trade");
+
+    // The same holds for a mutating route: no write access either.
+    const del = await fetch(`${base}/api/v1/trades/${tradeId}`, {
+      method: "DELETE",
+      headers: hdrs(sign({ sub: ownerId, role: "admin" })),
+    });
+    assert.equal(del.status, 404, "owner must not be able to delete another user's trade");
+    // And the victim's trade is still intact and readable by its real owner.
+    const after = await fetch(`${base}/api/v1/trades/${tradeId}`, {
+      headers: hdrs(sign({ sub: victimId, role: "user" })),
+    });
+    assert.equal(after.status, 200, "the victim's trade must be untouched");
   });
 });
 

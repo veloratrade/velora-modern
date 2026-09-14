@@ -34,7 +34,13 @@ async function seed(
 }
 
 const svcFor = (store: MemoryUserStore): AdminUserService =>
-  new AdminUserService({ store, now: () => NOW });
+  new AdminUserService({
+    store,
+    now: () => NOW,
+    // Peer / last-admin invariants are under test here, not ownership: the
+    // installation is explicitly unowned.
+    getSystemOwnerUserId: async () => null,
+  });
 
 async function expectError(fn: () => Promise<unknown>): Promise<AuthError> {
   try {

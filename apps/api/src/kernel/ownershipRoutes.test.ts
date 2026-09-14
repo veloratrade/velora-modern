@@ -45,7 +45,13 @@ async function withServer(
     hasher,
     now: () => NOW,
   });
-  const adminUsers = new AdminUserService({ store: users, now: () => NOW });
+  const adminUsers = new AdminUserService({
+    store: users,
+    now: () => NOW,
+    // Wired to the REAL ownership store, exactly as the composition root does,
+    // so owner protection is live for whatever these tests claim.
+    getSystemOwnerUserId: async () => (await ownershipStore.getOwnership())?.ownerUserId ?? null,
+  });
   const app = createApp({
     allowedOrigins: ["https://veloratrade.ir"],
     checks: { database: async () => "ok" as const },

@@ -37,7 +37,11 @@ async function withServer(
     hasher: new VeloraHasher(),
     jwt: JwtService.create(SECRET),
   });
-  const adminUsers = new AdminUserService({ store: userStore, now: () => NOW });
+  const adminUsers = new AdminUserService({
+    store: userStore,
+    now: () => NOW,
+    getSystemOwnerUserId: async () => null, // no ownership claimed in this suite
+  });
   const app = createApp({
     allowedOrigins: ["https://veloratrade.ir"],
     checks: { database: async () => "ok" as const },

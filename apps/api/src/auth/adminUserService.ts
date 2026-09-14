@@ -86,11 +86,15 @@ export interface AdminUserServiceDeps {
    * Resolves the installation's System Owner user id from authoritative
    * storage (installation_ownership), or null when ownership is unclaimed.
    *
-   * Optional so that existing wiring keeps working; when it is absent the
-   * service behaves exactly as before (no owner exists to protect). It is NEVER
-   * derived from a token, header or request body.
+   * REQUIRED, deliberately. Owner immutability is enforced in this service, so
+   * a construction site that omitted the resolver would silently lose that
+   * protection with no runtime signal. Making it mandatory turns that mistake
+   * into a COMPILE-TIME error (TS2741) instead. There is intentionally no
+   * default and no fallback: a resolver that cannot be supplied must be written
+   * out explicitly as `async () => null` by a caller that has genuinely no
+   * ownership capability. It is NEVER derived from a token, header or body.
    */
-  readonly getSystemOwnerUserId?: () => Promise<string | null>;
+  readonly getSystemOwnerUserId: () => Promise<string | null>;
 }
 
 export interface ActorContext {
@@ -299,9 +303,7 @@ export class AdminUserService {
    * are in this class (verified by route audit).
    */
   private async assertNotSystemOwner(targetId: string): Promise<void> {
-    const resolve = this.deps.getSystemOwnerUserId;
-    if (resolve === undefined) return; // no ownership capability wired in
-    const ownerId = await resolve();
+    const ownerId = await this.deps.getSystemOwnerUserId();
     if (ownerId !== null && ownerId === targetId) {
       throw new AuthError(
         403,

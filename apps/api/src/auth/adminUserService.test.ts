@@ -43,8 +43,31 @@ async function seed(
 }
 
 function makeService(store: MemoryUserStore): AdminUserService {
-  return new AdminUserService({ store, now: () => NOW });
+  return new AdminUserService({
+    store,
+    now: () => NOW,
+    // No ownership is claimed in this suite: the resolver is stated EXPLICITLY
+    // rather than omitted, so owner protection is deliberately inert here and
+    // cannot be lost by accident elsewhere.
+    getSystemOwnerUserId: async () => null,
+  });
 }
+
+/**
+ * COMPILE-TIME PROOF (Gap 1): owner protection cannot be silently disabled by
+ * forgetting to wire the resolver. `getSystemOwnerUserId` is a REQUIRED member
+ * of AdminUserServiceDeps, so omitting it is a type error (TS2345/TS2741) — the
+ * build fails rather than the service degrading into a no-op guard at runtime.
+ *
+ * If the dependency is ever made optional again, `@ts-expect-error` below
+ * becomes an UNUSED directive and `npm run typecheck` fails. This assertion is
+ * therefore self-policing in both directions.
+ */
+function _ownerResolverIsRequiredAtCompileTime(store: MemoryUserStore): void {
+  // @ts-expect-error - getSystemOwnerUserId is required; omitting it must not compile.
+  void new AdminUserService({ store, now: () => NOW });
+}
+void _ownerResolverIsRequiredAtCompileTime;
 
 async function expectError(fn: () => Promise<unknown>): Promise<AuthError> {
   try {
