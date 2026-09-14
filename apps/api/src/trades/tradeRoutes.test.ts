@@ -7,6 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createApp, listen } from "../kernel/server.js";
 import { AuthService } from "../auth/authService.js";
+import { LogMailProvider } from "../mail/logMailProvider.js";
 import { MemoryUserStore } from "../auth/memoryUserStore.js";
 import { VeloraHasher } from "../auth/hashing.js";
 import { JwtService } from "../auth/jwt.js";
@@ -46,6 +47,7 @@ async function withServer(
       tokens.push(t);
       return t;
     },
+    mail: new LogMailProvider(), // explicit offline outbox — never a silent no-op
   });
   const accounts = new AccountService({
     store: accountStore,
@@ -126,7 +128,9 @@ test("TRADES HTTP: fail closed (503) when the capability is unconfigured", async
   const app = createApp({
     allowedOrigins: ["https://veloratrade.ir"],
     checks: { database: async () => "ok" as const },
-    auth: new AuthService({ store: new MemoryUserStore(), hasher: new VeloraHasher(), jwt: JwtService.create(SECRET) }),
+    auth: new AuthService({ store: new MemoryUserStore(), hasher: new VeloraHasher(), jwt: JwtService.create(SECRET),
+    mail: new LogMailProvider(), // explicit offline outbox — never a silent no-op
+  }),
     // trades deliberately NOT configured
   });
   const port = await listen(app);

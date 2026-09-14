@@ -86,12 +86,21 @@ export interface AuthDeps {
    */
   readonly generateVerificationToken?: () => string;
   /**
-   * Outbound transactional email (Phase 3B-1, OD-12). Optional so existing
-   * call sites keep working: when absent, flows that would send email still
-   * complete with identical observable behavior (anti-enumeration), they
-   * simply dispatch nothing.
+   * Outbound transactional email (Phase 3B-1, OD-12).
+   *
+   * REQUIRED, deliberately. Verification and password-reset links are only
+   * useful if they are actually dispatched, so a construction site that omitted
+   * the port would silently turn those flows into no-ops with no runtime
+   * signal. Making it mandatory turns that mistake into a COMPILE-TIME error
+   * (TS2741/TS2345) instead. There is intentionally no default and no
+   * fallback: a caller with genuinely nothing to send must say so explicitly by
+   * passing a LogMailProvider (offline, in-memory outbox).
+   *
+   * NOTE: required dependency != observable delivery. MailPort never throws for
+   * transport failure, and sendMailSafely keeps provider state unobservable so
+   * anti-enumeration responses stay uniform.
    */
-  readonly mail?: MailPort;
+  readonly mail: MailPort;
   /** Base URL used to build verification/reset links (no trailing slash). */
   readonly appOrigin?: string;
 }
@@ -580,10 +589,8 @@ export class AuthService {
     subject: string;
     text: string;
   }): Promise<void> {
-    const mail = this.deps.mail;
-    if (mail === undefined) return;
     try {
-      await mail.send(message);
+      await this.deps.mail.send(message);
     } catch {
       /* deliberately ignored — see doc comment */
     }

@@ -11,6 +11,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createApp, listen } from "../kernel/server.js";
 import { AuthService } from "../auth/authService.js";
+import { LogMailProvider } from "../mail/logMailProvider.js";
 import { MemoryUserStore } from "../auth/memoryUserStore.js";
 import { VeloraHasher } from "../auth/hashing.js";
 import { JwtService } from "../auth/jwt.js";
@@ -50,6 +51,7 @@ async function withServer(
       tokens.push(t);
       return t;
     },
+    mail: new LogMailProvider(), // explicit offline outbox — never a silent no-op
   });
   const accounts = new AccountService({
     store: accountStore,

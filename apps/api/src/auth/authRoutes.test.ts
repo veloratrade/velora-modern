@@ -6,6 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createApp, listen } from "../kernel/server.js";
 import { AuthService } from "./authService.js";
+import { LogMailProvider } from "../mail/logMailProvider.js";
 import { MemoryUserStore } from "./memoryUserStore.js";
 import { VeloraHasher } from "./hashing.js";
 import { JwtService } from "./jwt.js";
@@ -29,7 +30,8 @@ async function withAuthServer(
           tokens.push(t);
           return t;
         },
-      })
+        mail: new LogMailProvider(), // explicit offline outbox — never a silent no-op
+    })
     : undefined;
   const app = createApp({
     allowedOrigins: ["https://veloratrade.ir"],

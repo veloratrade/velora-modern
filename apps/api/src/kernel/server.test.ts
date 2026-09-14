@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { createApp, listen } from "./server.js";
 import type { Server } from "node:http";
 import { AuthService } from "../auth/authService.js";
+import { LogMailProvider } from "../mail/logMailProvider.js";
 import { MemoryUserStore } from "../auth/memoryUserStore.js";
 import { VeloraHasher } from "../auth/hashing.js";
 import { JwtService } from "../auth/jwt.js";
@@ -20,7 +21,8 @@ async function withKernelServer(
           store: new MemoryUserStore(),
           hasher: new VeloraHasher(),
           jwt: JwtService.create("server-test-auth-secret-0123456789abcdef"),
-        })
+          mail: new LogMailProvider(), // explicit offline outbox — never a silent no-op
+      })
       : undefined;
   const app = createApp({ allowedOrigins: origins, checks, ...(auth !== undefined ? { auth } : {}) });
   const port = await listen(app);

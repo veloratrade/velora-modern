@@ -38,6 +38,9 @@ import { AdminUserService } from "./auth/adminUserService.js";
 import { OwnershipService } from "./auth/ownershipService.js";
 import { MemoryOwnershipStore } from "./auth/memoryOwnershipStore.js";
 import { PgOwnershipStore } from "./auth/pgOwnershipStore.js";
+import type { MailPort } from "./mail/mailPort.js";
+import { ResendMailProvider } from "./mail/resendMailProvider.js";
+import { LogMailProvider } from "./mail/logMailProvider.js";
 
 type PgClient = import("pg").Client;
 
@@ -141,6 +144,23 @@ async function main(): Promise<void> {
   const tradeStore = pool !== undefined ? new PgTradeStore(pool) : new MemoryTradeStore();
   const rateLimitStore = pool !== undefined ? new PgRateLimitStore(pool) : new MemoryRateLimitStore();
 
+  // C-41 — outbound transactional email.
+  //
+  // Provider selection is explicit and has no silent third state: with
+  // RESEND_API_KEY set the real HTTPS adapter is used; without it the offline
+  // LogMailProvider keeps an in-memory outbox. The log adapter does NOT claim
+  // delivery to any external system and never prints message bodies (reset and
+  // verification links are bearer-equivalent secrets), so nothing here can be
+  // mistaken for a real send. The key itself is read from the environment,
+  // passed straight to the adapter, and never logged, echoed or stored.
+  const resendApiKey = process.env.RESEND_API_KEY;
+  const mail: MailPort =
+    resendApiKey !== undefined && resendApiKey.trim() !== ""
+      ? new ResendMailProvider({ apiKey: resendApiKey })
+      : new LogMailProvider();
+  // Provider NAME only — never the key, and never the message contents.
+  console.log(JSON.stringify({ level: "info", event: "mail.provider", provider: mail.name }));
+
   // Without a boot JWT secret every capability route stays fail-closed (503).
   const capabilities: {
     auth?: AuthService;
@@ -154,6 +174,10 @@ async function main(): Promise<void> {
       store: userStore,
       hasher: new VeloraHasher(),
       jwt: JwtService.create(boot.jwtSecret),
+      mail,
+      // Verification/reset links must point at this environment's validated
+      // origin (ADR-013); boot already guarantees it is present and canonical.
+      appOrigin: boot.appOrigin,
     });
     // Plan lookup through the entitlement module — fail-closed (503 on store
     // errors, never a silent 'free') per the Remote EntitlementService invariant.

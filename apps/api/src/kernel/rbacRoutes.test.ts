@@ -7,6 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createApp, listen } from "./server.js";
 import { AuthService } from "../auth/authService.js";
+import { LogMailProvider } from "../mail/logMailProvider.js";
 import { MemoryUserStore } from "../auth/memoryUserStore.js";
 import { VeloraHasher } from "../auth/hashing.js";
 import { JwtService } from "../auth/jwt.js";
@@ -40,6 +41,7 @@ async function withServer(
     store: userStore,
     hasher: new VeloraHasher(),
     jwt: JwtService.create(SECRET),
+    mail: new LogMailProvider(), // explicit offline outbox — never a silent no-op
   });
   const trades = new TradeService({
     store: tradeStore,

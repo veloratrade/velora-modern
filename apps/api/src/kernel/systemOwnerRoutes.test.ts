@@ -7,6 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createApp, listen } from "./server.js";
 import { AuthService } from "../auth/authService.js";
+import { LogMailProvider } from "../mail/logMailProvider.js";
 import { MemoryUserStore } from "../auth/memoryUserStore.js";
 import { MemoryOwnershipStore } from "../auth/memoryOwnershipStore.js";
 import { VeloraHasher } from "../auth/hashing.js";
@@ -39,7 +40,9 @@ async function withServer(
   const users = new MemoryUserStore();
   const ownershipStore = new MemoryOwnershipStore();
   const hasher = new VeloraHasher();
-  const auth = new AuthService({ store: users, hasher, jwt: JwtService.create(SECRET) });
+  const auth = new AuthService({ store: users, hasher, jwt: JwtService.create(SECRET),
+  mail: new LogMailProvider(), // explicit offline outbox — never a silent no-op
+  });
   const ownership = new OwnershipService({
     ownership: ownershipStore,
     users,
