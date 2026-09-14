@@ -13,6 +13,12 @@ import {
   registerRequest,
   loginRequest,
   type RateLimitKey,
+  APP_ROLES,
+  type AppRole,
+  type Permission,
+  can,
+  normalizeRole,
+  permissionsFor,
 } from "@velora/contracts";
 import { newSecurityContext, buildCsp, SECURITY_HEADERS, originAllowed } from "./security.js";
 import { AuthService, AuthError } from "../auth/authService.js";
@@ -89,15 +95,49 @@ async function parseJsonBody(req: IncomingMessage): Promise<Record<string, unkno
   return parsed as Record<string, unknown>;
 }
 
-/** Bearer access-token authentication for protected routes (fail-closed). */
+/**
+ * Bearer access-token authentication for protected routes (fail-closed).
+ *
+ * The returned `role` is trustworthy because it is read ONLY from a payload
+ * whose HS256 signature has already been verified by the JWT service — a
+ * client cannot supply or alter it. Any value outside the frozen OD-9 role set
+ * degrades to the least-privileged role (normalizeRole), so a tampered or
+ * future-dated claim can never escalate. Request body, query string and
+ * arbitrary headers are NEVER consulted for authorization.
+ */
 function authenticateRequest(
   req: IncomingMessage,
   auth: AuthService,
-): { sub: string } | null {
+): { sub: string; role: AppRole } | null {
   const bearer = req.headers.authorization;
   if (bearer === undefined || !bearer.startsWith("Bearer ")) return null;
   const payload = auth.verifyAccessToken(bearer.slice("Bearer ".length));
-  return payload === null ? null : { sub: payload.sub };
+  if (payload === null) return null;
+  return { sub: payload.sub, role: normalizeRole(payload.role) };
+}
+
+/**
+ * Server-side authorization guard (Phase 3B-3, OD-9).
+ *
+ * Distinguishes the two failure modes deliberately:
+ *   - not authenticated       => 401 UNAUTHENTICATED
+ *   - authenticated, no grant => 403 FORBIDDEN
+ * This is an ADMINISTRATIVE authority check. It is NOT a substitute for
+ * resource ownership: ownership-scoped routes keep their non-disclosing 404
+ * semantics and are untouched by this guard.
+ */
+function requirePermission(
+  claims: { sub: string; role: AppRole } | null,
+  permission: Permission,
+  requestId: string,
+): RouteResult | null {
+  if (claims === null) {
+    return { status: 401, body: fail("UNAUTHENTICATED", "Authentication required.", requestId) };
+  }
+  if (!can(claims.role, permission)) {
+    return { status: 403, body: fail("FORBIDDEN", "Insufficient role.", requestId) };
+  }
+  return null; // authorized
 }
 
 function validationFailure(error: z.ZodError, requestId: string): RouteResult {
@@ -625,6 +665,44 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
       const body = await parseJsonBody(req);
       return { status: 201, body: ok(await trades.createExit(id, claims.sub, body)) };
     });
+  }
+
+  // ---- Phase 3B-3: application RBAC (OD-9) ----------------------------------
+  // Strictly READ-ONLY diagnostics. No user management, no role mutation, no
+  // state change of any kind — Phase 3B-4 owns administrative user operations.
+  // These exist so the authorization primitive is observable and testable
+  // rather than dormant, and they enforce server-side.
+
+  // Caller's own effective authority. Every authenticated role may read this.
+  if (method === "GET" && path === "/api/v1/admin/rbac/self") {
+    if (config.auth === undefined) {
+      return { status: 503, body: fail("SERVICE_UNAVAILABLE", "auth not configured", sec.requestId) };
+    }
+    const claims = authenticateRequest(req, config.auth);
+    const denied = requirePermission(claims, "rbac.self.view", sec.requestId);
+    if (denied !== null) return denied;
+    return {
+      status: 200,
+      body: ok({ role: claims!.role, permissions: permissionsFor(claims!.role) }),
+    };
+  }
+
+  // Full role/permission matrix — super_admin only (the smallest honest
+  // example of an operation an `admin` must NOT reach).
+  if (method === "GET" && path === "/api/v1/admin/rbac/matrix") {
+    if (config.auth === undefined) {
+      return { status: 503, body: fail("SERVICE_UNAVAILABLE", "auth not configured", sec.requestId) };
+    }
+    const claims = authenticateRequest(req, config.auth);
+    const denied = requirePermission(claims, "rbac.matrix.view", sec.requestId);
+    if (denied !== null) return denied;
+    return {
+      status: 200,
+      body: ok({
+        roles: APP_ROLES,
+        permissions: Object.fromEntries(APP_ROLES.map((r) => [r, permissionsFor(r)])),
+      }),
+    };
   }
 
   return { status: 404, body: fail("NOT_FOUND", "no such route", sec.requestId) };

@@ -10,3 +10,4 @@ export * from "./jobs.js";
 export * from "./errors.js";
 export * from "./environment.js";
 export * from "./securityConfig.js";
+export * from "./rbac.js";

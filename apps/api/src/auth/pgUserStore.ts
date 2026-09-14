@@ -10,6 +10,7 @@
 // PGlite identity suite remains separate, in-wasm evidence — never real-PG
 // proof (Phase D evidence policy).
 import type { Pool } from "pg";
+import { normalizeRole } from "@velora/contracts";
 import { poolQuery, isUniqueViolation, iso, isoOrNull, type QueryFn } from "../persistence/pg.js";
 import type {
   UserStore,
@@ -46,7 +47,11 @@ function mapUser(r: UserRow): UserRecord {
     fullName: r.full_name,
     timezone: r.timezone,
     locale: r.locale === "en" ? "en" : "fa",
-    role: r.role === "admin" ? "admin" : "user",
+    // Phase 3B-3: normalizeRole maps any value outside the frozen OD-9 set to
+    // the LEAST privileged role. The previous ternary silently collapsed
+    // 'super_admin' to 'user' (a privilege DOWNGRADE that would have become
+    // live the moment migration 0006 widened the CHECK).
+    role: normalizeRole(r.role),
     plan: r.plan,
     status: r.status,
     emailVerifiedAt: isoOrNull(r.email_verified_at),

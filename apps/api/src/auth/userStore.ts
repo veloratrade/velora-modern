@@ -10,7 +10,8 @@ export interface UserRecord {
   readonly fullName: string;
   readonly timezone: string;
   readonly locale: "fa" | "en";
-  readonly role: "user" | "admin";
+  /** Application role (OD-9). NOT a PostgreSQL identity — see contracts/rbac.ts. */
+  readonly role: "user" | "admin" | "super_admin";
   readonly plan: string;
   readonly status: string;
   readonly emailVerifiedAt: string | null;

@@ -5,6 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { createEngine, migrate } from "../migrate.ts";
 
 const MIGRATIONS = join(import.meta.dirname, "..", "migrations");
@@ -103,5 +104,68 @@ test("webhook_events dedupe on (source, event_id) (ADR-008)", async () => {
         ["metaapi", "evt-1", JSON.stringify({ a: 1 })]),
       /duplicate key|unique/i,
     );
+  } finally { await engine.close(); }
+});
+
+test("0006 RBAC: users.role CHECK admits the three OD-9 roles, rejects anything else", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    // Every frozen application role is storable…
+    for (const role of ["user", "admin", "super_admin"]) {
+      await engine.query(
+        "INSERT INTO users(email, password_hash, role) VALUES ($1,'x',$2)",
+        [`${role}@rbac.example`, role],
+      );
+    }
+    const rows = await engine.query("SELECT role FROM users ORDER BY role");
+    assert.deepEqual((rows.rows as { role: string }[]).map((r) => r.role),
+      ["admin", "super_admin", "user"]);
+
+    // …and anything outside the frozen set is rejected by the DATABASE,
+    // independently of application-layer validation (defence in depth).
+    for (const bad of ["root", "owner", "guest", "SUPER_ADMIN", "velora_owner", ""]) {
+      await assert.rejects(
+        engine.query("INSERT INTO users(email, password_hash, role) VALUES ($1,'x',$2)",
+          [`bad-${bad}@rbac.example`, bad]),
+        /violates check constraint|users_role_check/i,
+        `role '${bad}' must be rejected by the CHECK`,
+      );
+    }
+
+    // The default is unchanged — a new row without an explicit role is 'user'.
+    await engine.query("INSERT INTO users(email, password_hash) VALUES ('default@rbac.example','x')");
+    const def = await engine.query("SELECT role FROM users WHERE email = 'default@rbac.example'");
+    assert.equal((def.rows as { role: string }[])[0]!.role, "user");
+  } finally { await engine.close(); }
+});
+
+test("0006 RBAC: pre-existing user/admin rows survive the CHECK widening", async () => {
+  const engine = await createEngine();
+  try {
+    // Apply 0001 ONLY (the narrow CHECK), seed rows exactly as they would
+    // already exist in a database predating Phase 3B-3...
+    await engine.exec(readFileSync(join(MIGRATIONS, "0001_core.sql"), "utf8"));
+    await engine.query("INSERT INTO users(email, password_hash, role) VALUES ('legacy-user@rbac.example','x','user')");
+    await engine.query("INSERT INTO users(email, password_hash, role) VALUES ('legacy-admin@rbac.example','x','admin')");
+    // ...the narrow CHECK genuinely rejects super_admin at this point:
+    await assert.rejects(
+      engine.query("INSERT INTO users(email, password_hash, role) VALUES ('pre@rbac.example','x','super_admin')"),
+      /violates check constraint/i,
+      "0001 must reject super_admin (this is the gap 0006 closes)",
+    );
+
+    // ...now apply ONLY the widening statement from 0006.
+    await engine.exec(readFileSync(join(MIGRATIONS, "0006_rbac_roles.sql"), "utf8"));
+
+    // Existing rows are untouched and still valid.
+    const rows = await engine.query(
+      "SELECT email, role FROM users WHERE email LIKE 'legacy-%' ORDER BY email");
+    assert.deepEqual((rows.rows as { email: string; role: string }[]).map((r) => r.role),
+      ["admin", "user"], "pre-existing rows must remain exactly as they were");
+    // And the previously-rejected value is now accepted.
+    await engine.query("INSERT INTO users(email, password_hash, role) VALUES ('post@rbac.example','x','super_admin')");
+    const after = await engine.query("SELECT role FROM users WHERE email = 'post@rbac.example'");
+    assert.equal((after.rows as { role: string }[])[0]!.role, "super_admin");
   } finally { await engine.close(); }
 });
