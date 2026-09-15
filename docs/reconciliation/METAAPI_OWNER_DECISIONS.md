@@ -1,8 +1,11 @@
-# VELORA MODERN — MetaAPI Owner Decisions (OD-M1 … OD-M4 + TZ-M1)
+# VELORA MODERN — MetaAPI Owner Decisions (OD-M1 … OD-M4 + TZ-M1, D-1, D-2)
 
 ## 1. Status
 
 **Status:** OWNER-APPROVED 2026-09-15 (explicit owner directive, this session).
+**Amended 2026-09-15 — D-2 RATIFIED (see §2A).** Governance-only amendment: records the owner's
+acceptance of **Boundary-Scoped Option B** for credential consumption. It changes no code, no
+schema, no migration, no privilege and no ADR. OD-M1, OD-M3, OD-M4 and TZ-M1 are **untouched**.
 **Mode:** GOVERNANCE ONLY — decision recording. No implementation.
 **Branch:** `reconcile/foundation-first` · **Recorded at HEAD:** `7864e9f25f0b1db9ef0a6eafddaed85fa1d47745`
 **Source evidence:** *MetaAPI Integration Readiness Audit* (read-only, 2026-09-15), which
@@ -103,6 +106,93 @@ redefined.** The following verified MetaAPI semantics are recorded instead:
 5. **Manual-trade timezone behaviour from ADR-004 remains unchanged.**
 6. The durable storage location for naive `brokerTime` evidence is a **future schema
    decision** (§6, D-5).
+
+---
+
+## 2A. Owner decision — D-2 (ratified 2026-09-15)
+
+### D-2 — Worker credential-consumption mechanism: **BOUNDARY-SCOPED OPTION B**
+
+**STATUS: ACCEPTED.**
+
+The mechanism question posed by OD-M2 (*options A / B / C / D, "not chosen silently"*) is hereby
+decided. The owner adopts **Boundary-Scoped Option B**: credential consumption is confined to
+API-hosted provisioning, and worker-hosted synchronization is **credential-free**.
+
+**The operative distinction — these are different operations with different security profiles:**
+
+| | **PROVISIONING** | **SYNCHRONIZATION** |
+|---|---|---|
+| User broker credential | **REQUIRED** | **NOT REQUIRED** |
+| Process | **API** | **Worker** |
+| Lifetime | Short-lived, user-initiated | Long-running, retryable |
+| Provider authentication | Platform token | Platform token |
+| Non-secret input | — | `metaapi_account_id` |
+
+**Binding terms of the decision:**
+
+1. User broker credentials are consumed **only** during account provisioning.
+2. Provisioning is an **API-hosted, short-lived, user-initiated** operation.
+3. The **API is the only process** that currently requires `CREDENTIAL_MASTER_KEY` for user
+   credential consumption.
+4. The worker **MUST NOT** receive: broker username/password · investor password · plaintext user
+   credentials · **encrypted user credential ciphertext** · `CREDENTIAL_MASTER_KEY`.
+5. Historical and incremental MetaAPI synchronization runs **entirely in the worker**, consistent
+   with OD-M2.
+6. MetaAPI sync **does not consume** the user's broker password.
+7. Sync authenticates provider requests using the installation-level `METAAPI_PLATFORM_TOKEN`
+   plus the **non-secret** MetaAPI account identifier.
+8. Worker jobs carry **identifiers and non-secret synchronization metadata only**.
+9. Worker job payloads **MUST NOT** contain user credentials or any other secret.
+10. The worker's existing prohibition on `user_credentials` access **remains**.
+11. The worker's existing prohibition on `audit_log` access **remains**.
+12. **`db/roles.sql` MUST NOT be weakened or expanded as a consequence of D-2.**
+13. **No credential broker is required** for current MetaAPI synchronization.
+14. **No API-hosted long-running MetaAPI synchronization is authorized.** Provider sync I/O
+    remains in the worker.
+
+### Security boundary attached to D-2
+
+The worker **may** receive `METAAPI_PLATFORM_TOKEN` as an **environment-supplied platform-level
+secret** when the MetaAPI worker implementation is eventually built.
+
+- This does **NOT** constitute access to `user_credentials`.
+- The platform token is a **distinct secret class**, governed separately from
+  `CREDENTIAL_MASTER_KEY` (ADR-014 / D-19).
+- The worker **must never** receive `CREDENTIAL_MASTER_KEY`.
+- The worker **must never** receive user broker credentials.
+
+### Consequences (each verified against the tree, not assumed)
+
+| Consequence | State |
+|---|---|
+| Migration required | **NONE** |
+| `db/roles.sql` change | **NONE — unchanged.** `REVOKE ALL ON user_credentials FROM velora_worker` stands |
+| Credential broker | **NOT REQUIRED** for current sync |
+| **ADR-007 amendment A-4** | **NOT REQUIRED** — D-2 alters no worker DB role and no least-privilege posture |
+| ADR-016 | **UNCHANGED** — server-side consumption stays inside the API, preserving the isolation boundary and the no-plaintext-logging rule (Future Work 4 is *not* triggered) |
+| ADR-014 | **UNCHANGED and governing** for the platform token |
+| Blocker **B2** | **DISSOLVED** rather than solved — the worker needs no credential path at all |
+
+### Evidence basis, and the exact limit of that evidence
+
+Established by the read-only *D-2 Architectural Clarification Audit* (2026-09-15) from the
+**legacy** implementation:
+
+- MetaAPI provider requests authenticate with the platform-level `auth-token` header.
+- Historical sync requests use `metaapi_account_id` and **do not supply** the user's broker
+  password.
+- `investorPassword` is read **only** in the provisioning/connect path.
+- The stored encrypted broker credential is **not decrypted** by the legacy MetaAPI sync path.
+- Legacy sync runs as a **worker** operation using account identifiers.
+- Therefore the suspected conflict between OD-M2 and this architecture **is not present** for
+  current historical and incremental synchronization.
+
+> **LIMIT OF EVIDENCE — BINDING.** This is proven for the **legacy implementation only**. It does
+> **NOT** establish that every possible future MetaAPI operation is credential-free. If an
+> operation is discovered that is **both** long-running / worker-owned **AND** requires user
+> broker credentials, that operation **requires a new explicit architectural decision**.
+> **This decision MUST NOT be silently extended to such an operation.**
 
 ---
 
@@ -252,7 +342,7 @@ This record does **NOT** decide, and nothing below may be inferred from it:
 | ID | Decision required | Blocks | Constraint it must satisfy |
 |---|---|---|---|
 | **D-1** | ~~Platform MetaAPI token storage mechanism~~ — **RATIFIED 2026-09-15 by ADR-014 (D-19)**: environment-supplied `METAAPI_PLATFORM_TOKEN` + `METAAPI_BASE_URL`, resolver-validated (`MA-001`…`MA-003`), fail-closed capability-absent. | ~~MetaAPI connect~~ | Satisfied by ADR-014 §2–§5. Implementation remains Phase 3 |
-| **D-2** | Worker credential-consumption mechanism (A / B / C / D) | Worker-side sync | Narrowest safe option; no broad `SELECT`; no plaintext in payloads; preserves ADR-016 isolation |
+| **D-2** | ~~Worker credential-consumption mechanism (A / B / C / D)~~ — **RATIFIED 2026-09-15: Boundary-Scoped Option B** (§2A). Provisioning is API-hosted and credential-consuming; synchronization is worker-hosted and credential-free, using `METAAPI_PLATFORM_TOKEN` + `metaapi_account_id`. | ~~Worker-side sync~~ | Satisfied: no broad `SELECT`, no plaintext in payloads, no ciphertext to the worker, ADR-016 isolation preserved. No broker, no migration, no `roles.sql` change |
 | **D-3** | `TRADE_IMPORTED` final actor set (and the home of migration-origin semantics) | Trade import | ADR-002 amendment ratified first |
 | **D-4** | Whether a diagnostic PnL value is retained, and where | Trade import | No silent replacement of provider value; no second column now |
 | **D-5** | Durable storage for naive `brokerTime` evidence | Trade import | Evidence only; never parsed; no IANA inference |
@@ -309,12 +399,17 @@ as that implementation.
 | **A-1** | `docs/adr/ADR-002-trade-ledger.md` — *Ownership matrix (proposed)* §Decision | Record that `TRADE_IMPORTED` permits actor `sync` (broker/provider-originated import) and state the final disposition of `system`/migration-origin semantics (D-3). Matrix ceases to be "(proposed)" for this row. | OD-M3, trade import | **REQUIRED** |
 | **A-2** | `docs/adr/ADR-004-time-model.md` — §Open Questions item 3 | Close *"MetaApi timestamp semantics in current sync code"* with TZ-M1: offset-explicit `time` → deterministic UTC; naive `brokerTime` never interpreted; no IANA inference; `source_timezone` NULL with provenance for MetaAPI rows. **Manual-trade behaviour unchanged.** | TZ-M1, trade import | **REQUIRED at implementation** |
 | **A-3** | `docs/adr/ADR-014-metaapi-platform-token.md` | **DONE 2026-09-15 (D-19).** Governs the platform token as a distinct secret class: external supply, prohibitions (no `user_credentials`, no synthetic user, no derivation from `CREDENTIAL_MASTER_KEY`), fail-closed resolver, independent rotation, no mandated secret manager. **ADR-016 unchanged.** | OD-M1, MetaAPI connect | **SATISFIED** |
-| **A-4** | `docs/adr/ADR-007-job-semantics.md` *(amendment only if D-2 requires it)* | If the chosen worker mechanism alters the worker's DB role or least-privilege posture, record it. If D-2 selects a broker/shared-contract approach with no privilege change, **no amendment is needed**. | OD-M2, worker sync | **CONDITIONAL on D-2** |
+| **A-4** | `docs/adr/ADR-007-job-semantics.md` | **NOT REQUIRED — condition resolved 2026-09-15.** D-2 selected Boundary-Scoped Option B, which alters no worker DB role and no least-privilege posture, so the stated "no amendment is needed" branch applies. **ADR-007 remains unchanged** unless an actual worker-role or job-semantics change is later introduced. | OD-M2, worker sync | **NOT REQUIRED** |
 | **A-5** | `docs/adr/ADR-002-trade-ledger.md` *(same change as A-1 or separate)* | Record that provider-reported profit is the authoritative net-PnL input for imported trades under `SYNC_WINS_FINANCIAL`, and the disposition of any diagnostic value (D-4). | OD-M4, trade import | **REQUIRED at implementation** |
 
 `db/roles.sql` is **not** an ADR but carries a standing obligation: its `user_credentials`
 block states that a future worker phase *"must grant exactly what it requires and justify
-it."* D-2 discharges that obligation.
+it."* **D-2 discharges that obligation with the narrowest possible answer: the worker requires
+nothing, so nothing is granted and `db/roles.sql` is unchanged.**
+
+**B11 preserved (unchanged by D-2).** `db/roles.sql` still contains broad `ALTER DEFAULT
+PRIVILEGES` for `velora_worker`, which would auto-grant DML on **future** tables. That remains a
+**future D-6 concern**, and **D-2 does NOT authorize changing those privileges**.
 
 ---
 
@@ -325,8 +420,9 @@ it."* D-2 discharges that obligation.
 - **G-1 — Internal credential-consumer design.** OD-M1 fixes what a consumer consumes.
   Requires **no migration** and **no change to `CredentialStore.reveal(id, userId)`**,
   which the audit verified is already owner-scoped and correctly shaped.
-- **G-2 — Worker execution design.** OD-M2 fixes *where* sync runs; D-2 remains open for
-  *how* it reaches credentials.
+- **G-2 — Worker execution design.** OD-M2 fixes *where* sync runs; **D-2 (ratified) fixes that
+  it reaches no credentials at all** — sync is credential-free, authenticating with
+  `METAAPI_PLATFORM_TOKEN` and `metaapi_account_id`. Design may proceed on that basis.
 - **G-3 — Log/payload hardening design.** Unblocked and **recommended first**: the three
   verified leak vectors should be closed before any plaintext egress exists.
 - **G-4 — Trade-import mapping design.** OD-M3 + OD-M4 + TZ-M1 fix event, PnL authority
@@ -345,7 +441,7 @@ historical or incremental sync · webhooks · credential reveal in any form ·
 | ID | Blocker | Cleared by | State |
 |---|---|---|---|
 | **B1** | Credential model contradiction (platform vs user secret) | **OD-M1** | **RESOLVED at decision level**; storage mechanism open (D-1) |
-| **B2** | Worker cannot reach credentials — no tsconfig reference, no dependency, no barrel export, and `velora_worker` holds `REVOKE ALL` on `user_credentials` | OD-M2 sets direction; **D-2 + A-4** | **OPEN** |
+| **B2** | Worker cannot reach credentials — no tsconfig reference, no dependency, no barrel export, and `velora_worker` holds `REVOKE ALL` on `user_credentials` | **D-2 (ratified 2026-09-15)** | **CLOSED — DISSOLVED.** Sync is credential-free, so no credential path is needed. The `REVOKE ALL` is correct and stays. A-4 not required |
 | **B3** | `TRADE_IMPORTED` forbids actor `sync` (verified by executing `assertOwnership`) | **OD-M3 decided**; needs **A-1** ratification + D-3 | **OPEN (governance)** |
 | **B4** | No sync substrate: no `last_synced_at`, no operation reservation, no fill ledger, no `quarantined` column | **D-6** migrations | **OPEN** |
 | **B5** | Three verified log/payload leak vectors (`runner.ts` `err.message`; `index.ts` event log; pg-boss persists payloads) | G-3 hardening | **OPEN — must close before plaintext egress** |
@@ -354,10 +450,21 @@ historical or incremental sync · webhooks · credential reveal in any form ·
 | **B8** | Import write model cannot represent provider data — `TradeRecord.source` typed `"manual"`; `externalDealId` absent from the write model | G-4 / trade-import phase | **OPEN** |
 | **B9** | Platform token has no governed storage | **D-1 + A-3** | **CLOSED (governance) 2026-09-15 — ADR-014 ratified.** Implementation pending Phase 3 |
 
-**MetaAPI implementation is NOT unlocked.** Four decisions of principle are now recorded
-(OD-M1…OD-M4 + TZ-M1), which clears B1 at the decision level and gives B2/B3 a defined
-direction. Nine blockers remain, of which **A-1, A-3, D-1 and D-2 are the minimum set**
-that must be discharged before the first line of MetaAPI implementation code.
+**MetaAPI implementation is NOT unlocked.** Four decisions of principle are recorded
+(OD-M1…OD-M4 + TZ-M1), clearing B1 at the decision level. **D-1 (ADR-014) and D-2
+(§2A) are now RATIFIED, and A-3 is satisfied**, which closes **B1, B9 and B2** at the
+governance level.
+
+**Still outstanding before the first line of MetaAPI implementation code:** **A-1**
+(ADR-002 `TRADE_IMPORTED` actor) and the substrate/mapping decisions **D-3…D-7**, plus
+the operational blockers below.
+
+**B10 — the async pipeline is inert (VERIFIED 2026-09-15).** D-2 settles *how* the worker
+obtains credentials (it does not need any), but **no worker is deployed**: `railway.json`
+defines a single API service, **nothing in the repository calls `enqueue()`**, and the
+worker's handler map is empty. OD-M2 is therefore currently aspirational, and closing B10
+requires a **deployment decision** that is outside implementation authority. See
+`VELORA-B10-ASYNC-PIPELINE-INERT-FINDING.md`.
 
 ---
 
@@ -372,6 +479,13 @@ that must be discharged before the first line of MetaAPI implementation code.
   `packages/contracts/src/trades.ts`.
 - **Owner authorization:** owner directive, 2026-09-15 (this session) — decisions quoted
   in §2 are the owner's, recorded verbatim in substance.
+- **D-2 amendment (2026-09-15), recorded at HEAD `51688e3`:** owner ratified
+  **Boundary-Scoped Option B** (§2A) on the evidence of the read-only *D-2 Architectural
+  Clarification Audit* (`VELORA-D2-ARCHITECTURAL-CLARIFICATION-AUDIT.md`), which inspected
+  the legacy implementation (`MetaApiService.php` `providerRequest`/`fetchHistoricalTrades`/
+  `runNextSyncJob`, `AccountRepository.php`) and this repository's `railway.json`,
+  `db/roles.sql`, ADR-007, ADR-014 and ADR-016. **That amendment changed this document
+  only** — no ADR, no code, no schema, no migration, no privilege.
 - **This record changes no ADR, no schema, no code.** Where it differs from any
   recommendation in the readiness audit, **this record is authoritative**; audit
   recommendations were not converted into decisions unless the owner approved them above.
