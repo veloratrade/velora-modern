@@ -1,8 +1,15 @@
-# VELORA MODERN — MetaAPI Owner Decisions (OD-M1 … OD-M4 + TZ-M1, D-1, D-2, D-3, D-4, D-5)
+# VELORA MODERN — MetaAPI Owner Decisions (OD-M1 … OD-M4 + TZ-M1, D-1, D-2, D-3, D-4, D-5, D-7)
 
 ## 1. Status
 
 **Status:** OWNER-APPROVED 2026-09-15 (explicit owner directive, this session).
+**Amended 2026-09-15 — D-7 RATIFIED IN PART (see §2E).** Governance-only, from **official MetaAPI
+documentation only** (no authenticated call, no provider mutation). The header-identity question
+is **settled**: the documented mechanism is **`transaction-id`**, and **`Idempotency-Key` is NOT a
+documented MetaAPI mechanism** — the legacy PHP system sends a header MetaAPI does not document.
+The **historical-sync path Velora plans has no request-level idempotency mechanism and needs
+none.** A residual sub-question (general deduplication/retention semantics) is recorded as
+**NOT PROVEN**. No code, no schema, no migration.
 **Amended 2026-09-15 — D-5 RATIFIED (see §2D).** Governance-only: fixes how a naive MetaAPI
 `brokerTime` is preserved as evidence without inventing a timezone. A **dedicated
 `broker_time_text` field is REQUIRED** but is **deliberately NOT created here** — it lands with
@@ -484,6 +491,148 @@ population logic writing it verbatim from the provider payload; (c) the A-2 ADR-
 
 ---
 
+## 2E. Owner decision — D-7 (ratified in part 2026-09-15)
+
+### D-7 — External idempotency contract: **`transaction-id` ON PROVISIONING WRITES; NO REQUEST-LEVEL MECHANISM ON THE SYNC READ PATH**
+
+**Status:** **RATIFIED IN PART, 2026-09-15.** The question D-7 was created to answer —
+`transaction-id` vs `Idempotency-Key` — is **resolved from authoritative provider documentation**.
+One narrower sub-question (general deduplication and retention semantics) is **NOT PROVEN** and is
+recorded as such rather than guessed.
+
+**Date:** 2026-09-15 · **Evidence class:** official MetaAPI documentation, fetched in full (not
+search snippets). **No authenticated MetaAPI call was made; no provider-side state was created,
+modified or deleted.**
+
+### External evidence sources (all fetched directly)
+
+| # | Source | Established |
+|---|---|---|
+| E-1 | `https://metaapi.cloud/docs/provisioning/api/account/createAccount/` | `POST /users/current/accounts` header table lists **`transaction-id`, string, Required: Yes** |
+| E-2 | `https://metaapi.cloud/docs/provisioning/api/accountReplica/createAccountReplica/` | `POST /users/current/accounts/:accountId/replicas` header table lists **`transaction-id`, Required: Yes**, identical description |
+| E-3 | `https://metaapi.cloud/docs/client/restApi/api/retrieveHistoricalData/readDealsByTimeRange/` | `GET /users/current/accounts/:accountId/history-deals/time/:startTime/:endTime` header table lists **only `auth-token`** — **no `transaction-id`, no idempotency header** |
+| E-4 | `https://metaapi.cloud/docs/provisioning/api/account/deployAccount/` | `POST .../deploy` header table lists **only `auth-token`**; doc states *"This request will be ignored if the account is already deployed"* |
+| E-5 | `https://metaapi.cloud/docs/provisioning/api/account/deleteAccount/` | `DELETE /users/current/accounts/:accountId` header table lists **only `auth-token`** |
+| E-6 | `https://metaapi.cloud/docs/provisioning/api/account/updateAccount/` | `PUT /users/current/accounts/:accountId` header table lists **only `auth-token`** |
+| E-7 | `https://metaapi.cloud/docs/provisioning/models/acceptedError/` | `AcceptedError` (202) carries `metadata.recommendedRetryTime`; the HTTP response carries `Retry-After` |
+
+**Negative finding (searched, not found):** **no MetaAPI documentation page documents an
+`Idempotency-Key` header.** Results for that term resolve to the IETF draft and unrelated
+third-party APIs (Adyen, Yandex), which are **not authoritative for MetaAPI** and are **not**
+relied on here.
+
+### Exact documented mechanism
+
+Verbatim from E-1/E-2:
+
+> `transaction-id` — *"Transaction id is used to identify a unique transaction. For the new request
+> please generate a random 32-character transaction id. If your request has returned 202 status
+> code, please reuse the same transaction id value to poll the result of the request you've sent
+> earlier."*
+
+1. **Mechanism:** an HTTP **request header** named **`transaction-id`** (not a body field, not a
+   query parameter).
+2. **Value:** a **random 32-character** value, client-generated, **per new request**.
+3. **Operation scope — VERIFIED:** **required** on `POST /users/current/accounts` (E-1) and
+   `POST /users/current/accounts/:accountId/replicas` (E-2). **Absent** from the documented header
+   tables of deploy (E-4), delete (E-5), update (E-6) and the historical-deals read (E-3).
+4. **Retry semantics — documented only for the 202 case:** when a request returns **202**, the
+   client **reuses the same `transaction-id` to poll the result of the earlier request** instead of
+   starting a new one. `Retry-After` / `recommendedRetryTime` indicate when (E-7). For account
+   creation this is the real-world case: broker-settings detection returns 202, and polling with
+   the same value avoids creating a second account.
+5. **Duplicate semantics outside the 202 flow — NOT DOCUMENTED.**
+6. **Retention / lifetime — NOT DOCUMENTED.**
+7. **Protection class:** the documentation describes a mechanism that **identifies a transaction
+   and allows polling an in-flight one**. It does **not** state that MetaAPI stores a response and
+   replays it for arbitrary duplicate submissions, and it does **not** state that reuse prevents
+   duplicate provider-side execution in the general case. **Velora must not assume exactly-once
+   provider-side execution from this header.**
+
+### Answers to the D-7 question set
+
+| # | Question | Answer | Basis |
+|---|---|---|---|
+| 1 | Exact mechanism | `transaction-id` request header | E-1, E-2 |
+| 2 | Header or other field | **Header** | E-1, E-2 |
+| 3 | `transaction-id` / `Idempotency-Key` / other / none | **`transaction-id`**; `Idempotency-Key` is **not documented by MetaAPI** | E-1, E-2 + negative search |
+| 4 | Which operations | Create account; create account replica. **Not** deploy/delete/update; **not** history-deals | E-1…E-6 |
+| 5 | Deduplication scope | **NOT DOCUMENTED** beyond 202-polling | — |
+| 6 | Same value resubmitted | Documented **only** for 202 → polls the earlier request. Otherwise **NOT DOCUMENTED** | E-1 |
+| 7 | Documented safe for retries | **Yes, for the 202 polling flow specifically** | E-1, E-7 |
+| 8 | Retention / lifetime | **NOT DOCUMENTED** | — |
+| 9 | Applies to Velora's historical sync | **No — the endpoint documents no such header** | E-3 |
+| 10 | Prevents duplicate execution, or merely identifies? | Documentation establishes **identification + polling**; duplicate-execution prevention is **NOT PROVEN** | E-1 |
+| 11 | Documented limitations / must-not-use | Not documented as forbidden anywhere; it is simply **absent** from the read path and from deploy/delete/update | E-3…E-6 |
+
+### Velora integration implication
+
+**The sync path needs no external idempotency mechanism, and none exists.** Velora's planned
+historical/incremental sync reads `GET .../history-deals/time/{from}/{to}` (E-3) — a **safe,
+idempotent read** that creates no provider-side state. Re-issuing it cannot duplicate anything at
+the provider. Duplicate protection for imported fills is therefore **entirely Velora's
+responsibility**, which the D-6 substrate already discharges.
+
+**The `Idempotency-Key`/`transaction-id` mismatch is resolved as a legacy defect.** The legacy PHP
+system sends `Idempotency-Key` on three **provisioning** calls — account create, deploy and delete
+(`MetaApiService.php:809`, `:828`, `:870`). Against current documentation: the header name is wrong
+on all three, and on deploy/delete **no** such header is documented at all. Any future Velora
+provisioning implementation must send **`transaction-id`** on account creation, **not**
+`Idempotency-Key`. **No legacy code is modified by this decision** (legacy is out of scope).
+
+**Deferred implementation note — value format.** The documentation specifies a **random
+32-character** value. Legacy derives a deterministic SHA-256-based value and prefixes it
+(`'velora-' . $operationKey`), which is neither 32 characters nor random. A future provisioning
+implementation must satisfy the documented format; whether a deterministic value may be reused
+across retries outside the 202 flow is **NOT PROVEN** and must not be assumed.
+
+**Safe design consequence.** Because general dedup semantics are unproven, a future provisioning
+implementation must **reconcile provider state before retrying** rather than trusting the header to
+deduplicate — the approach legacy already documents (*"Provision once or reconcile before reusing
+the stable provider idempotency key"*, `MetaApiService.php:303`). This is recorded as a
+**constraint on future implementation**, not as authorization to build it.
+
+### Velora-internal vs MetaAPI-external idempotency — NOT the same thing
+
+| | **A. Velora database idempotency** | **B. MetaAPI request-level idempotency** |
+|---|---|---|
+| Mechanism | `UNIQUE (account_id, external_deal_id)` on `sync_fills`; `trades_extdeal_unique`; `trade_events_uid_unique` | `transaction-id` header |
+| Enforced by | **Velora's PostgreSQL**, proven by executed test (D-6, 23505 on replay) | **MetaAPI**, semantics only partly documented |
+| Failure mode solved | A provider deal imported twice becomes **one** domain row | A provisioning **write** retried after an ambiguous response |
+| Applies to the sync read path | **Yes** | **No** (E-3) |
+
+**These are not substitutes.** Velora's constraint is a **VERIFIED internal guarantee** and is
+**never** to be presented as a MetaAPI provider-level guarantee. Conversely, `transaction-id`
+offers **no** protection against duplicate *domain* records — only Velora's constraints do.
+
+### Explicit non-goals
+
+This decision authorizes **no** implementation. Not authorized: MetaAPI client, provisioning
+route, connect flow, historical or incremental sync, webhook ingestion, retry/rate-limit policy,
+SDK adoption, any migration or schema change, any runtime code, any deployment, any authenticated
+provider call, and any modification of legacy PHP. **No ADR is amended** (rule 11).
+
+### Confidence / evidence level
+
+| Claim | Level |
+|---|---|
+| Header is named `transaction-id` and is Required on account + replica creation | **VERIFIED** (E-1, E-2 fetched) |
+| `Idempotency-Key` is not a documented MetaAPI mechanism | **VERIFIED** (absent from official docs; searched) |
+| History-deals read documents no idempotency header | **VERIFIED** (E-3 fetched) |
+| Deploy / delete / update document no `transaction-id` | **VERIFIED** (E-4, E-5, E-6 fetched) |
+| Reusing the value after 202 polls the earlier request | **VERIFIED** (E-1 verbatim) |
+| General duplicate-submission behaviour outside 202 | **NOT PROVEN** |
+| Retention / lifetime of a transaction id | **NOT PROVEN** |
+| Exactly-once provider-side execution guarantee | **NOT PROVEN — must not be assumed** |
+
+**Residual open fact.** Whether resubmitting a completed (`201`) request with the same
+`transaction-id` is deduplicated, and for how long such state is retained, is **not established by
+current documentation**. It is **not required** for the sync path (E-3) and therefore **blocks
+nothing that is currently authorized**. It must be resolved — by provider support or by the owner —
+**before** any provisioning/connect implementation relies on provider-side deduplication.
+
+---
+
 ## 3. Rationale
 
 **OD-M1.** The audit verified from the legacy implementation that MetaAPI authenticates
@@ -617,8 +766,11 @@ This record does **NOT** decide, and nothing below may be inferred from it:
 6. **Whether a diagnostic/reconciliation PnL column will exist**, and its name or scale.
 7. **The durable storage location for naive `brokerTime` evidence.**
 8. **Any MetaAPI endpoint, client shape, SDK adoption, retry budget or rate-limit policy.**
-9. **The `transaction-id` vs `Idempotency-Key` provisioning header question** — unresolved;
-   provider docs specify `transaction-id`, legacy sends `Idempotency-Key`.
+9. ~~**The `transaction-id` vs `Idempotency-Key` provisioning header question**~~ — **RESOLVED
+   2026-09-15 (§2E)**: official documentation requires **`transaction-id`** on account/replica
+   creation; **`Idempotency-Key` is not a documented MetaAPI mechanism**, so the legacy header is a
+   legacy defect. Still **not decided here**: general duplicate/retention semantics (**NOT
+   PROVEN**), and any provisioning implementation.
 10. **Webhook ingestion** (ADR-008 remains "Implementation not started").
 11. **Credential disclosure auditing** (`CREDENTIAL_USED` or equivalent) — still DEFERRED.
 12. **Key rotation** — remains deferred by ADR-016.
@@ -635,7 +787,7 @@ This record does **NOT** decide, and nothing below may be inferred from it:
 | **D-4** | ~~Whether a diagnostic PnL value is retained, and where~~ — **RATIFIED 2026-09-15: provider-reported profit is authoritative and populates the existing canonical `net_pnl`** (§2B). No second PnL column; no persisted local-vs-provider comparison; local calculation, if ever performed, is diagnostic only and never overwrites the provider value. | ~~Trade import~~ | Satisfied: one canonical persisted value, `profitLoss` API contract unchanged, manual-trade behaviour unchanged, **no migration**. Persisted diagnostic values remain a separate Owner Decision |
 | **D-5** | ~~Durable storage for naive `brokerTime` evidence~~ — **RATIFIED 2026-09-15: preserved verbatim in a DEDICATED `broker_time_text` field, never interpreted** (§2D). `raw_time_text` keeps its existing meaning (verbatim absolute `time`) and is **not overloaded**: the provider returns `time` and `brokerTime` as two distinct fields in the same deal, so one column cannot hold both. | ~~Trade import~~ | Satisfied at decision level: evidence only, never parsed, no IANA inference, `occurred_at_utc` stays NULL. **No migration now** — the column is authorized in principle and lands with the trade-import implementation (rule 11) |
 | **D-6** | Sync substrate: cursor (`last_synced_at`), operation reservation, fill ledger, `quarantined` column | Sync phases | Migrations, each separately justified |
-| **D-7** | Provisioning idempotency header (`transaction-id` vs `Idempotency-Key`) | MetaAPI connect | Resolve from provider docs/support; no live call with user credentials |
+| **D-7** | ~~Provisioning idempotency header (`transaction-id` vs `Idempotency-Key`)~~ — **RATIFIED IN PART 2026-09-15: the documented header is `transaction-id`** (§2E); `Idempotency-Key` is **not** a documented MetaAPI mechanism. The historical-sync read path documents **no** idempotency header and needs none. | ~~MetaAPI connect~~ (sync path unaffected) | Resolved from official docs, **no live call made**. **Residual NOT PROVEN:** duplicate/retention semantics outside the 202-polling flow — required only before a provisioning implementation relies on provider-side dedup |
 
 ---
 
@@ -714,9 +866,10 @@ PRIVILEGES` for `velora_worker`, which would auto-grant DML on **future** tables
 - **G-3 — Log/payload hardening design.** Unblocked and **recommended first**: the three
   verified leak vectors should be closed before any plaintext egress exists.
 - **G-4 — Trade-import mapping design.** OD-M3 + OD-M4 + TZ-M1 fix event, PnL authority
-  and timestamp semantics; **A-1, D-3, D-4, D-5 and D-6 are now ratified**, so the actor, PnL,
-  timestamp-evidence and substrate questions are settled. Implementation remains gated on
-  **A-2/A-5** (at implementation, rule 11) and **D-7**.
+  and timestamp semantics; **A-1, D-3, D-4, D-5 and D-6 are ratified**, and **D-7 is ratified in
+  part** — the sync read path is confirmed to need no external idempotency mechanism. Remaining
+  governance gates: **A-2/A-5** (at implementation, rule 11). **Implementation itself is still not
+  authorized**, and the worker deployment decision (B10-a) is unchanged.
 
 **NOT unlocked — implementation remains blocked:**
 
@@ -735,7 +888,7 @@ historical or incremental sync · webhooks · credential reveal in any form ·
 | **B3** | `TRADE_IMPORTED` forbids actor `sync` (verified by executing `assertOwnership`) | **OD-M3 + A-1 (ratified 2026-09-15)** | **CLOSED (governance).** The domain still encodes `["system"]`; the one-line change is now AUTHORIZED and lands with the trade-import implementation (AGENTS.md rule 11). **No migration.** **D-3 is now RATIFIED (§2C)**: the final set is `["system", "sync"]`, with `system` = migration/system-origin and `sync` = provider-synchronization provenance |
 | **B4** | No sync substrate: no `last_synced_at`, no operation reservation, no fill ledger, no `quarantined` column | **D-6** migrations | **OPEN** |
 | **B5** | Three verified log/payload leak vectors (`runner.ts` `err.message`; `index.ts` event log; pg-boss persists payloads) | G-3 hardening | **OPEN — must close before plaintext egress** |
-| **B6** | Provisioning idempotency header mismatch (`transaction-id` vs `Idempotency-Key`) | **D-7** | **OPEN / NOT PROVEN** |
+| **B6** | Provisioning idempotency header mismatch (`transaction-id` vs `Idempotency-Key`) | **D-7 (§2E, 2026-09-15)** | **CLOSED (governance) — mismatch resolved.** Official docs require **`transaction-id`**; `Idempotency-Key` is undocumented, so legacy is wrong. **Sync path unaffected** (no such header documented). Residual dedup/retention semantics remain **NOT PROVEN** and gate only a future provisioning implementation |
 | **B7** | pg-boss never integration-tested; `pgBossAdapter.claim()` hardcodes `attempts: 0` | Worker phase | **OPEN / NOT PROVEN** |
 | **B8** | Import write model cannot represent provider data — `TradeRecord.source` typed `"manual"`; `externalDealId` absent from the write model | G-4 / trade-import phase | **OPEN** |
 | **B9** | Platform token has no governed storage | **D-1 + A-3** | **CLOSED (governance) 2026-09-15 — ADR-014 ratified.** Implementation pending Phase 3 |
@@ -745,10 +898,12 @@ historical or incremental sync · webhooks · credential reveal in any form ·
 (§2A) are now RATIFIED, and A-3 is satisfied**, which closes **B1, B9 and B2** at the
 governance level.
 
-**Still outstanding before the first line of MetaAPI implementation code:** the
-remaining substrate/mapping decision **D-7**, plus the operational blockers below.
-**D-3, D-4, D-5 and D-6 are ratified** (§2C, §2B, §2D, migration `0012`). **D-7 requires an
-external provider fact and cannot be resolved from this repository.**
+**Still outstanding before the first line of MetaAPI implementation code:** the operational
+blockers below, plus **A-2/A-5** at their implementation phase. **D-3, D-4, D-5 and D-6 are
+ratified** (§2C, §2B, §2D, migration `0012`), and **D-7 is ratified in part** (§2E) from official
+documentation — the header question is settled and the sync read path needs no external
+idempotency mechanism. **B10-a (worker deployment) remains an unresolved Owner Decision, so
+MetaAPI implementation is still NOT unlocked.**
 **A-1 was ratified 2026-09-15** (ADR-002 *Amendment A-1*), closing B3 at the governance
 level; **A-2 and A-5 remain REQUIRED** at their respective implementation phases.
 
@@ -772,6 +927,18 @@ requires a **deployment decision** that is outside implementation authority. See
   `packages/contracts/src/trades.ts`.
 - **Owner authorization:** owner directive, 2026-09-15 (this session) — decisions quoted
   in §2 are the owner's, recorded verbatim in substance.
+- **D-7 partial ratification (2026-09-15), recorded at HEAD `9504d4f`:** external idempotency
+  contract established from **official MetaAPI documentation only** — no authenticated call, no
+  provider-side mutation, no use of Velora credentials. Seven documentation pages were fetched in
+  full (not search snippets): account create, replica create, history-deals read, deploy, delete,
+  update, and the `AcceptedError` model. Findings: **`transaction-id` is a Required header on
+  account and replica creation**; it is **absent** from deploy/delete/update and from the
+  history-deals read; **`Idempotency-Key` is documented nowhere by MetaAPI**, so the legacy PHP
+  header (`MetaApiService.php:809`, `:828`, `:870`) is a legacy defect. The **202-polling** retry
+  semantics are documented verbatim; **general duplicate and retention semantics are NOT PROVEN**
+  and are explicitly recorded as such. Velora's `(account_id, external_deal_id)` uniqueness is
+  recorded as an **internal** guarantee and is **not** presented as a provider guarantee.
+  **Governance only: no code, no schema, no migration, no ADR amendment, no legacy modification.**
 - **D-5 ratification (2026-09-15), recorded at HEAD `9d739fa`:** naive `brokerTime` evidence
   semantics settled (§2D). Claims verified before recording: `raw_time_text` is a nullable,
   **unconstrained** TEXT column at `0012:134` documented at `0012:125-132` as the verbatim copy of
