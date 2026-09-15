@@ -402,3 +402,69 @@ test("0010 credentials: nonce reuse, duplicate provider rows, and owner deletion
       "a user with stored credentials must not be deletable");
   } finally { await engine.close(); }
 });
+
+// --- 0011: audit contract extended for credential lifecycle events (B-2) ----
+
+test("0011 audit: credential actions and both outcomes are accepted; invalid values are rejected", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    const uid = await seedCredUser(engine, "audit0011@example.com");
+
+    // The three pre-existing actions must remain valid after the CHECK swap.
+    for (const action of ["OWNERSHIP_CLAIMED", "USER_ROLE_CHANGED", "USER_STATUS_CHANGED"]) {
+      await engine.query(
+        `INSERT INTO audit_log(action, actor_user_id) VALUES ('${action}', ${uid})`);
+    }
+    // The two new credential actions, with metadata.
+    for (const action of ["CREDENTIAL_CREATED", "CREDENTIAL_DELETED"]) {
+      await engine.query(
+        `INSERT INTO audit_log(action, actor_user_id, credential_id, provider)
+         VALUES ('${action}', ${uid}, 4242, 'METAAPI')`);
+    }
+    // Both outcomes.
+    await engine.query(
+      `INSERT INTO audit_log(action, actor_user_id, outcome) VALUES ('CREDENTIAL_CREATED', ${uid}, 'success')`);
+    await engine.query(
+      `INSERT INTO audit_log(action, actor_user_id, outcome) VALUES ('CREDENTIAL_DELETED', ${uid}, 'denied')`);
+
+    // Rejections: an unknown action, the deliberately-excluded reveal event,
+    // an unknown outcome, and an unsupported provider.
+    for (const [sql, label] of [
+      [`INSERT INTO audit_log(action, actor_user_id) VALUES ('NOPE', ${uid})`, "unknown action"],
+      [`INSERT INTO audit_log(action, actor_user_id) VALUES ('CREDENTIAL_REVEALED', ${uid})`, "reveal is not in the vocabulary"],
+      [`INSERT INTO audit_log(action, actor_user_id, outcome) VALUES ('CREDENTIAL_CREATED', ${uid}, 'maybe')`, "unknown outcome"],
+      [`INSERT INTO audit_log(action, actor_user_id, provider) VALUES ('CREDENTIAL_CREATED', ${uid}, 'BINANCE')`, "unknown provider"],
+    ] as Array<[string, string]>) {
+      await assert.rejects(engine.query(sql), /violates check constraint|check constraint/i, label);
+    }
+  } finally { await engine.close(); }
+});
+
+test("0011 audit: credential_id is a historical id with no FK, so history outlives the credential", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    const uid = await seedCredUser(engine, "audit0011fk@example.com");
+
+    // An id that never existed is accepted: there is no referential constraint.
+    await engine.query(
+      `INSERT INTO audit_log(action, actor_user_id, credential_id, provider)
+       VALUES ('CREDENTIAL_DELETED', ${uid}, 999999999, 'METAAPI')`);
+
+    // A real credential can be hard-deleted while its audit row survives.
+    const ins = await engine.query(
+      `INSERT INTO user_credentials(user_id, provider, key_version, iv, auth_tag, secret_ciphertext)
+       VALUES (${uid}, 'METAAPI', 1, ${IV12}, ${TAG16}, ${CT}) RETURNING id`);
+    const cid = String((ins.rows[0] as { id: string | number }).id);
+    await engine.query(
+      `INSERT INTO audit_log(action, actor_user_id, credential_id, provider)
+       VALUES ('CREDENTIAL_CREATED', ${uid}, ${cid}, 'METAAPI')`);
+    await engine.query(`DELETE FROM user_credentials WHERE id = ${cid}`);
+
+    const rows = await engine.query(
+      `SELECT count(*)::int AS n FROM audit_log WHERE credential_id = ${cid}`);
+    assert.equal((rows.rows[0] as { n: number }).n, 1,
+      "the audit row must survive deletion of the credential it describes");
+  } finally { await engine.close(); }
+});

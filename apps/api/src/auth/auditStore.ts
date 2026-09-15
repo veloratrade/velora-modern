@@ -41,7 +41,26 @@ export type AuditWrite = (tx: AuditTx | undefined) => Promise<void>;
 export type AuditAction =
   | "OWNERSHIP_CLAIMED"
   | "USER_ROLE_CHANGED"
-  | "USER_STATUS_CHANGED";
+  | "USER_STATUS_CHANGED"
+  // B-2 credential lifecycle (migration 0011). Representable here; NOT yet
+  // emitted anywhere — the CredentialService wiring is B-3.
+  // CREDENTIAL_REVEALED is deliberately absent: reveal has no production
+  // consumer, and an action nothing can emit is dead contract surface.
+  | "CREDENTIAL_CREATED"
+  | "CREDENTIAL_DELETED";
+
+/**
+ * Result of the audited attempt. Mirrors the 0011 outcome CHECK.
+ *
+ * `denied` exists for credential access, where the REFUSED attempt carries
+ * more security signal than the successful one. Only AUTHENTICATED denials are
+ * recordable: `actor_user_id` is NOT NULL, so an unattributable attempt has no
+ * row to write.
+ */
+export type AuditOutcome = "success" | "denied";
+
+/** Providers that may appear on a credential audit record. Mirrors 0010/0011. */
+export type AuditProvider = "METAAPI";
 
 /** A single append-only audit record as written by the application. */
 export interface AuditEntry {
@@ -60,6 +79,27 @@ export interface AuditEntry {
   /** Correlation id from the per-request security context, when available. */
   readonly requestId: string | null;
   readonly occurredAt: Date;
+  /**
+   * Outcome of the attempt. OPTIONAL: omitted means `"success"`, which keeps
+   * every existing call site correct without modification — the three
+   * account-lifecycle events are only ever appended after the mutation
+   * succeeded.
+   */
+  readonly outcome?: AuditOutcome;
+  /**
+   * B-2 credential metadata — OPTIONAL and METADATA ONLY.
+   *
+   * `credentialId` is a HISTORICAL identifier, not a live reference: it has no
+   * foreign key because credential deletion is a hard delete and the trail must
+   * outlive the credential (see migration 0011).
+   *
+   * SECURITY: these two fields are the ONLY credential-related data an audit
+   * record may carry. A secret, ciphertext, master key, IV or auth tag must
+   * NEVER be placed here, nor in beforeState/afterState, which keep their
+   * original meaning of low-cardinality lifecycle values.
+   */
+  readonly credentialId?: string | null;
+  readonly provider?: AuditProvider | null;
 }
 
 /** A persisted audit record (read back for verification/tests only). */
@@ -70,9 +110,12 @@ export interface AuditRecord {
   readonly targetUserId: string | null;
   readonly beforeState: string | null;
   readonly afterState: string | null;
-  readonly outcome: "success";
+  readonly outcome: AuditOutcome;
   readonly requestId: string | null;
   readonly occurredAt: string;
+  /** Credential metadata when the action is a credential event; else null. */
+  readonly credentialId: string | null;
+  readonly provider: AuditProvider | null;
 }
 
 export interface AuditStore {

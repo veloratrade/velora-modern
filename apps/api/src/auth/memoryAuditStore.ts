@@ -22,9 +22,13 @@ export class MemoryAuditStore implements AuditStore {
       targetUserId: entry.targetUserId,
       beforeState: entry.beforeState,
       afterState: entry.afterState,
-      outcome: "success" as const,
+      // Same defaulting as the PG adapter, so the two cannot drift: an omitted
+      // outcome is a success and non-credential events carry no metadata.
+      outcome: entry.outcome ?? "success",
       requestId: entry.requestId,
       occurredAt: entry.occurredAt.toISOString(),
+      credentialId: entry.credentialId ?? null,
+      provider: entry.provider ?? null,
     });
     this.records.push(record);
     return record;

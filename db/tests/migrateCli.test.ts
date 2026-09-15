@@ -2,7 +2,7 @@
 //
 // These exist because of a PROVEN defect: a blank MIGRATION_DATABASE_URL made
 // the CLI construct an in-memory PGlite engine, print
-// `applied: 0001_core.sql … 0010_user_credentials.sql` and exit 0, while the
+// `applied: 0001_core.sql … <head>.sql` and exit 0, while the
 // real PostgreSQL database received ZERO tables. `railway.json` runs
 // `db/migrate.ts && server-main.ts`, so that false success sat directly on the
 // deployment path.
@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
+import { readdirSync } from "node:fs";
 import {
   resolveMigrationUrl,
   createEngine,
@@ -125,7 +126,12 @@ test("explicit PGlite test path still works (no-arg createEngine and createPglit
 // --- migration head ---------------------------------------------------------
 
 test("head: expectedHead reads the highest migration on disk; currentHead reads the database", async () => {
-  assert.equal(expectedHead(MIGRATIONS), "0010_user_credentials.sql");
+  // Derived from disk rather than hardcoded: the assertion is that
+  // expectedHead() reports the LAST migration in lexical order, which stays
+  // true as migrations are added (it previously pinned 0010 and broke when
+  // 0011 landed).
+  const onDisk = readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql")).sort();
+  assert.equal(expectedHead(MIGRATIONS), onDisk[onDisk.length - 1]);
   const engine = await createPgliteEngine();
   try {
     assert.equal(await currentHead(engine), null, "no tracking table yet → null");

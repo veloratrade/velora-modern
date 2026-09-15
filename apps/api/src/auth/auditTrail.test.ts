@@ -368,9 +368,11 @@ test("C-34/10: audit records never contain passwords, hashes or tokens", async (
         targetUserId: entry.targetUserId,
         beforeState: entry.beforeState,
         afterState: entry.afterState,
-        outcome: "success" as const,
+        outcome: entry.outcome ?? ("success" as const),
         requestId: entry.requestId,
         occurredAt: entry.occurredAt.toISOString(),
+        credentialId: entry.credentialId ?? null,
+        provider: entry.provider ?? null,
       };
     },
     async list() {
