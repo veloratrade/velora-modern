@@ -143,6 +143,25 @@ REVOKE UPDATE, DELETE, TRUNCATE ON TABLE audit_log      FROM app_readwrite, velo
 REVOKE ALL                      ON TABLE audit_log      FROM velora_worker;
 GRANT  INSERT, SELECT           ON TABLE audit_log      TO   app_readwrite;
 
+-- `sync_fills` (D-6, migration 0012) is the MetaAPI import ledger: one durable
+-- row per provider deal, which is what makes a replayed provider response
+-- converge instead of double-counting. Provider-reported facts are evidence and
+-- must never be rewritten, so the same append-only rule as `trade_events`
+-- applies. Discharges the standing obligation in section 6: ALTER DEFAULT
+-- PRIVILEGES would otherwise have auto-granted UPDATE/DELETE on this new table
+-- to both runtime roles (B11).
+-- The worker KEEPS INSERT/SELECT here: under D-2 sync is credential-free, and
+-- writing fills is precisely the work it is authorized to do. This is NOT a
+-- credential grant — `user_credentials` stays fully revoked below.
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE sync_fills     FROM app_readwrite, velora_worker;
+
+-- `sync_reservations` (D-6, migration 0012) is a mutable lease table, NOT a
+-- ledger: releasing and reclaiming a stale lease are UPDATEs by design, so the
+-- append-only rule deliberately does NOT apply. TRUNCATE is still revoked —
+-- wiping live reservations would silently permit concurrent sync of one
+-- account, defeating the invariant the table exists to enforce.
+REVOKE TRUNCATE                 ON TABLE sync_reservations FROM app_readwrite, velora_worker;
+
 -- `user_credentials` (C-22, migration 0010) holds AES-256-GCM ciphertext for
 -- third-party integration secrets. The API owns the full lifecycle (create,
 -- read, revoke), so app_readwrite keeps ordinary DML. velora_worker gets NO
