@@ -4,6 +4,8 @@
 
 Accepted — owner decision D-01 (2026-08-29): **Option B approved** — immutable trade ledger, correction events, tombstone deletion, explicit mutation ownership (user/sync/webhook/admin), append-only trade events, optimistic concurrency/versioning, idempotent external trade identifiers. Implementation not started (Phase 1 schema design / Phase 2 wave ④).
 
+**Amendment — 2026-09-15 (owner ratification, A-1, MetaAPI imported trades): `TRADE_IMPORTED` permits actor `sync` in addition to `system`.** The authoritative actor set becomes **`TRADE_IMPORTED → ["system", "sync"]`**. This amends the *Ownership matrix* row for imported trades only; every other part of D-01 — the immutable ledger, correction events, tombstone deletion, conflict policy, optimistic concurrency and idempotency — is **unchanged**. No other event's actor set is broadened. See *Ownership matrix* below and *Amendment A-1* for the reasoning and its limits.
+
 ## Context
 
 Trades are the core financial record. Today the API exposes mutable trade rows
@@ -37,15 +39,15 @@ Accepted by owner decision D-01 (2026-08-29).
 | Delete | Row disappears | Tombstone + event; reporting stays consistent |
 | Complexity | Lower | Moderate (event schema + projection) |
 
-**Ownership matrix (proposed):**
+**Ownership matrix** (rows marked **(ratified)** are no longer proposed):
 
 | Actor | May do | Never does |
 |---|---|---|
 | User | create manual trades, edit journaling metadata, record exits | mutate sync-sourced financial fields silently |
-| Sync (MetaApi) | upsert by `(account_id, external_deal_id)`, fill/close trades | overwrite user journaling metadata |
+| Sync (MetaApi) | **(ratified 2026-09-15, A-1)** emit `TRADE_IMPORTED` for broker/provider-originated trades; upsert by `(account_id, external_deal_id)`, fill/close trades | overwrite user journaling metadata; emit `TRADE_IMPORTED` for a trade outside the account/user context of the sync operation |
 | Webhook | same as sync, idempotent by event id | independent writes bypassing the same rules |
 | Admin | support corrections (audited) | silent edits |
-| System | retention, aggregations, corrections from migrations | business edits |
+| System | retention, aggregations, corrections from migrations, **`TRADE_IMPORTED` for migration-origin imports (retained)** | business edits |
 
 **Conflict behavior:** explicit policy enum per field group
 (e.g., `SYNC_WINS_FINANCIAL / USER_WINS_JOURNALING / QUARANTINE_FOR_REVIEW`) —
@@ -58,6 +60,52 @@ Phase 2 spec extraction, owner-approved.
 **Idempotency:** unique `(account_id, external_deal_id)` enforced by constraint
 (pending index verification above); webhook event ids deduped (ADR-008);
 duplicate delivery converges instead of double-counting.
+
+### Amendment A-1 — `TRADE_IMPORTED` actor set (2026-09-15)
+
+**Authoritative rule:** `TRADE_IMPORTED → ["system", "sync"]`.
+
+**Why both actors, and what each means:**
+
+- **`system`** remains valid, unchanged, for the system-driven import mechanisms already
+  covered by this ADR — notably the *Migration Impact* path, where existing trades import
+  into the ledger as `IMPORT`-origin events. Nothing that relies on `system` is affected.
+- **`sync`** denotes the **controlled background synchronization worker** performing MetaAPI
+  imports. Per OD-M2 that worker owns long-running historical and incremental sync, so it is
+  the process that legitimately originates an imported trade.
+
+**Why not `TRADE_CREATED`:** a MetaAPI-originated trade is an **import**, not a manual
+creation. Reusing `TRADE_CREATED` to avoid touching the actor matrix would make the ledger
+misreport provenance — precisely the auditability this ADR exists to protect. The event
+semantics stay explicit: **`TRADE_IMPORTED` = a broker/provider-originated trade imported by
+sync.** `FINANCIAL_CORRECTED` remains the path for later provider-driven corrections under
+`SYNC_WINS_FINANCIAL`.
+
+**Limits of this amendment — binding.** It authorizes exactly one thing: the already-defined
+actor `sync` for the already-defined event `TRADE_IMPORTED`. It does **not**:
+
+- grant the worker arbitrary user-ownership authority, or any right to impersonate a user;
+- permit `sync` to emit `TRADE_CREATED`, or broaden any other event's actor set;
+- weaken ownership checks anywhere. **Imported-trade ownership must still be derived from the
+  authenticated account/user context of the sync operation** — the `(account_id,
+  external_deal_id)` linkage — never from a value the provider supplies;
+- relax the immutable-ledger, idempotency, expected-version, or transactional-event
+  requirements, all of which apply to `TRADE_IMPORTED` exactly as before;
+- grant the worker access to `user_credentials`, `CREDENTIAL_MASTER_KEY`, or any broker
+  credential. Under **D-2 (Boundary-Scoped Option B)** synchronization is credential-free and
+  authenticates with the platform-level `METAAPI_PLATFORM_TOKEN`; `sync` is an **internal
+  actor identity for ledger attribution, not an authorization grant**.
+
+**`sync` is never user-supplied.** It is asserted by trusted server-side code that has already
+established the account context; it must never be accepted from a request body, header or
+job payload.
+
+**Implementation status:** governance only. The domain currently encodes
+`ALLOWED_ACTORS.TRADE_IMPORTED = ["system"]` (`packages/domain/src/tradeLedger.ts`), which
+**rejects** `sync` — verified by executing `assertOwnership("TRADE_IMPORTED", "sync")`. This
+amendment makes the required change **authorized but not yet applied**; per AGENTS.md rule 11
+the code change lands in the same change as the trade-import implementation. The database
+event/actor CHECK constraints already permit this combination, so **no migration is required**.
 
 ## Alternatives Considered
 

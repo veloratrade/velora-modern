@@ -396,7 +396,7 @@ as that implementation.
 
 | # | Document | Exact amendment | Gates | Status |
 |---|---|---|---|---|
-| **A-1** | `docs/adr/ADR-002-trade-ledger.md` — *Ownership matrix (proposed)* §Decision | Record that `TRADE_IMPORTED` permits actor `sync` (broker/provider-originated import) and state the final disposition of `system`/migration-origin semantics (D-3). Matrix ceases to be "(proposed)" for this row. | OD-M3, trade import | **REQUIRED** |
+| **A-1** | `docs/adr/ADR-002-trade-ledger.md` — *Ownership matrix* §Decision + *Amendment A-1* | **DONE 2026-09-15.** `TRADE_IMPORTED → ["system", "sync"]` ratified: `sync` is the controlled worker performing MetaAPI imports; `system` retained for migration-origin imports. Matrix row no longer "(proposed)". Limits recorded: no ownership bypass, no impersonation, no other actor set broadened, no credential access. **No migration required.** | OD-M3, trade import | **SATISFIED** |
 | **A-2** | `docs/adr/ADR-004-time-model.md` — §Open Questions item 3 | Close *"MetaApi timestamp semantics in current sync code"* with TZ-M1: offset-explicit `time` → deterministic UTC; naive `brokerTime` never interpreted; no IANA inference; `source_timezone` NULL with provenance for MetaAPI rows. **Manual-trade behaviour unchanged.** | TZ-M1, trade import | **REQUIRED at implementation** |
 | **A-3** | `docs/adr/ADR-014-metaapi-platform-token.md` | **DONE 2026-09-15 (D-19).** Governs the platform token as a distinct secret class: external supply, prohibitions (no `user_credentials`, no synthetic user, no derivation from `CREDENTIAL_MASTER_KEY`), fail-closed resolver, independent rotation, no mandated secret manager. **ADR-016 unchanged.** | OD-M1, MetaAPI connect | **SATISFIED** |
 | **A-4** | `docs/adr/ADR-007-job-semantics.md` | **NOT REQUIRED — condition resolved 2026-09-15.** D-2 selected Boundary-Scoped Option B, which alters no worker DB role and no least-privilege posture, so the stated "no amendment is needed" branch applies. **ADR-007 remains unchanged** unless an actual worker-role or job-semantics change is later introduced. | OD-M2, worker sync | **NOT REQUIRED** |
@@ -442,7 +442,7 @@ historical or incremental sync · webhooks · credential reveal in any form ·
 |---|---|---|---|
 | **B1** | Credential model contradiction (platform vs user secret) | **OD-M1** | **RESOLVED at decision level**; storage mechanism open (D-1) |
 | **B2** | Worker cannot reach credentials — no tsconfig reference, no dependency, no barrel export, and `velora_worker` holds `REVOKE ALL` on `user_credentials` | **D-2 (ratified 2026-09-15)** | **CLOSED — DISSOLVED.** Sync is credential-free, so no credential path is needed. The `REVOKE ALL` is correct and stays. A-4 not required |
-| **B3** | `TRADE_IMPORTED` forbids actor `sync` (verified by executing `assertOwnership`) | **OD-M3 decided**; needs **A-1** ratification + D-3 | **OPEN (governance)** |
+| **B3** | `TRADE_IMPORTED` forbids actor `sync` (verified by executing `assertOwnership`) | **OD-M3 + A-1 (ratified 2026-09-15)** | **CLOSED (governance).** The domain still encodes `["system"]`; the one-line change is now AUTHORIZED and lands with the trade-import implementation (AGENTS.md rule 11). **No migration.** D-3 (final disposition of migration-origin semantics) remains open |
 | **B4** | No sync substrate: no `last_synced_at`, no operation reservation, no fill ledger, no `quarantined` column | **D-6** migrations | **OPEN** |
 | **B5** | Three verified log/payload leak vectors (`runner.ts` `err.message`; `index.ts` event log; pg-boss persists payloads) | G-3 hardening | **OPEN — must close before plaintext egress** |
 | **B6** | Provisioning idempotency header mismatch (`transaction-id` vs `Idempotency-Key`) | **D-7** | **OPEN / NOT PROVEN** |
@@ -455,9 +455,10 @@ historical or incremental sync · webhooks · credential reveal in any form ·
 (§2A) are now RATIFIED, and A-3 is satisfied**, which closes **B1, B9 and B2** at the
 governance level.
 
-**Still outstanding before the first line of MetaAPI implementation code:** **A-1**
-(ADR-002 `TRADE_IMPORTED` actor) and the substrate/mapping decisions **D-3…D-7**, plus
-the operational blockers below.
+**Still outstanding before the first line of MetaAPI implementation code:** the
+substrate/mapping decisions **D-3…D-7**, plus the operational blockers below.
+**A-1 was ratified 2026-09-15** (ADR-002 *Amendment A-1*), closing B3 at the governance
+level; **A-2 and A-5 remain REQUIRED** at their respective implementation phases.
 
 **B10 — the async pipeline is inert (VERIFIED 2026-09-15).** D-2 settles *how* the worker
 obtains credentials (it does not need any), but **no worker is deployed**: `railway.json`
@@ -479,6 +480,11 @@ requires a **deployment decision** that is outside implementation authority. See
   `packages/contracts/src/trades.ts`.
 - **Owner authorization:** owner directive, 2026-09-15 (this session) — decisions quoted
   in §2 are the owner's, recorded verbatim in substance.
+- **A-1 amendment (2026-09-15), recorded at HEAD `b31975d`:** ADR-002 amended to ratify
+  `TRADE_IMPORTED → ["system", "sync"]` (dated Status amendment + *Amendment A-1* section +
+  ownership-matrix rows), following the ADR-010 amendment precedent. Mismatch re-proven by
+  executing `assertOwnership("TRADE_IMPORTED", "sync")` → `OwnershipPolicyError` before the
+  edit. **Governance only: no code, no schema, no migration, no privilege change.**
 - **D-2 amendment (2026-09-15), recorded at HEAD `51688e3`:** owner ratified
   **Boundary-Scoped Option B** (§2A) on the evidence of the read-only *D-2 Architectural
   Clarification Audit* (`VELORA-D2-ARCHITECTURAL-CLARIFICATION-AUDIT.md`), which inspected
