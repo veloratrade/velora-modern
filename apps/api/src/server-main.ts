@@ -41,6 +41,7 @@ import { PgOwnershipStore } from "./auth/pgOwnershipStore.js";
 import { MemoryAuditStore } from "./auth/memoryAuditStore.js";
 import { PgAuditStore } from "./auth/pgAuditStore.js";
 import { resolveCredentialKey } from "./credentials/credentialConfig.js";
+import { resolveMetaApiConfig } from "./metaapi/metaApiConfig.js";
 import { MemoryCredentialStore } from "./credentials/memoryCredentialStore.js";
 import { PgCredentialStore } from "./credentials/pgCredentialStore.js";
 import type { CredentialStore } from "./credentials/credentialStore.js";
@@ -228,6 +229,30 @@ async function main(): Promise<void> {
       }
     }
   }
+  // MetaAPI platform token (ADR-014 / D-19). Resolution is reported at boot so
+  // a misconfiguration is visible, but absence is NOT fatal: MetaAPI is an
+  // integration, and hard-exiting here would let a third-party configuration
+  // gap take down authentication and trades. Deliberately absent from /ready
+  // for the same reason. Codes and fixed messages only — never the token.
+  const metaApi = resolveMetaApiConfig(process.env);
+  if (metaApi.configured) {
+    // The base URL is non-secret configuration; the token is never logged.
+    console.log(
+      JSON.stringify({ level: "info", event: "metaapi.configured", baseUrl: metaApi.baseUrl }),
+    );
+  } else {
+    for (const f of metaApi.findings) {
+      console.log(
+        JSON.stringify({
+          level: "warn",
+          event: "metaapi.unavailable",
+          code: f.code,
+          message: f.message,
+        }),
+      );
+    }
+  }
+
   const app = createApp({
     allowedOrigins: boot.allowedOrigins,
     checks: { database: dbProbe },
