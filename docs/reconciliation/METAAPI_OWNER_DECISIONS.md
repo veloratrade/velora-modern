@@ -1,8 +1,11 @@
-# VELORA MODERN — MetaAPI Owner Decisions (OD-M1 … OD-M4 + TZ-M1, D-1, D-2)
+# VELORA MODERN — MetaAPI Owner Decisions (OD-M1 … OD-M4 + TZ-M1, D-1, D-2, D-4)
 
 ## 1. Status
 
 **Status:** OWNER-APPROVED 2026-09-15 (explicit owner directive, this session).
+**Amended 2026-09-15 — D-4 RATIFIED (see §2B).** Governance-only: ratifies provider PnL
+authority for imported trades on the existing canonical `net_pnl` field. **No second PnL column
+is authorized**, no code, no schema, no migration, no API change.
 **Amended 2026-09-15 — D-2 RATIFIED (see §2A).** Governance-only amendment: records the owner's
 acceptance of **Boundary-Scoped Option B** for credential consumption. It changes no code, no
 schema, no migration, no privilege and no ADR. OD-M1, OD-M3, OD-M4 and TZ-M1 are **untouched**.
@@ -196,6 +199,67 @@ Established by the read-only *D-2 Architectural Clarification Audit* (2026-09-15
 
 ---
 
+## 2B. Owner decision — D-4 (ratified 2026-09-15)
+
+### D-4 — PnL authority for imported trades: **PROVIDER-REPORTED PROFIT IS AUTHORITATIVE, ON THE EXISTING CANONICAL FIELD**
+
+**STATUS: ACCEPTED.**
+
+OD-M4 established the *principle* (provider profit is authoritative). D-4 decides the
+*representation*: it stays on the field that already exists. **No second PnL column is created.**
+
+**Binding terms:**
+
+1. For MetaAPI-imported trades, **the provider-reported profit is authoritative**.
+2. The canonical persisted domain value remains the existing field **`net_pnl`**
+   (`trades.net_pnl`, `NUMERIC(20,2)`, migration 0001 — VERIFIED present).
+3. API serialization remains **`profitLoss`**. VERIFIED chain, unchanged by this decision:
+   `trades.net_pnl` → `TradeRecord.netPnl` → `profitLoss`
+   (`pgTradeStore.ts:101`, `tradeService.ts:652`).
+4. **MUST NOT** add a second persisted PnL column — specifically **not** `provider_profit`,
+   `calculated_profit`, or `broker_profit`. VERIFIED absent from all 12 migrations.
+5. **MUST NOT** persist a local-vs-provider PnL comparison at this stage.
+6. If a future implementation computes local PnL, it is **diagnostic / reconciliation only**.
+7. A local calculation **MUST NOT overwrite or replace** the provider-reported authoritative
+   value.
+8. For an imported trade, **the provider-reported profit populates the canonical `net_pnl`**.
+9. Any future reconciliation mechanism that requires **persisted** diagnostic values is a
+   **separate Owner Decision**.
+10. **Existing manual-trade PnL behaviour is unchanged.** `computePnl`
+    (`packages/domain/src/pnl.ts`) continues to govern manual trades exactly as today.
+
+### Rationale
+
+MetaAPI reports the provider-side financial result — profit, commission and swap — for a trade
+it executed. Modern's generic formula diverges from it on swaps, commissions, currency
+conversions, partial fills, broker-specific calculations and contract-size assumptions, so for
+an imported trade the provider value is the one that matches the user's account statement.
+
+Persisting a second PnL value **now** would create two competing durable representations with
+**no approved reconciliation model** — which value wins on read, which is exported, which is
+reported. That ambiguity is a correctness risk, and the cheapest time to avoid it is before the
+column exists. One canonical field also preserves API compatibility and requires no migration.
+
+### Consequences
+
+| Consequence | State |
+|---|---|
+| Migration required | **NONE** |
+| Schema change | **NONE** — `trades.net_pnl` already exists |
+| API contract | **UNCHANGED** — `profitLoss` |
+| Second PnL column | **NOT AUTHORIZED** |
+| Manual-trade PnL | **UNCHANGED** |
+| Immutable ledger / ownership / `TRADE_IMPORTED` actors | **UNCHANGED** |
+| **A-5** (ADR-002 PnL amendment) | Still **REQUIRED at implementation** — D-4 fixes the value, A-5 records it in ADR-002 in the same change as the trade-import code (AGENTS.md rule 11) |
+
+### Explicitly NOT decided here
+
+Provider→domain field mapping detail, whether commission/swap are stored separately for
+imported trades, any diagnostic-value persistence (item 9), and **D-3** (migration-origin
+semantics), which remains open.
+
+---
+
 ## 3. Rationale
 
 **OD-M1.** The audit verified from the legacy implementation that MetaAPI authenticates
@@ -344,7 +408,7 @@ This record does **NOT** decide, and nothing below may be inferred from it:
 | **D-1** | ~~Platform MetaAPI token storage mechanism~~ — **RATIFIED 2026-09-15 by ADR-014 (D-19)**: environment-supplied `METAAPI_PLATFORM_TOKEN` + `METAAPI_BASE_URL`, resolver-validated (`MA-001`…`MA-003`), fail-closed capability-absent. | ~~MetaAPI connect~~ | Satisfied by ADR-014 §2–§5. Implementation remains Phase 3 |
 | **D-2** | ~~Worker credential-consumption mechanism (A / B / C / D)~~ — **RATIFIED 2026-09-15: Boundary-Scoped Option B** (§2A). Provisioning is API-hosted and credential-consuming; synchronization is worker-hosted and credential-free, using `METAAPI_PLATFORM_TOKEN` + `metaapi_account_id`. | ~~Worker-side sync~~ | Satisfied: no broad `SELECT`, no plaintext in payloads, no ciphertext to the worker, ADR-016 isolation preserved. No broker, no migration, no `roles.sql` change |
 | **D-3** | `TRADE_IMPORTED` final actor set (and the home of migration-origin semantics) | Trade import | ADR-002 amendment ratified first |
-| **D-4** | Whether a diagnostic PnL value is retained, and where | Trade import | No silent replacement of provider value; no second column now |
+| **D-4** | ~~Whether a diagnostic PnL value is retained, and where~~ — **RATIFIED 2026-09-15: provider-reported profit is authoritative and populates the existing canonical `net_pnl`** (§2B). No second PnL column; no persisted local-vs-provider comparison; local calculation, if ever performed, is diagnostic only and never overwrites the provider value. | ~~Trade import~~ | Satisfied: one canonical persisted value, `profitLoss` API contract unchanged, manual-trade behaviour unchanged, **no migration**. Persisted diagnostic values remain a separate Owner Decision |
 | **D-5** | Durable storage for naive `brokerTime` evidence | Trade import | Evidence only; never parsed; no IANA inference |
 | **D-6** | Sync substrate: cursor (`last_synced_at`), operation reservation, fill ledger, `quarantined` column | Sync phases | Migrations, each separately justified |
 | **D-7** | Provisioning idempotency header (`transaction-id` vs `Idempotency-Key`) | MetaAPI connect | Resolve from provider docs/support; no live call with user credentials |
@@ -400,7 +464,7 @@ as that implementation.
 | **A-2** | `docs/adr/ADR-004-time-model.md` — §Open Questions item 3 | Close *"MetaApi timestamp semantics in current sync code"* with TZ-M1: offset-explicit `time` → deterministic UTC; naive `brokerTime` never interpreted; no IANA inference; `source_timezone` NULL with provenance for MetaAPI rows. **Manual-trade behaviour unchanged.** | TZ-M1, trade import | **REQUIRED at implementation** |
 | **A-3** | `docs/adr/ADR-014-metaapi-platform-token.md` | **DONE 2026-09-15 (D-19).** Governs the platform token as a distinct secret class: external supply, prohibitions (no `user_credentials`, no synthetic user, no derivation from `CREDENTIAL_MASTER_KEY`), fail-closed resolver, independent rotation, no mandated secret manager. **ADR-016 unchanged.** | OD-M1, MetaAPI connect | **SATISFIED** |
 | **A-4** | `docs/adr/ADR-007-job-semantics.md` | **NOT REQUIRED — condition resolved 2026-09-15.** D-2 selected Boundary-Scoped Option B, which alters no worker DB role and no least-privilege posture, so the stated "no amendment is needed" branch applies. **ADR-007 remains unchanged** unless an actual worker-role or job-semantics change is later introduced. | OD-M2, worker sync | **NOT REQUIRED** |
-| **A-5** | `docs/adr/ADR-002-trade-ledger.md` *(same change as A-1 or separate)* | Record that provider-reported profit is the authoritative net-PnL input for imported trades under `SYNC_WINS_FINANCIAL`, and the disposition of any diagnostic value (D-4). | OD-M4, trade import | **REQUIRED at implementation** |
+| **A-5** | `docs/adr/ADR-002-trade-ledger.md` | Record that provider-reported profit is the authoritative net-PnL input for imported trades under `SYNC_WINS_FINANCIAL`. **D-4 is now RATIFIED (§2B)**, so the disposition is settled: the provider value populates the existing canonical `net_pnl`, and **no second PnL column and no persisted diagnostic value are authorized**. A-5 records this in ADR-002 in the same change as the trade-import implementation. | OD-M4, D-4, trade import | **REQUIRED at implementation** |
 
 `db/roles.sql` is **not** an ADR but carries a standing obligation: its `user_credentials`
 block states that a future worker phase *"must grant exactly what it requires and justify
@@ -480,6 +544,12 @@ requires a **deployment decision** that is outside implementation authority. See
   `packages/contracts/src/trades.ts`.
 - **Owner authorization:** owner directive, 2026-09-15 (this session) — decisions quoted
   in §2 are the owner's, recorded verbatim in substance.
+- **D-4 ratification (2026-09-15), recorded at HEAD `0390ab5`:** provider PnL authority fixed to
+  the existing canonical `net_pnl` (§2B). Claims verified before recording: `trades.net_pnl`
+  present in migration 0001; `provider_profit`/`calculated_profit`/`broker_profit` absent from
+  all 12 migrations; serialization chain `net_pnl` → `netPnl` → `profitLoss` confirmed in
+  `pgTradeStore.ts:101` and `tradeService.ts:652`. **Governance only: no code, no schema, no
+  migration, no API change.**
 - **A-1 amendment (2026-09-15), recorded at HEAD `b31975d`:** ADR-002 amended to ratify
   `TRADE_IMPORTED → ["system", "sync"]` (dated Status amendment + *Amendment A-1* section +
   ownership-matrix rows), following the ADR-010 amendment precedent. Mismatch re-proven by
