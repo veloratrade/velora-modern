@@ -46,6 +46,7 @@ import {
   type CredentialRecord,
   type CredentialStore,
 } from "./credentialStore.js";
+import type { AuditStore } from "../auth/auditStore.js";
 
 /**
  * Domain error carrying the HTTP shape, mirroring AccountError so the route
@@ -89,6 +90,18 @@ const MAX_SECRET_LENGTH = 4096;
 
 export interface CredentialServiceDeps {
   readonly store: CredentialStore;
+  /**
+   * Append-only security audit trail (C-34 / B-2).
+   *
+   * REQUIRED, deliberately — the same rule AdminUserServiceDeps applies to its
+   * audit dependency. A construction site that omitted it would silently stop
+   * recording credential lifecycle events with no runtime signal; making it
+   * mandatory turns that into a COMPILE-TIME error instead.
+   *
+   * Append errors PROPAGATE: the audit write is part of the mutation, not
+   * best-effort telemetry.
+   */
+  readonly audit: AuditStore;
   /** Injectable clock; defaults to real time. Keeps tests deterministic. */
   readonly now?: () => Date;
 }
@@ -131,13 +144,39 @@ export class CredentialService {
       });
     }
 
+    const occurredAt = this.now();
     try {
-      return await this.deps.store.create({
-        userId: actor.id, // authenticated identity — never client-supplied
-        provider: provider as CredentialProvider,
-        secret,
-        now: this.now(),
-      });
+      // B-3: the store owns the transaction (pgUserStore.mutateUser
+      // convention). The audit row is appended with the SAME query function as
+      // the INSERT, so both commit together or both roll back. `tx` is left
+      // undefined: this service is the outermost caller, so the store opens the
+      // transaction itself.
+      return await this.deps.store.create(
+        {
+          userId: actor.id, // authenticated identity — never client-supplied
+          provider: provider as CredentialProvider,
+          secret,
+          now: occurredAt,
+        },
+        undefined,
+        async (tx, record) => {
+          await this.deps.audit.append(
+            {
+              action: "CREDENTIAL_CREATED",
+              actorUserId: actor.id,
+              targetUserId: actor.id, // self-service: actor IS the owner
+              beforeState: null,
+              afterState: null,
+              outcome: "success",
+              credentialId: record.id,
+              provider: record.provider,
+              requestId: actor.requestId ?? null,
+              occurredAt,
+            },
+            tx,
+          );
+        },
+      );
     } catch (err) {
       if (err instanceof CredentialAlreadyExistsError) {
         // 409 mirrors the store's (user, provider) uniqueness rule: replacing a
@@ -170,7 +209,29 @@ export class CredentialService {
    * holds a credential.
    */
   async deleteCredential(actor: CredentialActor, id: string): Promise<{ deleted: true }> {
-    const removed = await this.deps.store.delete(id, actor.id);
+    const occurredAt = this.now();
+    // B-3: DELETE ... RETURNING hands the callback the row's metadata from the
+    // very statement that removed it, so `provider` is recorded accurately for
+    // a hard-deleted row with no read-then-delete race. A credential that is
+    // absent OR not owned removes nothing, so no audit row is written and the
+    // non-disclosing 404 below is unchanged.
+    const removed = await this.deps.store.delete(id, actor.id, undefined, async (tx, record) => {
+      await this.deps.audit.append(
+        {
+          action: "CREDENTIAL_DELETED",
+          actorUserId: actor.id,
+          targetUserId: actor.id,
+          beforeState: null,
+          afterState: null,
+          outcome: "success",
+          credentialId: record.id,
+          provider: record.provider,
+          requestId: actor.requestId ?? null,
+          occurredAt,
+        },
+        tx,
+      );
+    });
     if (!removed) throw new CredentialError(404, "NOT_FOUND", "Credential not found.");
     return { deleted: true };
   }

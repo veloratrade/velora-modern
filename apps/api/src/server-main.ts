@@ -187,8 +187,9 @@ async function main(): Promise<void> {
     // CREDENTIAL_MASTER_KEY the capability is simply ABSENT — it is never
     // constructed with a generated key and never degrades to plaintext, so a
     // misconfigured deployment cannot silently store unencrypted secrets.
-    // No HTTP route is wired in this phase: this is storage infrastructure for
-    // the future integration chain, reachable only from server-side code.
+    // B-1 exposes authenticated self-service routes over this store; B-3 makes
+    // create/delete emit audit events in the same transaction. There is still
+    // no reveal route, so no secret-disclosure path exists over HTTP.
     const credentialKey = resolveCredentialKey(process.env);
     if (credentialKey.key !== null) {
       credentialStore =
@@ -198,7 +199,13 @@ async function main(): Promise<void> {
       // B-1: the authenticated access layer. Only constructed when a valid key
       // produced a store, so a misconfigured deployment leaves the routes
       // fail-closed (503) instead of exposing an unusable capability.
-      capabilities.credentials = new CredentialService({ store: credentialStore });
+      capabilities.credentials = new CredentialService({
+        store: credentialStore,
+        // B-3: the same append-only trail used by every other privileged
+        // mutation. Credential create/delete and their audit rows commit in
+        // ONE transaction.
+        audit: auditStore,
+      });
       // Key VERSION only — never the key, never a credential.
       console.log(
         JSON.stringify({

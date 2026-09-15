@@ -10,7 +10,8 @@
 // text), so a driver error message cannot contain the plaintext. Decryption
 // failures are re-thrown as the uniform CredentialDecryptionError.
 import type { Pool } from "pg";
-import { poolQuery, iso, isUniqueViolation, type QueryFn } from "../persistence/pg.js";
+import { poolQuery, iso, isUniqueViolation, withTransaction, type QueryFn } from "../persistence/pg.js";
+import type { CredentialAuditWrite } from "./credentialStore.js";
 import {
   type CredentialProvider,
   type CredentialRecord,
@@ -64,8 +65,27 @@ export class PgCredentialStore implements CredentialStore {
     this.q = poolQuery(pool);
   }
 
-  async create(input: CredentialWrite, tx?: QueryFn): Promise<CredentialRecord> {
-    const run = tx ?? this.q;
+  async create(
+    input: CredentialWrite,
+    tx?: QueryFn,
+    audit?: CredentialAuditWrite,
+  ): Promise<CredentialRecord> {
+    // B-3 atomicity: with an audit callback and no caller-supplied transaction,
+    // this store opens ONE transaction covering the INSERT and the audit row.
+    // If the audit write throws, withTransaction issues ROLLBACK and no
+    // credential exists without its audit record. An externally supplied `tx`
+    // is reused as-is, so a larger caller transaction still governs atomicity.
+    if (audit !== undefined && tx === undefined) {
+      return withTransaction(this.pool, async (q) => this.createWith(q, input, audit));
+    }
+    return this.createWith(tx ?? this.q, input, audit);
+  }
+
+  private async createWith(
+    run: QueryFn,
+    input: CredentialWrite,
+    audit?: CredentialAuditWrite,
+  ): Promise<CredentialRecord> {
     // Encrypt BEFORE touching the database: if this throws, nothing is written.
     const env = encryptCredential(input.secret, this.key);
     try {
@@ -89,7 +109,11 @@ export class PgCredentialStore implements CredentialStore {
       );
       const row = rows[0];
       if (row === undefined) throw new Error("credential create: INSERT returned no row");
-      return mapMetadata(row as unknown as CredentialRow);
+      const record = mapMetadata(row as unknown as CredentialRow);
+      // Inside the same transaction: an audit failure rolls the INSERT back.
+      // Errors propagate deliberately — never caught, never ignored.
+      if (audit !== undefined) await audit(run, record);
+      return record;
     } catch (err: unknown) {
       // (user, provider) uniqueness -> an explicit domain error. The original
       // driver error is not propagated, so nothing it carries can leak.
@@ -138,12 +162,36 @@ export class PgCredentialStore implements CredentialStore {
     );
   }
 
-  async delete(id: string, userId: string, tx?: QueryFn): Promise<boolean> {
-    const run = tx ?? this.q;
+  async delete(
+    id: string,
+    userId: string,
+    tx?: QueryFn,
+    audit?: CredentialAuditWrite,
+  ): Promise<boolean> {
+    if (audit !== undefined && tx === undefined) {
+      return withTransaction(this.pool, async (q) => this.deleteWith(q, id, userId, audit));
+    }
+    return this.deleteWith(tx ?? this.q, id, userId, audit);
+  }
+
+  private async deleteWith(
+    run: QueryFn,
+    id: string,
+    userId: string,
+    audit?: CredentialAuditWrite,
+  ): Promise<boolean> {
+    // RETURNING the full metadata (not just id) so the audit row can record
+    // `provider` for a row that no longer exists. Reading it in a separate
+    // statement before the DELETE would be a race; RETURNING is atomic with
+    // the deletion itself.
     const rows = await run(
-      "DELETE FROM user_credentials WHERE id = $1 AND user_id = $2 RETURNING id",
+      `DELETE FROM user_credentials WHERE id = $1 AND user_id = $2
+       RETURNING ${METADATA_COLUMNS}`,
       [id, userId],
     );
-    return rows.length > 0;
+    const row = rows[0];
+    if (row === undefined) return false; // absent or not owned -> no audit row
+    if (audit !== undefined) await audit(run, mapMetadata(row as unknown as CredentialRow));
+    return true;
   }
 }

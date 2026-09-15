@@ -11,6 +11,7 @@ import { randomBytes } from "node:crypto";
 import { MasterKey, MASTER_KEY_BYTES } from "./credentialCrypto.js";
 import { MemoryCredentialStore } from "./memoryCredentialStore.js";
 import { CredentialService, CredentialError } from "./credentialService.js";
+import { MemoryAuditStore } from "../auth/memoryAuditStore.js";
 
 const NOW = new Date("2026-05-02T10:30:00.000Z");
 const SECRET = "metaapi-token-b1-4d9e2a77-DO-NOT-LEAK";
@@ -20,9 +21,14 @@ const USER_A = "101";
 const USER_B = "202";
 const SYSTEM_OWNER = "1";
 
-function service(): { svc: CredentialService; store: MemoryCredentialStore } {
+function service(): {
+  svc: CredentialService;
+  store: MemoryCredentialStore;
+  audit: MemoryAuditStore;
+} {
   const store = new MemoryCredentialStore(KEY);
-  return { svc: new CredentialService({ store, now: () => NOW }), store };
+  const audit = new MemoryAuditStore();
+  return { svc: new CredentialService({ store, audit, now: () => NOW }), store, audit };
 }
 
 /** Deep scan of any serialized value for the plaintext secret. */
@@ -244,4 +250,149 @@ test("B-1/12: credentials created through the service are encrypted at rest", as
   assert.equal(await store.reveal(rec.id, USER_A), SECRET);
   // And the raw stored state holds no plaintext.
   assert.equal(containsSecret(await store.list(USER_A)), false);
+});
+
+// --------------------------------------------------------------------------
+// B-3. Credential lifecycle audit emission + atomicity.
+// --------------------------------------------------------------------------
+
+/** A store wrapper that lets a test fail the audit write deterministically. */
+class FailingAudit extends MemoryAuditStore {
+  constructor(private readonly boom: () => boolean) {
+    super();
+  }
+  override async append(
+    ...args: Parameters<MemoryAuditStore["append"]>
+  ): ReturnType<MemoryAuditStore["append"]> {
+    if (this.boom()) throw new Error("audit backend unavailable");
+    return super.append(...args);
+  }
+}
+
+test("B-3/1: a successful create emits exactly ONE CREDENTIAL_CREATED event", async () => {
+  const { svc, audit } = service();
+  const rec = await svc.createCredential(
+    { id: USER_A, requestId: "req-create-1" },
+    { provider: "METAAPI", secret: SECRET },
+  );
+
+  const rows = await audit.list();
+  assert.equal(rows.length, 1, "exactly one audit row — not zero, not two");
+  const row = rows[0]!;
+  assert.equal(row.action, "CREDENTIAL_CREATED");
+  assert.equal(row.outcome, "success");
+  assert.equal(row.actorUserId, USER_A);
+  assert.equal(row.targetUserId, USER_A);
+  assert.equal(row.credentialId, rec.id);
+  assert.equal(row.provider, "METAAPI");
+  assert.equal(row.requestId, "req-create-1");
+  // Lifecycle events carry no before/after state.
+  assert.equal(row.beforeState, null);
+  assert.equal(row.afterState, null);
+});
+
+test("B-3/2: a successful delete emits exactly ONE CREDENTIAL_DELETED event", async () => {
+  const { svc, audit } = service();
+  const rec = await svc.createCredential({ id: USER_A }, { provider: "METAAPI", secret: SECRET });
+  await svc.deleteCredential({ id: USER_A, requestId: "req-del-1" }, rec.id);
+
+  const rows = await audit.list();
+  assert.equal(rows.length, 2, "one create + one delete");
+  const del = rows.find((r) => r.action === "CREDENTIAL_DELETED")!;
+  assert.equal(del.outcome, "success");
+  assert.equal(del.actorUserId, USER_A);
+  assert.equal(del.targetUserId, USER_A);
+  assert.equal(del.credentialId, rec.id);
+  // Provider captured from the deleted row itself (hard delete).
+  assert.equal(del.provider, "METAAPI");
+  assert.equal(del.requestId, "req-del-1");
+});
+
+test("B-3/3: audit failure ROLLS BACK create — no credential is left behind", async () => {
+  const store = new MemoryCredentialStore(KEY);
+  const audit = new FailingAudit(() => true);
+  const svc = new CredentialService({ store, audit, now: () => NOW });
+
+  await assert.rejects(
+    () => svc.createCredential({ id: USER_A }, { provider: "METAAPI", secret: SECRET }),
+    /audit backend unavailable/,
+    "the audit failure must propagate, never be swallowed",
+  );
+  // The whole operation failed: nothing was stored.
+  assert.equal((await store.list(USER_A)).length, 0, "credential must not exist");
+  assert.equal((await audit.list()).length, 0, "no audit row either");
+});
+
+test("B-3/4: audit failure ROLLS BACK delete — the credential still exists", async () => {
+  const store = new MemoryCredentialStore(KEY);
+  let fail = false;
+  const audit = new FailingAudit(() => fail);
+  const svc = new CredentialService({ store, audit, now: () => NOW });
+
+  const rec = await svc.createCredential({ id: USER_A }, { provider: "METAAPI", secret: SECRET });
+  fail = true; // only the DELETE audit fails
+
+  await assert.rejects(
+    () => svc.deleteCredential({ id: USER_A }, rec.id),
+    /audit backend unavailable/,
+  );
+  // The credential survived the failed delete.
+  const remaining = await store.list(USER_A);
+  assert.equal(remaining.length, 1, "credential must still exist after rollback");
+  assert.equal(remaining[0]!.id, rec.id);
+});
+
+test("B-3/5: a rejected duplicate create leaves exactly one audit row", async () => {
+  const { svc, audit } = service();
+  await svc.createCredential({ id: USER_A }, { provider: "METAAPI", secret: SECRET });
+  await svc
+    .createCredential({ id: USER_A }, { provider: "METAAPI", secret: "replacement" })
+    .then(() => assert.fail("duplicate must be rejected"), () => undefined);
+
+  const rows = await audit.list();
+  assert.equal(rows.length, 1, "the rejected duplicate must not add an audit row");
+});
+
+test("B-3/6: validation failures and cross-user denials write NO audit row", async () => {
+  const { svc, audit } = service();
+  // Invalid input never reaches the store.
+  await svc.createCredential({ id: USER_A }, { provider: "NOPE", secret: SECRET }).catch(() => undefined);
+  assert.equal((await audit.list()).length, 0);
+
+  // A cross-user delete removes nothing, so it records nothing — and still
+  // returns the non-disclosing 404.
+  const bCred = await svc.createCredential({ id: USER_B }, { provider: "METAAPI", secret: SECRET });
+  const before = (await audit.list()).length;
+  const err = await svc
+    .deleteCredential({ id: USER_A }, bCred.id)
+    .then(() => null, (e: unknown) => e as CredentialError);
+  assert.equal(err?.status, 404);
+  assert.equal((await audit.list()).length, before, "a denied delete must add no audit row");
+  // And B's credential is intact.
+  assert.equal((await svc.listCredentials({ id: USER_B })).length, 1);
+});
+
+test("B-3/7: System Owner cannot delete another user's credential, and nothing is audited", async () => {
+  const { svc, audit } = service();
+  const bCred = await svc.createCredential({ id: USER_B }, { provider: "METAAPI", secret: SECRET });
+  const before = (await audit.list()).length;
+
+  const err = await svc
+    .deleteCredential({ id: SYSTEM_OWNER }, bCred.id)
+    .then(() => null, (e: unknown) => e as CredentialError);
+  assert.equal(err?.status, 404);
+  assert.equal((await audit.list()).length, before);
+  assert.equal((await svc.listCredentials({ id: USER_B })).length, 1);
+});
+
+test("B-3/8: no secret material reaches the audit trail", async () => {
+  const { svc, audit } = service();
+  const rec = await svc.createCredential({ id: USER_A }, { provider: "METAAPI", secret: SECRET });
+  await svc.deleteCredential({ id: USER_A }, rec.id);
+
+  const serialized = JSON.stringify(await audit.list());
+  assert.equal(serialized.includes(SECRET), false, "plaintext secret must never be audited");
+  for (const field of ["ciphertext", "authTag", "iv", "masterKey", "envelope"]) {
+    assert.equal(serialized.includes(field), false, `audit must not carry ${field}`);
+  }
 });

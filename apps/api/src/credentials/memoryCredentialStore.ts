@@ -6,6 +6,7 @@
 // here "because it is only a test adapter" would make the ciphertext-at-rest
 // tests meaningless, so the same encryption path is used.
 import type { QueryFn } from "../persistence/pg.js";
+import type { CredentialAuditWrite } from "./credentialStore.js";
 import {
   type CredentialRecord,
   type CredentialStore,
@@ -30,7 +31,11 @@ export class MemoryCredentialStore implements CredentialStore {
 
   constructor(private readonly key: MasterKey) {}
 
-  async create(input: CredentialWrite, _tx?: QueryFn): Promise<CredentialRecord> {
+  async create(
+    input: CredentialWrite,
+    _tx?: QueryFn,
+    audit?: CredentialAuditWrite,
+  ): Promise<CredentialRecord> {
     for (const r of this.rows.values()) {
       if (r.record.userId === input.userId && r.record.provider === input.provider) {
         throw new CredentialAlreadyExistsError();
@@ -46,6 +51,10 @@ export class MemoryCredentialStore implements CredentialStore {
       createdAt: input.now.toISOString(),
       updatedAt: input.now.toISOString(),
     };
+    // C-34 atomicity, in-memory equivalent: the audit write runs BEFORE the
+    // map is mutated, so if it throws the store is left untouched — the same
+    // observable outcome as the PG adapter's ROLLBACK.
+    if (audit !== undefined) await audit(undefined, record);
     this.rows.set(record.id, { record, envelope });
     return record;
   }
@@ -70,9 +79,19 @@ export class MemoryCredentialStore implements CredentialStore {
     return decryptCredential(row.envelope, this.key);
   }
 
-  async delete(id: string, userId: string, _tx?: QueryFn): Promise<boolean> {
+  async delete(
+    id: string,
+    userId: string,
+    _tx?: QueryFn,
+    audit?: CredentialAuditWrite,
+  ): Promise<boolean> {
     const row = this.rows.get(id);
+    // Ownership mismatch is indistinguishable from "absent", and neither
+    // produces an audit record: nothing happened.
     if (row === undefined || row.record.userId !== userId) return false;
+    // Audit first: a throw here leaves the credential in place, mirroring
+    // ROLLBACK.
+    if (audit !== undefined) await audit(undefined, row.record);
     this.rows.delete(id);
     return true;
   }

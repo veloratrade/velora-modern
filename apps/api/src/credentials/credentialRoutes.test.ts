@@ -17,6 +17,7 @@ import { JwtService } from "../auth/jwt.js";
 import { MasterKey, MASTER_KEY_BYTES } from "./credentialCrypto.js";
 import { MemoryCredentialStore } from "./memoryCredentialStore.js";
 import { CredentialService } from "./credentialService.js";
+import { MemoryAuditStore } from "../auth/memoryAuditStore.js";
 
 const JWT_SECRET = "credential-routes-test-secret-0123456789abcdef"; // test-only
 const SECRET = "metaapi-token-routes-7c1f22ab-DO-NOT-LEAK";
@@ -51,7 +52,10 @@ async function withServer(
   const credentials =
     options.credentials === false
       ? undefined
-      : new CredentialService({ store: new MemoryCredentialStore(key) });
+      : new CredentialService({
+          store: new MemoryCredentialStore(key),
+          audit: new MemoryAuditStore(),
+        });
 
   const app = createApp({
     allowedOrigins: ["https://veloratrade.ir"],

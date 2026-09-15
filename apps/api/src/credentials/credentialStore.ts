@@ -57,6 +57,28 @@ export class CredentialAlreadyExistsError extends Error {
   }
 }
 
+/**
+ * A deferred audit write executed INSIDE the store's own transaction,
+ * immediately after the credential mutation and before commit (the C-34
+ * pgUserStore/pgTradeStore convention).
+ *
+ * It receives the affected credential's METADATA because the audit row needs
+ * `credential_id` and `provider`. That matters most for DELETE: the row is hard
+ * deleted, so its provider must be captured from the same statement that
+ * removed it — reading it beforehand on another connection would be a race
+ * (the row could change or vanish between the read and the delete).
+ *
+ * `record` is CredentialRecord, which by construction carries no secret,
+ * ciphertext or crypto parameters, so an audit callback CANNOT be handed secret
+ * material even by mistake.
+ *
+ * If this throws, the store MUST roll the mutation back.
+ */
+export type CredentialAuditWrite = (
+  tx: QueryFn | undefined,
+  record: CredentialRecord,
+) => Promise<void>;
+
 export interface CredentialStore {
   /**
    * Store a new encrypted credential. The store encrypts; the caller never
@@ -69,7 +91,11 @@ export interface CredentialStore {
    * pgTradeStore convention) so credential creation can participate in a
    * larger business mutation without a second transaction framework.
    */
-  create(input: CredentialWrite, tx?: QueryFn): Promise<CredentialRecord>;
+  create(
+    input: CredentialWrite,
+    tx?: QueryFn,
+    audit?: CredentialAuditWrite,
+  ): Promise<CredentialRecord>;
 
   /** Metadata for every credential owned by this user. Never secrets. */
   list(userId: string): Promise<readonly CredentialRecord[]>;
@@ -94,5 +120,10 @@ export interface CredentialStore {
    * row was removed. A hard delete is deliberate: keeping recoverable
    * ciphertext after a user revokes a secret would be the less safe choice.
    */
-  delete(id: string, userId: string, tx?: QueryFn): Promise<boolean>;
+  delete(
+    id: string,
+    userId: string,
+    tx?: QueryFn,
+    audit?: CredentialAuditWrite,
+  ): Promise<boolean>;
 }
