@@ -19,6 +19,17 @@ export interface QueuePort {
   complete(id: string): Promise<void>;
   fail(id: string): Promise<void>; // records attempt; schedules per policy or DLQs
   deadLetter(id: string, reason: string): Promise<void>;
+  /**
+   * Register a recurring producer: `jobClass` is enqueued on the `cron`
+   * cadence by the queue implementation itself.
+   *
+   * Part of the port (not reached around) so the runner and the scheduler stay
+   * implementation-agnostic — the in-memory queue models it without a clock,
+   * and swapping pg-boss out later cannot strand a direct library call.
+   * Implementations MUST be idempotent: registering the same name twice
+   * updates the cadence rather than creating a second schedule.
+   */
+  schedule(jobClass: string, cron: string): Promise<void>;
   size(): Promise<number>;
   dlqSize(): Promise<number>;
   dlqEntries(): Promise<Array<{ id: string; reason: string }>>;

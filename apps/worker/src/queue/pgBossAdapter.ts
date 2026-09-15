@@ -162,6 +162,19 @@ export async function createPgBossQueue(
       await boss.fail(name, id, { dlq: true, reason: reason.slice(0, 128) });
     },
 
+    /**
+     * pg-boss NATIVE cron (v10 `schedule`). An upsert into `pgboss.schedule`
+     * (`ON CONFLICT (name) DO UPDATE`) — pure DML, so the least-privilege
+     * worker role can perform it with no CREATE privilege.
+     *
+     * The timekeeper drives this through its internal `__pgboss__send-it`
+     * queue using `singletonKey: name, singletonSeconds: 60`, so a duplicate
+     * tick inside the same minute is debounced by the library itself.
+     */
+    async schedule(jobClass: string, cron: string): Promise<void> {
+      await boss.schedule(jobClass, cron);
+    },
+
     async size() {
       let total = 0;
       for (const jobClass of known) total += await boss.getQueueSize(jobClass);

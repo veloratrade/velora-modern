@@ -74,7 +74,18 @@ export function isLedgerEvent(e: unknown): e is LedgerEvent {
 
 /** Ownership matrix (ADR-002): which actor may emit which event type. */
 const ALLOWED_ACTORS: Record<LedgerEventType, readonly MutationActor[]> = {
-  TRADE_IMPORTED: ["system"],
+  // ADR-002 Amendment A-1 + D-3 (ratified 2026-09-15), APPLIED with the
+  // MetaAPI trade-import implementation per AGENTS.md rule 11.
+  //   `system` — migration/system-origin imports (retained, unchanged).
+  //   `sync`   — the controlled background worker performing provider
+  //              synchronization. This is a LEDGER ATTRIBUTION identity, not
+  //              an authorization grant: it confers no ownership authority and
+  //              is asserted only by trusted server-side code that has already
+  //              established the account context. It is NEVER accepted from a
+  //              request body, header or job payload.
+  // No other actor set is broadened; no `migration`/`importer`/`legacy`/
+  // `backfill` actor exists.
+  TRADE_IMPORTED: ["system", "sync"],
   TRADE_CREATED: ["user", "sync", "webhook"],
   FINANCIAL_CORRECTED: ["sync", "webhook", "admin"], // SYNC_WINS_FINANCIAL — user never rewrites financials
   JOURNALING_EDITED: ["user", "admin"], // USER_WINS_JOURNALING — sync never rewrites journaling

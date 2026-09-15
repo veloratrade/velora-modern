@@ -80,6 +80,16 @@ export class MemoryQueue implements QueuePort {
     e.dlqReason = reason;
   }
 
+  /**
+   * Recorded, not executed. The in-memory queue has no clock by design — its
+   * purpose is deterministic semantics tests, and a real timer would make them
+   * time-dependent. Tests drive `runSyncTick` directly and assert on this map.
+   */
+  readonly schedules = new Map<string, string>();
+  async schedule(jobClass: string, cron: string): Promise<void> {
+    this.schedules.set(jobClass, cron);
+  }
+
   async size(): Promise<number> {
     return this.entries.filter((e) => e.state === "queued" || e.state === "active").length;
   }

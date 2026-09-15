@@ -66,6 +66,58 @@ corrupts trade chronology, analytics, and reporting.
 Audit-log timestamps must be monotonic and unambiguous (forensics). JWT `exp`
 checks (VERIFIED in PHP) already use server clock — modern keeps UTC everywhere.
 
+### Amendment A-2 — naive `brokerTime` storage (2026-09-16, implemented)
+
+**Status: IMPLEMENTED** in migration `0013_metaapi_import_path.sql` together
+with the MetaAPI import path (AGENTS.md rule 11 — decision and code land in the
+same change).
+
+**Decision.** A provider deal carries two distinct timestamp fields, and they
+are stored in two distinct columns on `sync_fills`:
+
+| Provider field | Column | Meaning |
+| --- | --- | --- |
+| `time` (offset-explicit, e.g. `…Z` / `±HH:MM`) | `raw_time_text` | verbatim copy of the ABSOLUTE instant text; may resolve `occurred_at_utc` |
+| `brokerTime` (naive wall clock) | `broker_time_text` | verbatim EVIDENCE only; never an instant |
+
+**`broker_time_text` is never parsed.** It is stored exactly as received and is
+never converted, never used to derive `occurred_at_utc`, and never allowed to
+set `time_status = 'resolved_utc'`. No timezone is assigned to it and no IANA
+zone is inferred — not from the broker country, the broker/server location, the
+account location, the host machine's timezone, a default application timezone,
+or any other heuristic. That list is exhaustive and binding.
+
+**Why a second column rather than overloading `raw_time_text`.** The provider
+returns both fields on the same deal, so one column cannot hold both without
+losing one of them; and `raw_time_text` already has a defined D-6 meaning (the
+offset-explicit text). Overloading it would silently change the meaning of
+existing rows. `raw_time_text` is therefore unchanged and un-renamed.
+
+**Unresolved instants are excluded from time-ordered analytics.** When `time`
+carries no offset, `occurred_at_utc` stays NULL, `time_status` is
+`'unresolved'`, and the fill is persisted with `processing_state='skipped'` and
+`skip_reason='UNRESOLVED_TIME'`. It never becomes a trade, so it cannot enter
+P/L or time-series analytics — but the raw evidence is preserved, so the
+provider's actual response remains auditable and can be reprocessed if the
+provider later supplies an offset.
+
+**Deliberately no CHECK constraint references `broker_time_text`.** The
+existing `sync_fills_time_consistency` CHECK ties `time_status` to
+`occurred_at_utc` only. Extending it to `broker_time_text` would couple
+EVIDENCE to RESOLUTION and imply the naive value carries instant information —
+exactly the inference this amendment forbids.
+
+**Scope.** This amendment adds storage and semantics for a previously discarded
+provider field. It does not alter the UTC-everywhere rule, the
+`timestamptz` standard, or any other part of ADR-004. The Open Question below
+about legacy naive columns is **unaffected and still open** — it concerns
+historical PHP data, not MetaAPI ingestion.
+
+**Evidence.** `db/tests/metaapiSync.pg.test.ts` (offset-explicit resolves;
+naive yields NULL UTC + `unresolved` + preserved `broker_time_text`; no trade
+created) and `db/tests/syncSubstrate.pg.test.ts` (both columns exist and hold
+different values on one row), executed against real PostgreSQL 17.10.
+
 ## Migration Impact
 
 Direct: every naive column interprets via the sampling result; documented in

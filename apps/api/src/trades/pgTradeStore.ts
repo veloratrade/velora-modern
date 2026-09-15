@@ -67,6 +67,7 @@ interface TradeRow {
   raw_open_text: string | null;
   raw_close_text: string | null;
   source: string;
+  external_deal_id: string | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -117,6 +118,7 @@ function mapTrade(r: TradeRow): TradeRecord {
     rawOpenText: r.raw_open_text,
     rawCloseText: r.raw_close_text,
     source: r.source as TradeRecord["source"],
+    externalDealId: r.external_deal_id,
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
   };
@@ -158,8 +160,8 @@ export class PgTradeStore implements TradeStore {
            entry_price, exit_price, volume, contract_size, commission, swap, net_pnl, r_multiple,
            stop_loss, take_profit, strategy, emotion, notes, occurred_at,
            occurred_open_at_utc, occurred_close_at_utc, time_status, source_timezone,
-           source_timezone_source, source_calendar, source)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
+           source_timezone_source, source_calendar, source, external_deal_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
          RETURNING *`,
         [
           record.userId,
@@ -188,6 +190,7 @@ export class PgTradeStore implements TradeStore {
           record.sourceTimezoneSource,
           record.sourceCalendar,
           record.source,
+          record.externalDealId,
         ],
       );
       const t = rows[0];

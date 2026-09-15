@@ -8,6 +8,12 @@ import type { LedgerEventType, MutationActor } from "@velora/contracts";
 export type TradeDirection = "buy" | "sell";
 export type TradeExitType = "tp" | "sl" | "manual" | "partial";
 export type TradeTimeStatus = "resolved" | "unresolved";
+/**
+ * Row provenance. Mirrors the 0005 `trades.source` CHECK exactly — the DB is
+ * the source of truth for the vocabulary, so no value can be added here
+ * without a migration widening that constraint.
+ */
+export type TradeSource = "manual" | "metaapi" | "import";
 
 /** Read-model projection of the ledger (0001 `trades` row + 0005 API columns). */
 export interface TradeRecord {
@@ -43,7 +49,22 @@ export interface TradeRecord {
   readonly sourceCalendar: string;
   readonly rawOpenText: string | null;
   readonly rawCloseText: string | null;
-  readonly source: "manual"; // sync/import sources are Phase H
+  /**
+   * Provenance of the row (0005 CHECK: 'manual' | 'metaapi' | 'import').
+   *
+   * B8 (owner-authorized with the MetaAPI import implementation): `metaapi`
+   * joins `manual`. Manual-trade behaviour is UNCHANGED — the manual path
+   * still writes `source: "manual"` and nothing about it is redesigned.
+   */
+  readonly source: TradeSource;
+  /**
+   * Provider deal identity for imported trades; null for manual trades.
+   *
+   * This is the idempotency anchor: `trades_extdeal_unique (account_id,
+   * external_deal_id)` (0001) makes a replayed provider deal converge instead
+   * of creating a second trade. Never client-supplied.
+   */
+  readonly externalDealId: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
 }

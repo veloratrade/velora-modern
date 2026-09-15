@@ -877,6 +877,36 @@ MetaAPI client · provider routing · connect/provisioning route · account disc
 historical or incremental sync · webhooks · credential reveal in any form ·
 `CREDENTIAL_REVEALED`/`CREDENTIAL_USED` audit events · any migration · any privilege change.
 
+### 9.1 Owner authorization — Phase 2 implementation (2026-09-16)
+
+The owner **explicitly authorized implementation** of the historical-sync path,
+superseding the "implementation remains blocked" list above **for the three
+items named here and nothing else**:
+
+| # | Decision | Effect |
+| --- | --- | --- |
+| 1 | **Scheduled producer is the production path** | Sync is triggered by a background schedule. **No user-facing manual-sync HTTP route** was added, and no endpoint was invented. A long MetaAPI call never runs inside an HTTP request. |
+| 2 | **Dedicated `trading_accounts.metaapi_account_id`** | A new nullable column. `external_account_id` is **not** reused or overloaded and keeps its exact prior semantics. *This reverses the earlier audit conclusion that `external_account_id` was the mapping.* |
+| 3 | **B8 write-model extension authorized** | `source='metaapi'`, `externalDealId` on the import path, provider P/L as authoritative `net_pnl`, `TRADE_IMPORTED` with actor `sync` — preserving ownership, idempotency, CAS, tombstone and ledger invariants. |
+
+**Implemented under this authorization:** migration `0013`, the MetaAPI
+history-deals client, deal normalizer, `sync_fills` → `trades` import path, the
+pg-boss-scheduled producer, the `velora_worker` pg-boss grant model, and the
+rule-11 amendments **A-2** (ADR-004) and **A-5** (ADR-002).
+
+**Still NOT authorized** (unchanged): incremental/webhook sync, the connect /
+provisioning route, account discovery, credential reveal in any form,
+`CREDENTIAL_REVEALED` / `CREDENTIAL_USED` audit events, and **deployment of a
+worker service (B10-a)**.
+
+**Scheduling mechanism — no new architecture was invented.** ADR-007 already
+adopted pg-boss, and pg-boss 10.4.2 **ships a native cron scheduler**
+(`boss.schedule(name, cron, data)`, persisted in `pgboss.schedule`, driven by
+its internal `__pgboss__send-it` queue with `singletonSeconds: 60`). The
+producer uses that. No second service, no host cron, and **no new npm
+dependency** were introduced. `cron-parser` is already vendored as a pg-boss
+dependency.
+
 ---
 
 ## 10. Remaining blockers

@@ -91,14 +91,16 @@ export class HandlerRegistry {
 /**
  * Build the worker's registry.
  *
- * INTENTIONALLY EMPTY. No production job class is authorized yet: the first
- * legitimate producer is MetaAPI sync, whose prerequisites (A-1, D-3…D-7) are
- * still open. Registering a placeholder job class here — or a fake enqueue
- * caller — would make B10 *look* closed while proving nothing, which the brief
- * explicitly forbids.
+ * STILL EMPTY BY DEFAULT, deliberately. The registry is a pure structure with
+ * no knowledge of any concrete job class, so constructing one never implies a
+ * dependency (a database pool, a platform token) that the caller may not have.
+ * The composition root — `apps/worker/src/index.ts` — is the single place that
+ * decides which classes this process serves, and it registers MetaAPI sync
+ * there once its dependencies resolve.
  *
- * When MetaAPI sync is authorized, it registers here:
- *   registry.register<MetaApiSyncPayload>("metaapi.sync-account", handler);
+ * Keeping the default empty also preserves the fail-loud contract: a process
+ * that reaches the runner with nothing registered still exits non-zero rather
+ * than idling while looking healthy.
  */
 export function createHandlerRegistry(): HandlerRegistry {
   return new HandlerRegistry();

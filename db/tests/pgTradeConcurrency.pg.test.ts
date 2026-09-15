@@ -615,7 +615,7 @@ test("PG D4 I/J: duplicate event_uid → honest constraint failure with FULL rol
         rMultiple: "1.00000000", stopLoss: null, takeProfit: null, strategy: null, emotion: null,
         notes: "dup probe", openAtUtc: T0.toISOString(), closeAtUtc: T0.toISOString(),
         timeStatus: "resolved", sourceTimezone: "UTC", sourceTimezoneSource: "user_config",
-        sourceCalendar: "proleptic-gregorian", rawOpenText: null, rawCloseText: null, source: "manual",
+        sourceCalendar: "proleptic-gregorian", rawOpenText: null, rawCloseText: null, source: "manual", externalDealId: null,
       },
       { eventUid: "d4-fixed-uid-001", tradeId: "", type: "TRADE_CREATED", actor: "user", expectedVersion: 0, payload: { probe: "d4" }, at: T0.toISOString() },
     );
@@ -632,7 +632,7 @@ test("PG D4 I/J: duplicate event_uid → honest constraint failure with FULL rol
           rMultiple: null, stopLoss: null, takeProfit: null, strategy: null, emotion: null,
           notes: "dup probe 2", openAtUtc: T0.toISOString(), closeAtUtc: T0.toISOString(),
           timeStatus: "resolved", sourceTimezone: "UTC", sourceTimezoneSource: "user_config",
-          sourceCalendar: "proleptic-gregorian", rawOpenText: null, rawCloseText: null, source: "manual",
+          sourceCalendar: "proleptic-gregorian", rawOpenText: null, rawCloseText: null, source: "manual", externalDealId: null,
         },
         { eventUid: "d4-fixed-uid-001", tradeId: "", type: "TRADE_CREATED", actor: "user", expectedVersion: 0, payload: { probe: "d4" }, at: T0.toISOString() },
       );

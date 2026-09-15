@@ -18,6 +18,8 @@ import {
 } from "./safeError.js";
 import { allowedLogFields, safeLogFields } from "./safeLog.js";
 import type { JobDescriptor } from "@velora/contracts";
+import { fetchHistoryDeals } from "../metaapi/historyDealsClient.js";
+import { buildSyncDescriptor } from "../scheduler/syncScheduler.js";
 
 // A realistic worst case: a provider client that echoes the request it sent.
 const FAKE_SECRET = "investorPassword=Hunter2-NOT-REAL";
@@ -213,4 +215,58 @@ test("G-3/10: a ClassifiedError with no message does not expose internals", () =
   assert.equal(String(e).includes(FAKE_SECRET), false);
   assert.match(String(e), /NOT_CONFIGURED/);
   assert.ok(WORKER_ERROR_CODES.includes(e.code));
+});
+
+// --- MetaAPI sync surfaces (added with the historical-sync implementation) ---
+// New code introduced two fresh egress surfaces — a provider HTTP client and a
+// job payload — so each gets a leak assertion rather than an assumption.
+
+test("G-3/11: the MetaAPI client never puts the platform token in an error", async () => {
+  const TOKEN = "meta-platform-token-NOT-REAL-9f3b";
+  // A provider that rejects, and a transport that throws with the token in its
+  // message — the two realistic ways a token escapes into an error path.
+  for (const impl of [
+    (async () => new Response("denied", { status: 401 })) as unknown as typeof fetch,
+    (async () => { throw new Error(`connect failed using auth-token ${TOKEN}`); }) as unknown as typeof fetch,
+  ]) {
+    let thrown: unknown;
+    try {
+      await fetchHistoryDeals(TOKEN, {
+        metaapiAccountId: "acc-1", from: "2026-01-01T00:00:00Z", to: "2026-02-01T00:00:00Z",
+      }, { fetchImpl: impl });
+    } catch (err) { thrown = err; }
+
+    assert.ok(thrown instanceof ClassifiedError);
+    // Neither the message nor any serialization of the error carries the token.
+    assert.equal(String((thrown as Error).message).includes(TOKEN), false);
+    assert.equal(JSON.stringify(safeFailureEvent({
+      event: "job.failed", jobClass: "metaapi.sync-account", jobId: "1",
+      attempts: 1, code: classifyError(thrown),
+    })).includes(TOKEN), false);
+  }
+});
+
+test("G-3/12: a sync job payload is flat, non-secret identifiers only", () => {
+  const descriptor = buildSyncDescriptor(
+    "acct-1", "meta-acct-1", "2026-01-01T00:00:00.000Z", "2026-02-01T00:00:00.000Z");
+  const serialized = JSON.stringify(descriptor.payload);
+  for (const forbidden of ["token", "password", "secret", "credential", "cipher", "key"]) {
+    assert.equal(serialized.toLowerCase().includes(forbidden), false,
+      `payload must not contain '${forbidden}'`);
+  }
+  // Flat scalars only: a nested object could smuggle a credential bundle.
+  for (const v of Object.values(descriptor.payload)) {
+    assert.ok(["string", "number", "boolean"].includes(typeof v));
+  }
+});
+
+test("G-3/13: a provider error code is never derived from provider text", () => {
+  // The provider controls the body; it must not be able to choose our code.
+  const hostile = new Error("PROVIDER_REJECTED but actually leaking Hunter2");
+  assert.equal(classifyError(hostile), "UNKNOWN");
+  // And every sync code stays inside the closed vocabulary.
+  for (const code of ["PROVIDER_MALFORMED", "RESERVATION_HELD"] as const) {
+    assert.ok((WORKER_ERROR_CODES as readonly string[]).includes(code));
+    assert.equal(safeDlqReason(code, "metaapi.sync-account").includes("Hunter2"), false);
+  }
 });

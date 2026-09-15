@@ -321,6 +321,7 @@ export class TradeService {
       rawOpenText: raw.openTime,
       rawCloseText: raw.closeTime,
       source: "manual",
+      externalDealId: null, // manual trades have no provider identity
     };
 
     // Domain fold gate: TRADE_CREATED from state null (ownership matrix: user may create).

@@ -194,8 +194,82 @@ export interface ProvisionOptions {
 }
 
 /**
+ * Queue classes this installation runs. Pre-creating them is what lets
+ * velora_worker operate with NO CREATE privilege at all (see db/roles.sql §6).
+ *
+ * `__pgboss__send-it` is pg-boss's INTERNAL cron queue: its timekeeper
+ * createQueue()s it on start and SWALLOWS the failure, so without pre-creation
+ * the scheduler would silently never fire. It is listed explicitly for that
+ * reason — omitting it is a silent-failure trap, not a harmless detail.
+ */
+export const PGBOSS_QUEUES = [
+  "metaapi.sync-account",
+  "metaapi.sync-tick",
+  "velora.dlq",
+  "__pgboss__send-it",
+] as const;
+
+/**
+ * Create the pg-boss schema and queues as velora_owner.
+ *
+ * WHY HERE AND NOT IN A MIGRATION: the queue schema is operational
+ * infrastructure, not application schema. Migrations run as velora_migrator
+ * (which holds no CREATE on the database after provisioning) and are versioned
+ * application state; pg-boss owns its own schema version and upgrades it
+ * itself. Running its DDL from a migration would fork that ownership.
+ *
+ * The admin connection creates the schema (velora_owner is NOLOGIN and cannot
+ * CREATE SCHEMA itself — VERIFIED: "permission denied for database"), then
+ * hands authorship to velora_owner so every object inside is owner-owned.
+ */
+async function provisionPgBoss(client: {
+  query(sql: string, values?: unknown[]): Promise<unknown>;
+}): Promise<void> {
+  const PgBoss = (await import("pg-boss")).default;
+  await client.query("CREATE SCHEMA IF NOT EXISTS pgboss AUTHORIZATION velora_owner");
+
+  // getConstructionPlans emits the full install DDL without connecting.
+  // Guarded by to_regclass so a re-run is a no-op rather than an error —
+  // provisioning must be idempotent.
+  const installed = (await client.query(
+    "SELECT to_regclass('pgboss.version') IS NOT NULL AS ok",
+  )) as { rows: Array<{ ok: boolean }> };
+  if (installed.rows[0]?.ok !== true) {
+    // The plans open with `CREATE SCHEMA IF NOT EXISTS pgboss`. PostgreSQL
+    // checks CREATE on the DATABASE for that statement even when the schema
+    // already exists, and velora_owner deliberately does not hold it
+    // (VERIFIED: "permission denied for database"). The schema was just
+    // created above by the admin connection WITH AUTHORIZATION velora_owner,
+    // so the statement is redundant — it is removed rather than papered over
+    // by granting the owner a database-wide CREATE it never otherwise needs.
+    const plans = PgBoss.getConstructionPlans("pgboss")
+      .replace(/CREATE SCHEMA IF NOT EXISTS pgboss\s*;/i, "");
+    // Everything that remains is executed AS velora_owner, so every pgboss
+    // object ends up owner-owned — the precondition for the grant model in
+    // db/roles.sql §6.
+    await client.query(`SET LOCAL ROLE velora_owner; ${plans}`);
+  }
+
+  // Queues are a row plus a partition; create_queue short-circuits when the
+  // row exists, so re-running is a no-op. SET ROLE is issued separately: a
+  // parameterized statement cannot carry multiple commands, and the partition
+  // must be created BY the owner for the roles.sql grants to apply.
+  await client.query("SET ROLE velora_owner");
+  try {
+    for (const name of PGBOSS_QUEUES) {
+      await client.query("SELECT pgboss.create_queue($1, $2::json)", [
+        name,
+        JSON.stringify({ name }),
+      ]);
+    }
+  } finally {
+    await client.query("RESET ROLE");
+  }
+}
+
+/**
  * pre-migration  : roles-bootstrap.sql + separated-owner model + memberships
- * post-migration : ownership re-assert + roles.sql + default privileges
+ * post-migration : ownership re-assert + pgboss bootstrap + roles.sql + default privileges
  */
 export async function provision(opts: ProvisionOptions): Promise<string[]> {
   const { Client } = await import("pg");
@@ -211,6 +285,12 @@ export async function provision(opts: ProvisionOptions): Promise<string[]> {
     } else {
       await client.query(REASSIGN_SQL);
       steps.push("reassign-ownership");
+      // The pgboss schema + queues must exist BEFORE roles.sql, because
+      // roles.sql only GRANTS on them (its DO block is a no-op when the schema
+      // is absent). This is the owner/bootstrap path — the only place
+      // authorized to create queue infrastructure.
+      await provisionPgBoss(client);
+      steps.push("pgboss-bootstrap");
       await client.query(readFileSync(join(DB_DIR, "roles.sql"), "utf8"));
       steps.push("roles.sql");
       await client.query(DEFAULT_PRIVILEGES_SQL);

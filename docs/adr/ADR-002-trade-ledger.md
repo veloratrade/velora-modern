@@ -4,7 +4,7 @@
 
 Accepted — owner decision D-01 (2026-08-29): **Option B approved** — immutable trade ledger, correction events, tombstone deletion, explicit mutation ownership (user/sync/webhook/admin), append-only trade events, optimistic concurrency/versioning, idempotent external trade identifiers. Implementation not started (Phase 1 schema design / Phase 2 wave ④).
 
-**Amendment — 2026-09-15 (owner ratification, A-1, MetaAPI imported trades): `TRADE_IMPORTED` permits actor `sync` in addition to `system`.** The authoritative actor set becomes **`TRADE_IMPORTED → ["system", "sync"]`**. This amends the *Ownership matrix* row for imported trades only; every other part of D-01 — the immutable ledger, correction events, tombstone deletion, conflict policy, optimistic concurrency and idempotency — is **unchanged**. No other event's actor set is broadened. See *Ownership matrix* below and *Amendment A-1* for the reasoning and its limits.
+**Amendment — 2026-09-15 (owner ratification, A-1, MetaAPI imported trades; APPLIED 2026-09-16): `TRADE_IMPORTED` permits actor `sync` in addition to `system`.** See also **Amendment A-5** (2026-09-16): provider-reported P/L is authoritative on the canonical `trades.net_pnl`, with no second P/L column. The authoritative actor set becomes **`TRADE_IMPORTED → ["system", "sync"]`**. This amends the *Ownership matrix* row for imported trades only; every other part of D-01 — the immutable ledger, correction events, tombstone deletion, conflict policy, optimistic concurrency and idempotency — is **unchanged**. No other event's actor set is broadened. See *Ownership matrix* below and *Amendment A-1* for the reasoning and its limits.
 
 ## Context
 
@@ -100,12 +100,49 @@ actor `sync` for the already-defined event `TRADE_IMPORTED`. It does **not**:
 established the account context; it must never be accepted from a request body, header or
 job payload.
 
-**Implementation status:** governance only. The domain currently encodes
-`ALLOWED_ACTORS.TRADE_IMPORTED = ["system"]` (`packages/domain/src/tradeLedger.ts`), which
-**rejects** `sync` — verified by executing `assertOwnership("TRADE_IMPORTED", "sync")`. This
-amendment makes the required change **authorized but not yet applied**; per AGENTS.md rule 11
-the code change lands in the same change as the trade-import implementation. The database
-event/actor CHECK constraints already permit this combination, so **no migration is required**.
+**Implementation status: APPLIED (2026-09-16).** The domain now encodes
+`ALLOWED_ACTORS.TRADE_IMPORTED = ["system", "sync"]`
+(`packages/domain/src/tradeLedger.ts`), landed in the same change as the MetaAPI
+trade-import implementation per AGENTS.md rule 11. The database event/actor CHECK
+constraints already permitted this combination, so **no migration was required**.
+Verified on real PostgreSQL 17.10: an imported trade carries
+`trade_events.type='TRADE_IMPORTED'` with `actor='sync'`
+(`db/tests/metaapiSync.pg.test.ts`). The actor is written as a server-side
+constant by the importer and is never read from a job payload, a provider
+response, or a request — so it remains non-client-selectable.
+
+### Amendment A-5 — provider-reported P/L is authoritative on `net_pnl` (2026-09-16, implemented)
+
+**Status: IMPLEMENTED** with the MetaAPI import path.
+
+**Decision.** For a trade imported from MetaAPI, the **provider's reported
+profit is authoritative** and is persisted to the existing canonical
+`trades.net_pnl`. Velora does not recompute, adjust, or second-guess it.
+
+**No second P/L column exists.** There is deliberately no `provider_profit`,
+no `calculated_profit`, and no `broker_profit`. Two P/L columns would create an
+unanswerable question at read time — which one is the truth? — and would leak
+that ambiguity into the API and analytics. One canonical column keeps
+`profitLoss` in the API contract unambiguous.
+
+**Why the provider wins.** The broker is the system of record for realized
+money: its figure already incorporates the exact fill prices, partial closes,
+swap accrual, commission schedule and currency conversion the broker actually
+applied. A locally recomputed figure would silently disagree with the user's
+broker statement, and the broker's number is the one the user can verify.
+
+**Local computation remains available as diagnostic evidence only.** A derived
+figure may be used to detect drift or flag a suspicious import; it must never
+overwrite `net_pnl`. The provider's own `profit`, `commission` and `swap` are
+additionally preserved verbatim on the originating `sync_fills` row, so the
+imported value stays auditable against its source.
+
+**Scope.** Manual trades are unchanged: they keep the existing calculated-P/L
+behaviour. This amendment governs the import path only.
+
+**Evidence.** `db/tests/metaapiSync.pg.test.ts` asserts that a provider deal
+reporting `profit = "125.50"` produces `trades.net_pnl = 125.50` with
+`source='metaapi'`, executed against real PostgreSQL 17.10.
 
 ## Alternatives Considered
 

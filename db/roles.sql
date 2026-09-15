@@ -203,3 +203,71 @@ ALTER DEFAULT PRIVILEGES FOR ROLE velora_migrator IN SCHEMA public
 -- USAGE grant is required today. Declared for future explicit sequences.
 ALTER DEFAULT PRIVILEGES FOR ROLE velora_migrator IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO app_readwrite, velora_worker;
+
+-- ---------------------------------------------------------------------------
+-- 6. PG-BOSS QUEUE SCHEMA — least privilege for velora_worker.
+--
+--    EMPIRICALLY DERIVED, NOT ASSUMED. pg-boss's own documentation implies the
+--    job-running role needs CREATE on the database (it self-migrates and
+--    self-creates queue partitions). That is a large privilege for a process
+--    whose whole purpose is to be the least-trusted identity in the system, so
+--    the actual requirement was measured against pg-boss 10.4.2 on PostgreSQL
+--    17.10 rather than accepted. Findings that shape this section:
+--
+--      - `start()` short-circuits when `pgboss.version` already exists, so the
+--        worker never needs the install/upgrade DDL path.
+--      - `createQueue()` short-circuits when the queue row already exists, so
+--        with queues PRE-CREATED the worker never executes the partition DDL
+--        (CREATE TABLE ... ATTACH PARTITION).
+--      - runtime DML (send/fetch/complete/fail) targets the PARENT tables, so
+--        no per-partition grant is needed.
+--      - maintenance (expire/archive/drop) under `supervise: true` is DML on
+--        `pgboss.job`/`pgboss.archive` only — VERIFIED over repeated ticks with
+--        zero permission errors.
+--
+--    CONSEQUENCE: velora_worker runs pg-boss with **no CREATE on the database
+--    and no CREATE on the pgboss schema** (both VERIFIED false at runtime).
+--    Creating a NEW queue fails 42501 — deliberately: introducing a job class
+--    is a deployment decision, not something a worker may do to itself.
+--
+--    PREREQUISITE (owner/bootstrap path — `db/provision.ts`, NOT a migration):
+--    the pgboss schema, its objects, and every queue (including pg-boss's
+--    internal `__pgboss__send-it`, used by the cron timekeeper) are created by
+--    velora_owner before this file runs. This section only GRANTS.
+-- ---------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'pgboss') THEN
+    -- Enter the schema, but never create in it.
+    EXECUTE 'GRANT USAGE ON SCHEMA pgboss TO velora_worker';
+    EXECUTE 'REVOKE CREATE ON SCHEMA pgboss FROM velora_worker';
+
+    -- Job lifecycle: send, fetch, complete, fail, archive, maintain.
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA pgboss TO velora_worker';
+    EXECUTE 'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA pgboss TO velora_worker';
+    -- pg-boss calls its own helper functions (e.g. create_queue's guard path).
+    EXECUTE 'GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgboss TO velora_worker';
+
+    -- Future queue partitions created by the owner must be usable without
+    -- re-running this file. Keyed to velora_owner because the owner is the
+    -- creator under the separated-owner model.
+    EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE velora_owner IN SCHEMA pgboss '
+         || 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO velora_worker';
+    EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE velora_owner IN SCHEMA pgboss '
+         || 'GRANT USAGE, SELECT ON SEQUENCES TO velora_worker';
+
+    -- The API process does not run jobs; it must not reach into the queue.
+    -- Read-only/reporting has no business in queue internals either.
+    EXECUTE 'REVOKE ALL ON SCHEMA pgboss FROM velora_readonly';
+    EXECUTE 'REVOKE ALL ON ALL TABLES IN SCHEMA pgboss FROM velora_readonly';
+  END IF;
+END
+$$;
+
+-- NOTE on `sync_fills` (0012/0013): the append-only REVOKE in section 4 above
+-- is deliberately left INTACT for the MetaAPI importer. The first draft of the
+-- import path wanted UPDATE (to stamp `processing_state`/`processed_trade_id`
+-- after folding a fill into a trade) and was refused by this grant at runtime
+-- (VERIFIED 42501). The importer was restructured to compute the final state
+-- BEFORE the insert and write each fill exactly once, rather than relaxing the
+-- grant — provider evidence stays immutable, as B11/D-6 require.

@@ -11,3 +11,4 @@ export * from "./errors.js";
 export * from "./environment.js";
 export * from "./securityConfig.js";
 export * from "./rbac.js";
+export * from "./metaapiSync.js";

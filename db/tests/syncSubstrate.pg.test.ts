@@ -244,11 +244,44 @@ test("D-6 sync substrate", { skip: URL ? false : "DATABASE_URL not set" }, async
     assert.equal(rows[0]!.raw_time_text, "2026-04-01T09:00:00.000Z");
   });
 
-  await t.test("no naive brokerTime column was added (that storage is D-5)", async () => {
+  await t.test("broker_time_text exists and does NOT overload raw_time_text (D-5)", async () => {
+    // SUPERSEDED ASSERTION, updated deliberately rather than deleted.
+    // Under D-6 alone this column was unauthorized, so this test asserted its
+    // ABSENCE. D-5 was ratified afterwards and is implemented in migration
+    // 0013, so the governing requirement is now the opposite: the column must
+    // EXIST, and — the part that actually protects the decision — it must be
+    // separate from `raw_time_text`, which keeps its D-6 meaning (the verbatim
+    // offset-explicit `time`).
     const { rows } = await pool.query<{ column_name: string }>(
       `SELECT column_name FROM information_schema.columns WHERE table_name='sync_fills'`);
     const names = rows.map((r) => r.column_name);
-    assert.equal(names.includes("broker_time_text"), false, "D-5 is not authorized by D-6");
+    assert.equal(names.includes("broker_time_text"), true, "D-5 storage is now authorized");
+    assert.equal(names.includes("raw_time_text"), true, "D-6 column is preserved, not renamed");
+
+    // The two fields hold DIFFERENT provider values on the same row, which is
+    // precisely why one column could not serve both.
+    const { userId, accountId } = await seed(pool);
+    await pool.query(
+      `INSERT INTO sync_fills (account_id, user_id, external_deal_id, time_status,
+                               occurred_at_utc, raw_time_text, broker_time_text)
+       VALUES ($1,$2,'t-d5','resolved_utc','2026-04-01T09:00:00.000Z',
+               '2026-04-01T09:00:00.000Z','2026-04-01 12:00:00')`,
+      [accountId, userId]);
+    const got = await pool.query<{ raw_time_text: string; broker_time_text: string }>(
+      `SELECT raw_time_text, broker_time_text FROM sync_fills WHERE external_deal_id='t-d5'`);
+    assert.equal(got.rows[0]!.raw_time_text, "2026-04-01T09:00:00.000Z");
+    assert.equal(got.rows[0]!.broker_time_text, "2026-04-01 12:00:00");
+
+    // A naive broker time carries NO instant: it must be storable while
+    // occurred_at_utc stays NULL and the status stays 'unresolved'.
+    await pool.query(
+      `INSERT INTO sync_fills (account_id, user_id, external_deal_id, time_status, broker_time_text)
+       VALUES ($1,$2,'t-d5-naive','unresolved','2026-04-01 12:00:00')`,
+      [accountId, userId]);
+    const naive = await pool.query<{ occurred_at_utc: Date | null; broker_time_text: string }>(
+      `SELECT occurred_at_utc, broker_time_text FROM sync_fills WHERE external_deal_id='t-d5-naive'`);
+    assert.equal(naive.rows[0]!.occurred_at_utc, null);
+    assert.equal(naive.rows[0]!.broker_time_text, "2026-04-01 12:00:00");
   });
 
   // --- QUARANTINE -----------------------------------------------------------

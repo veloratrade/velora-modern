@@ -36,6 +36,8 @@ export const WORKER_ERROR_CODES = [
   "MAX_ATTEMPTS", // bounded retries exhausted (queue policy)
   "PROVIDER_REJECTED", // third party returned a terminal 4xx
   "PROVIDER_UNAVAILABLE", // third party returned a retryable 5xx / transport failure
+  "PROVIDER_MALFORMED", // third party response was not the documented shape
+  "RESERVATION_HELD", // another worker already owns this account's sync lease
   "NOT_CONFIGURED", // required configuration (e.g. a platform token) is absent
   "UNKNOWN", // nothing more specific could be established
 ] as const;

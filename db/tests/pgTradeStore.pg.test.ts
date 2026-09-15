@@ -104,6 +104,7 @@ function newTrade(userId: string, over: Partial<NewTrade> = {}): NewTrade {
     rawOpenText: null,
     rawCloseText: null,
     source: "manual",
+    externalDealId: null,
     ...over,
   };
 }

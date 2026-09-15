@@ -48,6 +48,57 @@ setup; queue-depth and job-age alerts are day-one (observability-contract).
 Redis is **not** introduced because it is fashionable; the trigger evidence is
 recorded in an ADR addendum when it fires.
 
+### Amendment — scheduled producer and least-privilege queue bootstrap (2026-09-16, implemented)
+
+**Status: IMPLEMENTED** with the MetaAPI historical-sync path.
+
+**Scheduling uses pg-boss's NATIVE cron — no new mechanism was introduced.**
+pg-boss 10.4.2 ships `boss.schedule(queue, cron, data)`, persisted as a row in
+`pgboss.schedule` and driven by its internal `__pgboss__send-it` queue. The
+producer registers a single recurring **tick** (`metaapi.sync-tick`, default
+`0 * * * *`); each tick reads the accounts that currently carry a
+`metaapi_account_id` and enqueues one `metaapi.sync-account` job per account.
+
+*Why a fan-out tick rather than one schedule row per account:* schedules are
+durable rows, so per-account rows would need lifecycle management on every
+account change and would rot when an account is deleted. A single tick reads
+live state instead. With zero MetaAPI-provisioned accounts it enqueues zero
+jobs — the producer cannot manufacture work.
+
+**No second service, no host cron, no new dependency.** `cron-parser` is
+already vendored as a pg-boss dependency. Declaring a worker service in-repo
+remains impossible (Railway config-as-code has no `services` key), so **worker
+deployment is still an owner decision and is NOT made here**.
+
+**Enqueue idempotency is layered:** pg-boss debounces cron ticks with
+`singletonKey: name, singletonSeconds: 60`, and each enqueued job carries the
+business key `sync:{accountId}:{cursor}` so a repeated tick over the same
+window collapses to one job.
+
+**Least-privilege queue access — empirically derived, not assumed.** pg-boss
+self-migrates and self-creates queue partitions, which naively implies granting
+the worker `CREATE` on the database. That was measured instead of accepted, and
+the result is that **`velora_worker` runs pg-boss with NO CREATE on the database
+and NO CREATE on the `pgboss` schema** (both VERIFIED `false` at runtime on
+PostgreSQL 17.10):
+
+- `start()` short-circuits when `pgboss.version` exists, so the worker never
+  runs install/upgrade DDL. A simulated schema downgrade made `start()` fail
+  closed with `42501` — upgrades are an owner/bootstrap action.
+- `createQueue()` short-circuits when the queue row exists, so with queues
+  pre-created the worker never runs partition DDL. Creating a **new** queue
+  fails `42501` — introducing a job class is a deployment decision, not
+  something a worker may do to itself.
+- Runtime DML and `supervise` maintenance target the parent tables only —
+  VERIFIED over repeated maintenance ticks with zero permission errors.
+
+**Bootstrap path.** The `pgboss` schema, its objects and every queue —
+including pg-boss's internal `__pgboss__send-it`, whose `createQueue` failure
+the timekeeper silently swallows — are created by `velora_owner` in
+`db/provision.ts` (the operator-run, `ADMIN_DATABASE_URL` path), never by a
+migration and never by the worker. `db/roles.sql` §6 then grants the worker
+`USAGE` + table DML + `EXECUTE` and nothing more.
+
 ## Alternatives Considered
 
 - BullMQ now (Redis-backed): rejected — adds a service with no current need.
