@@ -7,6 +7,7 @@
   ],
   "scripts": {
     "build": "tsc -b packages/contracts packages/domain",
+    "start:worker": "tsx apps/worker/src/index.ts",
     "typecheck": "tsc -b packages/contracts packages/domain apps/api apps/worker apps/web",
     "test": "node tools/run-tests.mjs",
     "test:migrations": "tsx --test db/tests/migrations.test.ts",
