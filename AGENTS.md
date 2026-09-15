@@ -76,7 +76,7 @@ Every architectural claim must be tagged:
 
 | Path | Role |
 |---|---|
-| `docs/adr/ADR-001…013` | Architectural decisions — ADR-001…010 accepted 2026-08-29 (D-01…D-05 + D-11…D-15); ADR-011 Phase-1 implementation record; **ADR-012 backup-gate law + ADR-013 environment-origin safety law** (2026-09-12, D-16/D-17); evidence-gated sub-items tracked within each ADR |
+| `docs/adr/ADR-001…016` | Architectural decisions — ADR-001…010 accepted 2026-08-29 (D-01…D-05 + D-11…D-15); ADR-011 Phase-1 implementation record; **ADR-012 backup-gate law + ADR-013 environment-origin safety law** (2026-09-12, D-16/D-17); **ADR-014 MetaAPI platform token as a distinct secret class** (2026-09-15, D-19); **ADR-016 credential encryption & key management** (2026-09-15, D-18); ADR-015 unused; evidence-gated sub-items tracked within each ADR |
 | `docs/threat-model.md` | Threats, controls, detection, residual risk |
 | `docs/security-policy.md` | Mandatory baseline + production security gates |
 | `docs/external-contracts.md` | Frozen external contract tier |
