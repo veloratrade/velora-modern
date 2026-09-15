@@ -44,6 +44,7 @@ import { resolveCredentialKey } from "./credentials/credentialConfig.js";
 import { MemoryCredentialStore } from "./credentials/memoryCredentialStore.js";
 import { PgCredentialStore } from "./credentials/pgCredentialStore.js";
 import type { CredentialStore } from "./credentials/credentialStore.js";
+import { CredentialService } from "./credentials/credentialService.js";
 import { makeDbProbe } from "./kernel/dbProbe.js";
 import type { MailPort } from "./mail/mailPort.js";
 import { ResendMailProvider } from "./mail/resendMailProvider.js";
@@ -125,8 +126,10 @@ async function main(): Promise<void> {
   console.log(JSON.stringify({ level: "info", event: "mail.provider", provider: mail.name }));
 
   // Without a boot JWT secret every capability route stays fail-closed (503).
-  // C-22: held server-side only; deliberately NOT passed to createApp, because
-  // this phase exposes no credential HTTP surface.
+  // C-22 store; B-1 wraps it in a CredentialService and exposes authenticated
+  // self-service routes. The store itself is still never handed to createApp —
+  // only the service is — so the route layer cannot reach reveal()/findById()
+  // and no secret-disclosure path exists over HTTP.
   let credentialStore: CredentialStore | undefined;
   const capabilities: {
     auth?: AuthService;
@@ -134,6 +137,7 @@ async function main(): Promise<void> {
     trades?: TradeService;
     adminUsers?: AdminUserService;
     ownership?: OwnershipService;
+    credentials?: CredentialService;
   } = {};
   if (boot.jwtSecret !== undefined) {
     capabilities.auth = new AuthService({
@@ -191,6 +195,10 @@ async function main(): Promise<void> {
         pool !== undefined
           ? new PgCredentialStore(pool, credentialKey.key)
           : new MemoryCredentialStore(credentialKey.key);
+      // B-1: the authenticated access layer. Only constructed when a valid key
+      // produced a store, so a misconfigured deployment leaves the routes
+      // fail-closed (503) instead of exposing an unusable capability.
+      capabilities.credentials = new CredentialService({ store: credentialStore });
       // Key VERSION only — never the key, never a credential.
       console.log(
         JSON.stringify({

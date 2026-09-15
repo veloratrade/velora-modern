@@ -29,6 +29,7 @@ import { AdminUserService, type ActorContext } from "../auth/adminUserService.js
 import { OwnershipService } from "../auth/ownershipService.js";
 import { AccountService, AccountError } from "../accounts/accountService.js";
 import { TradeService, TradeError } from "../trades/tradeService.js";
+import { CredentialService, CredentialError } from "../credentials/credentialService.js";
 import { EntitlementError } from "../entitlements/entitlementService.js";
 import { resolveClientIp, type RateLimitDecision } from "@velora/domain";
 import { FixedWindowRateLimiter, type RateLimiter } from "../ratelimits/rateLimiter.js";
@@ -51,6 +52,12 @@ export interface ApiConfig {
   readonly adminUsers?: AdminUserService;
   /** System Owner bootstrap. Absent → ownership routes fail closed (503). */
   readonly ownership?: OwnershipService;
+  /**
+   * B-1 credential access layer (C-22 store). Absent → credential routes fail
+   * closed (503). Absence is the NORMAL state when CREDENTIAL_MASTER_KEY is
+   * missing or invalid: the capability disappears rather than degrading.
+   */
+  readonly credentials?: CredentialService;
   /** Phase C rate limiting (inc 7). Absent → createApp builds a default
    *  fixed-window limiter on a per-process memory store (PHP applies
    *  throttling unconditionally at dispatch; a per-app instance preserves
@@ -570,6 +577,69 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
     return accountsRoute(async (accounts, claims) => {
       const id = decodeURIComponent(path.split("/")[4] ?? "");
       const result = await accounts.deleteAccount(id, claims.sub);
+      return { status: 200, body: ok(result) };
+    });
+  }
+
+  // ---- Credentials (B-1: authenticated self-service over the C-22 store) ----
+  //
+  // OWNERSHIP, NOT RBAC. These routes are gated on AUTHENTICATION only and the
+  // owner is always `claims.sub`. That is deliberate and load-bearing: this
+  // server resolves a System Owner who satisfies EVERY permission, so gating
+  // credentials behind a permission check would silently hand the System Owner
+  // access to other users' secrets. Ownership is the only authorization rule
+  // here (ADR-016), so no route accepts a user id from the client.
+  //
+  // There is NO reveal route: secret disclosure has no production consumer yet.
+  const credentialsRoute = (
+    fn: (credentials: CredentialService, claims: { sub: string }) => Promise<RouteResult>,
+  ): Promise<RouteResult> => {
+    if (config.auth === undefined || config.credentials === undefined) {
+      return Promise.resolve({
+        status: 503,
+        body: fail("SERVICE_UNAVAILABLE", "credentials not configured", sec.requestId),
+      });
+    }
+    const claims = authenticateRequest(req, config.auth);
+    if (claims === null) {
+      return Promise.resolve({
+        status: 401,
+        body: fail("UNAUTHENTICATED", "Unauthenticated.", sec.requestId),
+      });
+    }
+    return fn(config.credentials, claims).catch((err: unknown) => {
+      if (err instanceof CredentialError) {
+        return { status: err.status, body: fail(err.code, err.message, sec.requestId, err.details) };
+      }
+      throw err;
+    });
+  };
+
+  if (method === "GET" && path === "/api/v1/credentials") {
+    return credentialsRoute(async (credentials, claims) => {
+      const list = await credentials.listCredentials({ id: claims.sub, requestId: sec.requestId });
+      return { status: 200, body: ok({ credentials: list }) };
+    });
+  }
+
+  if (method === "POST" && path === "/api/v1/credentials") {
+    return credentialsRoute(async (credentials, claims) => {
+      const body = await parseJsonBody(req);
+      const credential = await credentials.createCredential(
+        { id: claims.sub, requestId: sec.requestId },
+        body,
+      );
+      return { status: 201, body: ok({ credential }) };
+    });
+  }
+
+  if (method === "DELETE" && /^\/api\/v1\/credentials\/[^/]+$/.test(path)) {
+    return credentialsRoute(async (credentials, claims) => {
+      const id = decodeURIComponent(path.split("/")[4] ?? "");
+      const result = await credentials.deleteCredential(
+        { id: claims.sub, requestId: sec.requestId },
+        id,
+      );
       return { status: 200, body: ok(result) };
     });
   }
