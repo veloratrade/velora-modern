@@ -1,8 +1,12 @@
-# VELORA MODERN — MetaAPI Owner Decisions (OD-M1 … OD-M4 + TZ-M1, D-1, D-2, D-4)
+# VELORA MODERN — MetaAPI Owner Decisions (OD-M1 … OD-M4 + TZ-M1, D-1, D-2, D-3, D-4)
 
 ## 1. Status
 
 **Status:** OWNER-APPROVED 2026-09-15 (explicit owner directive, this session).
+**Amended 2026-09-15 — D-3 RATIFIED (see §2C).** Governance-only: fixes the final
+`TRADE_IMPORTED` actor set as **`["system", "sync"]`** and assigns each actor a distinct
+provenance meaning. **No new actor is introduced**, no actor is removed, no other event's actor
+set changes, and `TRADE_CREATED` keeps its meaning. No code, no schema, no migration.
 **Amended 2026-09-15 — D-4 RATIFIED (see §2B).** Governance-only: ratifies provider PnL
 authority for imported trades on the existing canonical `net_pnl` field. **No second PnL column
 is authorized**, no code, no schema, no migration, no API change.
@@ -255,8 +259,90 @@ column exists. One canonical field also preserves API compatibility and requires
 ### Explicitly NOT decided here
 
 Provider→domain field mapping detail, whether commission/swap are stored separately for
-imported trades, any diagnostic-value persistence (item 9), and **D-3** (migration-origin
-semantics), which remains open.
+imported trades, and any diagnostic-value persistence (item 9). **D-3 (migration-origin
+semantics) is now RATIFIED — see §2C.**
+
+---
+
+## 2C. Owner decision — D-3 (ratified 2026-09-15)
+
+### D-3 — Migration-origin semantics: **`system` AND `sync` ARE DISTINCT PROVENANCE VALUES ON ONE EVENT**
+
+**Owner decision, ratified 2026-09-15.** The final actor set for `TRADE_IMPORTED` is
+**`["system", "sync"]`** — exactly the set A-1 established. D-3 settles *why* both actors
+exist and fixes their meanings so the pair cannot later drift or be collapsed.
+
+**Binding terms.**
+
+1. **`system` is PRESERVED** as an allowed actor for `TRADE_IMPORTED`.
+2. **`system` = migration-origin / system-origin provenance** — an import performed by an
+   explicitly authorized migration or system process, whose origin is *not* a live provider
+   synchronization cycle.
+3. **`sync` = provider-synchronization provenance** — the controlled background worker
+   performing provider-originated MetaAPI imports (OD-M2, A-1).
+4. **`system` is NOT collapsed into `sync`.** The two provenance classes stay separately
+   representable.
+5. **`system` is NOT removed** from the `TRADE_IMPORTED` actor set.
+6. **No migration-specific actor is introduced.** `migration`, `importer`, `legacy` and
+   `backfill` are all **forbidden**; `MutationActor` stays exactly
+   `user | sync | webhook | admin | system`.
+7. **No other event's actor set changes.** The ownership matrix is otherwise untouched.
+8. **`TRADE_CREATED` keeps its meaning** — manual creation. It is not repurposed for imports.
+
+**Security boundary — binding.**
+
+- **The actor is an internal attribution/provenance value, not an authorization grant.**
+- **`system` is NOT client-selectable.** No request body, header, query parameter, job payload
+  or other external input may select `actor = system`.
+- **`sync` likewise stays server-controlled**, asserted only by the synchronization path that
+  has already established the account context (A-1 already binds this).
+- Both actors are asserted by trusted server-side code **after** ownership is established.
+
+**This decision does NOT authorize:** ownership bypass · user impersonation · arbitrary event
+creation · client-selected actors · worker access to `user_credentials` ·
+`CREDENTIAL_MASTER_KEY` access · MetaAPI credential exposure · deployment · webhook
+implementation.
+
+### Rationale — two materially different provenance classes
+
+| Class | Actor | What it represents |
+|---|---|---|
+| **A — migration/system origin** | `system` | A controlled internal migration or system operation. Provenance is *not* a live provider sync cycle |
+| **B — provider synchronization** | `sync` | The long-running controlled worker importing provider-originated trades from MetaAPI |
+
+Both are **imports**, so both correctly use `TRADE_IMPORTED`; the event type answers *what
+happened*, the actor answers *what originated it*. Folding them into one value would destroy a
+provenance distinction the ledger exists to preserve, and inventing a third actor would add a
+vocabulary term with no behaviour behind it. Keeping `TRADE_IMPORTED` single-typed also means
+every existing reader, projection and CHECK constraint continues to work untouched.
+
+### Repository evidence (verified before ratifying, not assumed)
+
+| Claim | Evidence |
+|---|---|
+| The DB already accepts both actors on this event | `db/migrations/0001_core.sql:117` — `actor TEXT NOT NULL CHECK (actor IN ('user','sync','webhook','admin','system'))`; the `type` CHECK (`:114-116`, widened by `0005`) contains `TRADE_IMPORTED`. Both combinations are already legal, and D-6's `syncSubstrate.pg.test.ts` inserted `('TRADE_IMPORTED','sync')` successfully |
+| `system` has a documented migration-origin meaning | `packages/contracts/src/trades.ts:54` annotates `TRADE_IMPORTED` as `// migration origin event`; ADR-002 *Migration Impact* states *"Existing trades import into the ledger as `IMPORT` origin events"* |
+| The actor vocabulary is already closed and sufficient | `packages/contracts/src/trades.ts:44` — `MutationActor = "user" \| "sync" \| "webhook" \| "admin" \| "system"`. No new term is needed |
+| `system` is load-bearing beyond this event | `packages/domain/src/tradeLedger.ts:85` — `QUARANTINE_RAISED: ["sync","webhook","system","admin"]`. Removing `system` from the vocabulary would have reached further than imports |
+| Current code state | `packages/domain/src/tradeLedger.ts:77` still encodes `TRADE_IMPORTED: ["system"]`. **No production code emits `TRADE_IMPORTED`** — the identifier appears only in type declarations, the actor matrix, `applyEvent`, and tests |
+
+### Consequences
+
+| Area | Effect |
+|---|---|
+| Actor vocabulary | **Unchanged** — no term added, none removed |
+| `TRADE_IMPORTED` actor set | **`["system", "sync"]`** — identical to A-1; D-3 adds meaning, not members |
+| Other event actor sets | **Unchanged** |
+| `TRADE_CREATED` | **Unchanged** — manual creation |
+| Database | **No migration.** The `0001` CHECK already permits both actors; restating a valid constraint in a new migration is explicitly **not** done |
+| Domain code | Still `["system"]` at `tradeLedger.ts:77`. The one-line widening remains **authorized but unapplied**, landing with the trade-import implementation (AGENTS.md rule 11) |
+| A-1 | **Preserved in full.** D-3 adds the provenance reading; it supersedes nothing |
+
+### Explicitly NOT decided here
+
+Which concrete migration or system process may assert `system` (none exists today); how the
+sync worker establishes account context; the provider→domain field mapping; **D-7** (external
+idempotency mechanism); and **A-2** (ADR-004 timestamp amendment), all of which remain open.
 
 ---
 
@@ -407,7 +493,7 @@ This record does **NOT** decide, and nothing below may be inferred from it:
 |---|---|---|---|
 | **D-1** | ~~Platform MetaAPI token storage mechanism~~ — **RATIFIED 2026-09-15 by ADR-014 (D-19)**: environment-supplied `METAAPI_PLATFORM_TOKEN` + `METAAPI_BASE_URL`, resolver-validated (`MA-001`…`MA-003`), fail-closed capability-absent. | ~~MetaAPI connect~~ | Satisfied by ADR-014 §2–§5. Implementation remains Phase 3 |
 | **D-2** | ~~Worker credential-consumption mechanism (A / B / C / D)~~ — **RATIFIED 2026-09-15: Boundary-Scoped Option B** (§2A). Provisioning is API-hosted and credential-consuming; synchronization is worker-hosted and credential-free, using `METAAPI_PLATFORM_TOKEN` + `metaapi_account_id`. | ~~Worker-side sync~~ | Satisfied: no broad `SELECT`, no plaintext in payloads, no ciphertext to the worker, ADR-016 isolation preserved. No broker, no migration, no `roles.sql` change |
-| **D-3** | `TRADE_IMPORTED` final actor set (and the home of migration-origin semantics) | Trade import | ADR-002 amendment ratified first |
+| **D-3** | ~~`TRADE_IMPORTED` final actor set (and the home of migration-origin semantics)~~ — **RATIFIED 2026-09-15: final set is `["system", "sync"]`** (§2C). `system` = migration/system-origin provenance; `sync` = provider-synchronization provenance. Not collapsed, `system` not removed, **no new actor** (`migration`/`importer`/`legacy`/`backfill` forbidden), no other actor set changed, `TRADE_CREATED` unchanged. | ~~Trade import~~ | Satisfied: A-1 already ratified the set; the `0001` actor CHECK already permits both, so **no migration**. Domain widening still lands with the trade-import code (rule 11) |
 | **D-4** | ~~Whether a diagnostic PnL value is retained, and where~~ — **RATIFIED 2026-09-15: provider-reported profit is authoritative and populates the existing canonical `net_pnl`** (§2B). No second PnL column; no persisted local-vs-provider comparison; local calculation, if ever performed, is diagnostic only and never overwrites the provider value. | ~~Trade import~~ | Satisfied: one canonical persisted value, `profitLoss` API contract unchanged, manual-trade behaviour unchanged, **no migration**. Persisted diagnostic values remain a separate Owner Decision |
 | **D-5** | Durable storage for naive `brokerTime` evidence | Trade import | Evidence only; never parsed; no IANA inference |
 | **D-6** | Sync substrate: cursor (`last_synced_at`), operation reservation, fill ledger, `quarantined` column | Sync phases | Migrations, each separately justified |
@@ -490,7 +576,9 @@ PRIVILEGES` for `velora_worker`, which would auto-grant DML on **future** tables
 - **G-3 — Log/payload hardening design.** Unblocked and **recommended first**: the three
   verified leak vectors should be closed before any plaintext egress exists.
 - **G-4 — Trade-import mapping design.** OD-M3 + OD-M4 + TZ-M1 fix event, PnL authority
-  and timestamp semantics; implementation still gated on A-1/A-2/A-5 and D-3…D-6.
+  and timestamp semantics; **A-1, D-3, D-4 and D-6 are now ratified**, so the actor, PnL and
+  substrate questions are settled. Implementation remains gated on **A-2/A-5** (at
+  implementation, rule 11), **D-5** and **D-7**.
 
 **NOT unlocked — implementation remains blocked:**
 
@@ -506,7 +594,7 @@ historical or incremental sync · webhooks · credential reveal in any form ·
 |---|---|---|---|
 | **B1** | Credential model contradiction (platform vs user secret) | **OD-M1** | **RESOLVED at decision level**; storage mechanism open (D-1) |
 | **B2** | Worker cannot reach credentials — no tsconfig reference, no dependency, no barrel export, and `velora_worker` holds `REVOKE ALL` on `user_credentials` | **D-2 (ratified 2026-09-15)** | **CLOSED — DISSOLVED.** Sync is credential-free, so no credential path is needed. The `REVOKE ALL` is correct and stays. A-4 not required |
-| **B3** | `TRADE_IMPORTED` forbids actor `sync` (verified by executing `assertOwnership`) | **OD-M3 + A-1 (ratified 2026-09-15)** | **CLOSED (governance).** The domain still encodes `["system"]`; the one-line change is now AUTHORIZED and lands with the trade-import implementation (AGENTS.md rule 11). **No migration.** D-3 (final disposition of migration-origin semantics) remains open |
+| **B3** | `TRADE_IMPORTED` forbids actor `sync` (verified by executing `assertOwnership`) | **OD-M3 + A-1 (ratified 2026-09-15)** | **CLOSED (governance).** The domain still encodes `["system"]`; the one-line change is now AUTHORIZED and lands with the trade-import implementation (AGENTS.md rule 11). **No migration.** **D-3 is now RATIFIED (§2C)**: the final set is `["system", "sync"]`, with `system` = migration/system-origin and `sync` = provider-synchronization provenance |
 | **B4** | No sync substrate: no `last_synced_at`, no operation reservation, no fill ledger, no `quarantined` column | **D-6** migrations | **OPEN** |
 | **B5** | Three verified log/payload leak vectors (`runner.ts` `err.message`; `index.ts` event log; pg-boss persists payloads) | G-3 hardening | **OPEN — must close before plaintext egress** |
 | **B6** | Provisioning idempotency header mismatch (`transaction-id` vs `Idempotency-Key`) | **D-7** | **OPEN / NOT PROVEN** |
@@ -520,7 +608,8 @@ historical or incremental sync · webhooks · credential reveal in any form ·
 governance level.
 
 **Still outstanding before the first line of MetaAPI implementation code:** the
-substrate/mapping decisions **D-3…D-7**, plus the operational blockers below.
+remaining substrate/mapping decisions **D-5** and **D-7**, plus the operational blockers
+below. **D-3, D-4 and D-6 are ratified** (§2C, §2B, migration `0012`).
 **A-1 was ratified 2026-09-15** (ADR-002 *Amendment A-1*), closing B3 at the governance
 level; **A-2 and A-5 remain REQUIRED** at their respective implementation phases.
 
@@ -544,6 +633,16 @@ requires a **deployment decision** that is outside implementation authority. See
   `packages/contracts/src/trades.ts`.
 - **Owner authorization:** owner directive, 2026-09-15 (this session) — decisions quoted
   in §2 are the owner's, recorded verbatim in substance.
+- **D-3 ratification (2026-09-15), recorded at HEAD `94adf60`:** migration-origin semantics
+  settled (§2C). Final actor set `TRADE_IMPORTED → ["system", "sync"]` — unchanged from A-1;
+  D-3 fixes the *meaning* of each actor rather than the membership. Claims verified before
+  recording: the `0001_core.sql:117` actor CHECK already permits all five actors and the
+  `type` CHECK already contains `TRADE_IMPORTED`, so **no migration was created to restate a
+  valid constraint**; `packages/contracts/src/trades.ts:54` documents `TRADE_IMPORTED` as a
+  *"migration origin event"*, which is the repository evidence for retaining `system`;
+  `tradeLedger.ts:85` shows `system` is also load-bearing for `QUARANTINE_RAISED`; and no
+  production code emits `TRADE_IMPORTED` today. **Governance only: no code, no schema, no
+  migration, no privilege change. D-4, D-7 and A-2 untouched.**
 - **D-4 ratification (2026-09-15), recorded at HEAD `0390ab5`:** provider PnL authority fixed to
   the existing canonical `net_pnl` (§2B). Claims verified before recording: `trades.net_pnl`
   present in migration 0001; `provider_profit`/`calculated_profit`/`broker_profit` absent from
