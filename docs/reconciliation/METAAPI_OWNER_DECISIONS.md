@@ -1,8 +1,12 @@
-# VELORA MODERN — MetaAPI Owner Decisions (OD-M1 … OD-M4 + TZ-M1, D-1, D-2, D-3, D-4)
+# VELORA MODERN — MetaAPI Owner Decisions (OD-M1 … OD-M4 + TZ-M1, D-1, D-2, D-3, D-4, D-5)
 
 ## 1. Status
 
 **Status:** OWNER-APPROVED 2026-09-15 (explicit owner directive, this session).
+**Amended 2026-09-15 — D-5 RATIFIED (see §2D).** Governance-only: fixes how a naive MetaAPI
+`brokerTime` is preserved as evidence without inventing a timezone. A **dedicated
+`broker_time_text` field is REQUIRED** but is **deliberately NOT created here** — it lands with
+the trade-import implementation. No code, no schema, no migration.
 **Amended 2026-09-15 — D-3 RATIFIED (see §2C).** Governance-only: fixes the final
 `TRADE_IMPORTED` actor set as **`["system", "sync"]`** and assigns each actor a distinct
 provenance meaning. **No new actor is introduced**, no actor is removed, no other event's actor
@@ -346,6 +350,140 @@ idempotency mechanism); and **A-2** (ADR-004 timestamp amendment), all of which 
 
 ---
 
+## 2D. Owner decision — D-5 (ratified 2026-09-15)
+
+### D-5 — Naive `brokerTime` evidence: **PRESERVED VERBATIM IN A DEDICATED FIELD, NEVER INTERPRETED**
+
+**Owner decision, ratified 2026-09-15.** A naive MetaAPI `brokerTime` is **evidence, not an
+instant**. It is stored verbatim, never parsed, never converted, and never allowed to influence
+any UTC value. Because the provider supplies `time` and `brokerTime` as **two distinct fields in
+the same deal**, the existing `sync_fills.raw_time_text` column **cannot** serve as the canonical
+home for both: a **dedicated `broker_time_text` field is required**, and is deferred to the
+trade-import implementation phase (AGENTS.md rule 11).
+
+**Binding terms.**
+
+1. **Explicit timestamp.** If the provider timestamp carries `Z` or an explicit UTC offset, it is
+   parsed **deterministically** to UTC, persisted in `occurred_at_utc`, with `time_status =
+   'resolved_utc'`, and the original provider string preserved verbatim in `raw_time_text`.
+2. **Naive `brokerTime`.** If the provider supplies a naive `brokerTime` with no offset, the
+   **exact provider string is preserved verbatim as evidence**. No timezone is assigned, no UTC
+   conversion is performed, and no IANA zone is inferred.
+3. **Forbidden inference sources — exhaustive and binding.** A naive `brokerTime` must NEVER be
+   interpreted using a guessed timezone, broker country, broker/server location, account
+   location, machine/host timezone, IANA inference, a default application timezone, or any other
+   heuristic.
+4. **`occurred_at_utc` MUST remain NULL** for a fill whose only timestamp evidence is naive,
+   unless **independently deterministic** evidence exists. `time_status` stays `'unresolved'`,
+   which migration `0012`'s `sync_fills_time_consistency` CHECK already enforces at the database
+   level.
+5. **Analytics and ordering.** An unresolved naive timestamp **MUST NOT** be treated as if it
+   were UTC, **MUST NOT** silently participate in time-based analytics, and **MUST NOT** be used
+   for deterministic chronological ordering where timezone interpretation is required.
+   Unresolved rows are excluded from such computations rather than approximated.
+6. **Future reconciliation.** If authoritative deterministic timezone evidence is later obtained,
+   reconciliation **may be designed separately**. Historical raw evidence remains **immutable**,
+   and the system **must never overwrite the original provider evidence with a derived or
+   guessed value**. Any such reconciliation is a **separate Owner Decision**.
+7. **Storage.** `raw_time_text` keeps its existing meaning — verbatim copy of the **absolute,
+   offset-explicit `time`**. A **dedicated `broker_time_text`** field carries the naive
+   `brokerTime`. **`raw_time_text` is not overloaded, not redefined, and not altered.**
+8. **No schema change is authorized by D-5.** The `broker_time_text` column is **authorized in
+   principle but NOT created**; it lands in the same change as the trade-import implementation.
+
+### Traceability — the five questions answered before ratifying
+
+**1. What `raw_time_text` currently means.** Introduced by migration `0012`
+(`db/migrations/0012_metaapi_sync_substrate.sql:134`) as a nullable, **unconstrained** `TEXT`
+column on `sync_fills`. Its documented meaning (`:125-132`) is narrow: `occurred_at_utc` is set
+**only** from an offset-explicit provider `time`, and *"`raw_time_text` keeps **that value**
+verbatim as evidence."* It is the verbatim copy of the **absolute** timestamp — the same role as
+legacy `metaapi_fills.raw_time_text`, commented *"verbatim absolute `time`"*. **No CHECK
+constraint references it**, so the database would not reject a naive value — the restriction is
+semantic, not enforced.
+
+**2. Whether it can safely represent naive `brokerTime`.** **No.** The provider returns `time`
+and `brokerTime` as **two distinct fields in the same deal**, so they must both be retainable
+**simultaneously** for one fill. Verified in the legacy implementation:
+`MetaApiService.php:206-209` extracts `time_raw ← $deal['time']` and, separately,
+`broker_time ← $deal['brokerTime']`; `MetaApiFillRepository.php:44-48,77-78` binds `:raw_time`
+and `:broker_time` as **separate parameters in the same INSERT**; and the history-deal fixture
+(`MetaApiService.php:898-917`) shows every deal carrying **both** an offset-explicit `time` and a
+naive `brokerTime`. Overloading one column would therefore be **lossy** — it could store one or
+the other, not both — and would additionally make the column's contents ambiguous: a reader could
+no longer tell whether a stored string is an absolute instant or an uninterpretable wall-clock
+value, which is precisely the confusion this governance exists to prevent.
+
+**3. Whether a dedicated `broker_time_text` field is actually necessary.** **Yes — REQUIRED.**
+This is not an invention: it mirrors the **verified** legacy column
+`metaapi_fills.broker_time_text VARCHAR(64) NULL -- naive brokerTime, evidence only`
+(`api/database/migrations/v1.1_metaapi_fill_ledger.sql:42`), whose repository documentation states
+*"brokerTime is stored as evidence only (broker_time_text) and NEVER used"* (`:16`). D-6
+explicitly deferred exactly this column to D-5 (`0012:130-132`), and TZ-M1 item 6 assigns its
+durable storage to D-5. **The column is NOT created by this decision.**
+
+**4. Exactly what D-5 authorizes.** Recording the semantics above, and authorizing **in
+principle** a single additive, nullable `broker_time_text` evidence field on the fill ledger —
+to be created **only** as part of the trade-import implementation, with its own migration and
+tests, under the existing migration rules.
+
+**5. Exactly what D-5 does NOT authorize.** No migration and no schema change now · no
+modification of `raw_time_text`, `occurred_at_utc`, `time_status`, or any `0012` object · no
+runtime/TypeScript/PHP code · no MetaAPI client, worker, sync or webhook · no parsing,
+normalization or conversion of `brokerTime` · no IANA inference of any kind · no
+timezone-reconciliation mechanism · no change to manual-trade timezone behaviour · no ADR
+amendment · no deployment · no provider contact.
+
+### Rationale
+
+Two timestamps, two meanings, two columns. `time` is an **absolute instant** and reduces
+deterministically to UTC; `brokerTime` is a **wall-clock reading in an unknown zone** and reduces
+to nothing without evidence Velora does not possess. Keeping them in separate fields makes the
+distinction structural rather than conventional: no reader has to guess which kind of value it
+holds, and no future code can accidentally promote a wall-clock string to an instant. Discarding
+`brokerTime` instead was rejected — it is the only record of what the broker itself displayed,
+which is what a user recognises when reconciling a trade, and it is the raw material any future
+timezone determination would need. Storing it **without** interpreting it is the only option that
+loses no evidence and fabricates no fact.
+
+### Relationship to ADR-004
+
+**Consistent; no amendment made here.** ADR-004 §Decision item 1 mandates UTC-only `timestamptz`
+storage — honoured, because a naive value never becomes a `timestamptz` at all; it stays TEXT with
+`occurred_at_utc` NULL. Item 2 mandates that broker/MetaApi times are *"stored as reported, plus
+captured source/offset metadata **where the provider supplies it**"* — D-5 is the precise
+application of that clause to the case where the provider supplies **no** offset. The ADR's own
+rejection of naive storage in PG (*"every consumer must guess"*) is respected: nothing is stored
+in a form that invites interpretation. Manual-trade timezone behaviour is **unchanged**.
+
+**A-2 remains the deferred ADR-004 amendment** (§8) and is **NOT performed here**: ADR-004
+§Open Questions item 3 (*"MetaApi timestamp semantics in current sync code"*) is closed by TZ-M1
+together with D-5, but per AGENTS.md rule 11 that amendment lands **with the trade-import
+implementation**. D-5 adds the `broker_time_text` disposition to A-2's required content.
+
+### Relationship to D-6
+
+**Additive; nothing in `0012` changes.** D-6 built the evidence substrate and deliberately stopped
+at this boundary, stating that no naive `brokerTime` column is added because *"TZ-M1 item 6
+assigns its durable storage to D-5, which is NOT authorized by D-6"* (`0012:130-132`). D-5
+supplies that missing decision and nothing else: `occurred_at_utc`, `raw_time_text`,
+`time_status` and the `sync_fills_time_consistency` CHECK are **untouched**. That CHECK already
+enforces term 4 in the database — `time_status='unresolved'` requires `occurred_at_utc IS NULL`,
+proven by executed test in `db/tests/syncSubstrate.pg.test.ts`. D-5 adds **no** new constraint
+and **no** new state to `time_status`.
+
+### Implementation status
+
+**GOVERNANCE ONLY — nothing implemented.** No migration was created, no schema object was
+altered, no runtime code was changed, and migration count remains **12**. The `broker_time_text`
+column is **authorized but NOT created**. Deferred to the trade-import implementation phase:
+(a) the additive migration creating a nullable `broker_time_text` on `sync_fills`; (b) the
+population logic writing it verbatim from the provider payload; (c) the A-2 ADR-004 amendment;
+(d) tests proving a naive `brokerTime` yields `occurred_at_utc IS NULL` and
+`time_status='unresolved'`. None of these is authorized now.
+
+---
+
 ## 3. Rationale
 
 **OD-M1.** The audit verified from the legacy implementation that MetaAPI authenticates
@@ -495,7 +633,7 @@ This record does **NOT** decide, and nothing below may be inferred from it:
 | **D-2** | ~~Worker credential-consumption mechanism (A / B / C / D)~~ — **RATIFIED 2026-09-15: Boundary-Scoped Option B** (§2A). Provisioning is API-hosted and credential-consuming; synchronization is worker-hosted and credential-free, using `METAAPI_PLATFORM_TOKEN` + `metaapi_account_id`. | ~~Worker-side sync~~ | Satisfied: no broad `SELECT`, no plaintext in payloads, no ciphertext to the worker, ADR-016 isolation preserved. No broker, no migration, no `roles.sql` change |
 | **D-3** | ~~`TRADE_IMPORTED` final actor set (and the home of migration-origin semantics)~~ — **RATIFIED 2026-09-15: final set is `["system", "sync"]`** (§2C). `system` = migration/system-origin provenance; `sync` = provider-synchronization provenance. Not collapsed, `system` not removed, **no new actor** (`migration`/`importer`/`legacy`/`backfill` forbidden), no other actor set changed, `TRADE_CREATED` unchanged. | ~~Trade import~~ | Satisfied: A-1 already ratified the set; the `0001` actor CHECK already permits both, so **no migration**. Domain widening still lands with the trade-import code (rule 11) |
 | **D-4** | ~~Whether a diagnostic PnL value is retained, and where~~ — **RATIFIED 2026-09-15: provider-reported profit is authoritative and populates the existing canonical `net_pnl`** (§2B). No second PnL column; no persisted local-vs-provider comparison; local calculation, if ever performed, is diagnostic only and never overwrites the provider value. | ~~Trade import~~ | Satisfied: one canonical persisted value, `profitLoss` API contract unchanged, manual-trade behaviour unchanged, **no migration**. Persisted diagnostic values remain a separate Owner Decision |
-| **D-5** | Durable storage for naive `brokerTime` evidence | Trade import | Evidence only; never parsed; no IANA inference |
+| **D-5** | ~~Durable storage for naive `brokerTime` evidence~~ — **RATIFIED 2026-09-15: preserved verbatim in a DEDICATED `broker_time_text` field, never interpreted** (§2D). `raw_time_text` keeps its existing meaning (verbatim absolute `time`) and is **not overloaded**: the provider returns `time` and `brokerTime` as two distinct fields in the same deal, so one column cannot hold both. | ~~Trade import~~ | Satisfied at decision level: evidence only, never parsed, no IANA inference, `occurred_at_utc` stays NULL. **No migration now** — the column is authorized in principle and lands with the trade-import implementation (rule 11) |
 | **D-6** | Sync substrate: cursor (`last_synced_at`), operation reservation, fill ledger, `quarantined` column | Sync phases | Migrations, each separately justified |
 | **D-7** | Provisioning idempotency header (`transaction-id` vs `Idempotency-Key`) | MetaAPI connect | Resolve from provider docs/support; no live call with user credentials |
 
@@ -547,7 +685,7 @@ as that implementation.
 | # | Document | Exact amendment | Gates | Status |
 |---|---|---|---|---|
 | **A-1** | `docs/adr/ADR-002-trade-ledger.md` — *Ownership matrix* §Decision + *Amendment A-1* | **DONE 2026-09-15.** `TRADE_IMPORTED → ["system", "sync"]` ratified: `sync` is the controlled worker performing MetaAPI imports; `system` retained for migration-origin imports. Matrix row no longer "(proposed)". Limits recorded: no ownership bypass, no impersonation, no other actor set broadened, no credential access. **No migration required.** | OD-M3, trade import | **SATISFIED** |
-| **A-2** | `docs/adr/ADR-004-time-model.md` — §Open Questions item 3 | Close *"MetaApi timestamp semantics in current sync code"* with TZ-M1: offset-explicit `time` → deterministic UTC; naive `brokerTime` never interpreted; no IANA inference; `source_timezone` NULL with provenance for MetaAPI rows. **Manual-trade behaviour unchanged.** | TZ-M1, trade import | **REQUIRED at implementation** |
+| **A-2** | `docs/adr/ADR-004-time-model.md` — §Open Questions item 3 | Close *"MetaApi timestamp semantics in current sync code"* with TZ-M1: offset-explicit `time` → deterministic UTC; naive `brokerTime` never interpreted; no IANA inference; `source_timezone` NULL with provenance for MetaAPI rows. **Manual-trade behaviour unchanged.** **D-5 (§2D) adds the `broker_time_text` disposition to this amendment's required content.** | TZ-M1, D-5, trade import | **REQUIRED at implementation** |
 | **A-3** | `docs/adr/ADR-014-metaapi-platform-token.md` | **DONE 2026-09-15 (D-19).** Governs the platform token as a distinct secret class: external supply, prohibitions (no `user_credentials`, no synthetic user, no derivation from `CREDENTIAL_MASTER_KEY`), fail-closed resolver, independent rotation, no mandated secret manager. **ADR-016 unchanged.** | OD-M1, MetaAPI connect | **SATISFIED** |
 | **A-4** | `docs/adr/ADR-007-job-semantics.md` | **NOT REQUIRED — condition resolved 2026-09-15.** D-2 selected Boundary-Scoped Option B, which alters no worker DB role and no least-privilege posture, so the stated "no amendment is needed" branch applies. **ADR-007 remains unchanged** unless an actual worker-role or job-semantics change is later introduced. | OD-M2, worker sync | **NOT REQUIRED** |
 | **A-5** | `docs/adr/ADR-002-trade-ledger.md` | Record that provider-reported profit is the authoritative net-PnL input for imported trades under `SYNC_WINS_FINANCIAL`. **D-4 is now RATIFIED (§2B)**, so the disposition is settled: the provider value populates the existing canonical `net_pnl`, and **no second PnL column and no persisted diagnostic value are authorized**. A-5 records this in ADR-002 in the same change as the trade-import implementation. | OD-M4, D-4, trade import | **REQUIRED at implementation** |
@@ -576,9 +714,9 @@ PRIVILEGES` for `velora_worker`, which would auto-grant DML on **future** tables
 - **G-3 — Log/payload hardening design.** Unblocked and **recommended first**: the three
   verified leak vectors should be closed before any plaintext egress exists.
 - **G-4 — Trade-import mapping design.** OD-M3 + OD-M4 + TZ-M1 fix event, PnL authority
-  and timestamp semantics; **A-1, D-3, D-4 and D-6 are now ratified**, so the actor, PnL and
-  substrate questions are settled. Implementation remains gated on **A-2/A-5** (at
-  implementation, rule 11), **D-5** and **D-7**.
+  and timestamp semantics; **A-1, D-3, D-4, D-5 and D-6 are now ratified**, so the actor, PnL,
+  timestamp-evidence and substrate questions are settled. Implementation remains gated on
+  **A-2/A-5** (at implementation, rule 11) and **D-7**.
 
 **NOT unlocked — implementation remains blocked:**
 
@@ -608,8 +746,9 @@ historical or incremental sync · webhooks · credential reveal in any form ·
 governance level.
 
 **Still outstanding before the first line of MetaAPI implementation code:** the
-remaining substrate/mapping decisions **D-5** and **D-7**, plus the operational blockers
-below. **D-3, D-4 and D-6 are ratified** (§2C, §2B, migration `0012`).
+remaining substrate/mapping decision **D-7**, plus the operational blockers below.
+**D-3, D-4, D-5 and D-6 are ratified** (§2C, §2B, §2D, migration `0012`). **D-7 requires an
+external provider fact and cannot be resolved from this repository.**
 **A-1 was ratified 2026-09-15** (ADR-002 *Amendment A-1*), closing B3 at the governance
 level; **A-2 and A-5 remain REQUIRED** at their respective implementation phases.
 
@@ -633,6 +772,19 @@ requires a **deployment decision** that is outside implementation authority. See
   `packages/contracts/src/trades.ts`.
 - **Owner authorization:** owner directive, 2026-09-15 (this session) — decisions quoted
   in §2 are the owner's, recorded verbatim in substance.
+- **D-5 ratification (2026-09-15), recorded at HEAD `9d739fa`:** naive `brokerTime` evidence
+  semantics settled (§2D). Claims verified before recording: `raw_time_text` is a nullable,
+  **unconstrained** TEXT column at `0012:134` documented at `0012:125-132` as the verbatim copy of
+  the **offset-explicit** `time`; **no CHECK references it**; the provider supplies `time` and
+  `brokerTime` as two distinct fields in the same deal, proven by
+  `MetaApiService.php:206-209` (separate extraction), `MetaApiFillRepository.php:44-48,77-78`
+  (separate bind parameters, same INSERT) and the history-deal fixture at
+  `MetaApiService.php:898-917` (both present per deal); the legacy schema carries a dedicated
+  `broker_time_text` column (`v1.1_metaapi_fill_ledger.sql:42`) commented *"naive brokerTime,
+  evidence only"*; and `0012:130-132` explicitly deferred this column to D-5. Conclusion:
+  `raw_time_text` is **semantically insufficient**, so a dedicated `broker_time_text` is
+  **REQUIRED but NOT created here**. **Governance only: no code, no schema, no migration, no ADR
+  amendment. ADR-004 unchanged; A-2 remains deferred under rule 11.**
 - **D-3 ratification (2026-09-15), recorded at HEAD `94adf60`:** migration-origin semantics
   settled (§2C). Final actor set `TRADE_IMPORTED → ["system", "sync"]` — unchanged from A-1;
   D-3 fixes the *meaning* of each actor rather than the membership. Claims verified before
