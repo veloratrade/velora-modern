@@ -46,7 +46,13 @@ export async function createPgBossQueue(connectionString: string): Promise<Queue
     },
     async complete(id: string) { await boss.complete(id); },
     async fail(id: string) { await boss.fail(id); },
-    async deadLetter(id: string, reason: string) { await boss.fail(id, { data: { dlq: true, reason } }); },
+    async deadLetter(id: string, reason: string) {
+      // G-3: the DLQ row is durable, so the reason is bounded and coerced to a
+      // fixed shape here too. Callers already pass `CODE:jobClass` via
+      // safeDlqReason(); this guarantees the invariant at the persistence
+      // boundary rather than trusting every present and future caller.
+      await boss.fail(id, { data: { dlq: true, reason: reason.slice(0, 128) } });
+    },
     async size() { const s = await boss.getJobCounts(); return s.queued ?? 0; },
     async dlqSize() { const s = await boss.getJobCounts(); return s.failed ?? 0; },
     async dlqEntries() { return []; }, // pg-boss maintains its own failed-state listing

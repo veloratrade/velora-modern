@@ -3,6 +3,12 @@
 // idempotent completion. Handlers receive the descriptor and must be
 // idempotent under the idempotencyKey contract.
 import type { QueuePort, QueuedJob } from "./queue/QueuePort.js";
+import {
+  classifyError,
+  safeDlqReason,
+  safeFailureEvent,
+  type WorkerErrorCode,
+} from "./observability/safeError.js";
 
 export type JobHandler = (job: QueuedJob) => Promise<void>;
 export type Logger = (event: Record<string, unknown>) => void;
@@ -20,7 +26,7 @@ export class WorkerRunner {
     if (!job) return "idle";
     const handler = this.handlers.get(job.descriptor.jobClass);
     if (!handler) {
-      await this.queue.deadLetter(job.id, `no handler registered for ${job.descriptor.jobClass}`);
+      await this.queue.deadLetter(job.id, safeDlqReason("NO_HANDLER", job.descriptor.jobClass));
       this.log({ level: "error", event: "job.no_handler", jobClass: job.descriptor.jobClass });
       return "no-handler";
     }
@@ -33,14 +39,20 @@ export class WorkerRunner {
     } catch (err) {
       const timedOut = err instanceof JobTimeoutError;
       await this.queue.fail(job.id); // queue applies retry/DLQ policy (ADR-007)
-      this.log({
-        level: "warn",
-        event: timedOut ? "job.timeout" : "job.failed",
-        jobClass: job.descriptor.jobClass,
-        id: job.id,
-        attempts: job.attempts + 1,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      // G-3: the raw error is NEVER logged. An integration failure can embed
+      // the request that produced it — including a credential forwarded to a
+      // provider — so only a code from the closed vocabulary is emitted.
+      const code: WorkerErrorCode = timedOut ? "TIMEOUT" : classifyError(err);
+      this.log(
+        safeFailureEvent({
+          event: timedOut ? "job.timeout" : "job.failed",
+          jobClass: job.descriptor.jobClass,
+          jobId: job.id,
+          attempts: job.attempts + 1,
+          code,
+          durationMs: Date.now() - started,
+        }),
+      );
       return timedOut ? "timeout" : "failed";
     }
   }
