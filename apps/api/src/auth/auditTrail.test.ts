@@ -373,6 +373,9 @@ test("C-34/10: audit records never contain passwords, hashes or tokens", async (
         occurredAt: entry.occurredAt.toISOString(),
         credentialId: entry.credentialId ?? null,
         provider: entry.provider ?? null,
+        // OD-MP-2 (migration 0014): binding events carry an account reference.
+        // Mirrored here so this recorder stays a faithful AuditStore.
+        tradingAccountId: entry.tradingAccountId ?? null,
       };
     },
     async list() {

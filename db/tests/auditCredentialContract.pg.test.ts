@@ -170,8 +170,12 @@ test("B-2 real PostgreSQL: audit credential contract (0011)", { skip: URL === un
     ]) {
       assert.equal(names.includes(forbidden), false, `audit_log must have no ${forbidden} column`);
     }
-    // Exactly the 9 original columns plus the 2 added by 0011.
-    assert.equal(names.length, 11);
+    // Exactly the 9 original columns, the 2 added by 0011, and the 1 added by
+    // 0014 (trading_account_id). Kept as an exact count so that ANY future
+    // column must come past this assertion and justify itself.
+    assert.equal(names.length, 12);
+    assert.equal(names.includes("trading_account_id"), true,
+      "0014 adds a nullable account reference — an identifier, never a secret");
   });
 
   await t.test("append-only: the adapter issues no UPDATE or DELETE", async () => {

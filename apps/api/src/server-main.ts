@@ -42,6 +42,8 @@ import { MemoryAuditStore } from "./auth/memoryAuditStore.js";
 import { PgAuditStore } from "./auth/pgAuditStore.js";
 import { resolveCredentialKey } from "./credentials/credentialConfig.js";
 import { resolveMetaApiConfig } from "./metaapi/metaApiConfig.js";
+import { MetaApiProvisioningService } from "./metaapi/provisioningService.js";
+import { PgProvisioningStore } from "./metaapi/pgProvisioningStore.js";
 import { MemoryCredentialStore } from "./credentials/memoryCredentialStore.js";
 import { PgCredentialStore } from "./credentials/pgCredentialStore.js";
 import type { CredentialStore } from "./credentials/credentialStore.js";
@@ -139,6 +141,7 @@ async function main(): Promise<void> {
     adminUsers?: AdminUserService;
     ownership?: OwnershipService;
     credentials?: CredentialService;
+    provisioning?: MetaApiProvisioningService;
   } = {};
   if (boot.jwtSecret !== undefined) {
     capabilities.auth = new AuthService({
@@ -251,6 +254,76 @@ async function main(): Promise<void> {
         }),
       );
     }
+  }
+
+  // OD-MP-1: MetaAPI provisioning / account binding.
+  //
+  // FAIL-CLOSED COMPOSITION. The capability is constructed ONLY when all four
+  // preconditions hold: a database pool, a valid CREDENTIAL_MASTER_KEY (which
+  // is what produced `credentialStore`), a configured platform token, and the
+  // audit trail. Any gap leaves the routes 503 rather than half-built — a
+  // provisioning path that could not decrypt, or could not audit, must not
+  // exist at all.
+  //
+  // The credential STORE is handed to this service and to nothing else. No
+  // route receives it, so `reveal()` remains unreachable from HTTP except
+  // through this one owner-scoped flow.
+  if (
+    pool !== undefined &&
+    credentialStore !== undefined &&
+    metaApi.configured &&
+    metaApi.token !== null
+  ) {
+    const platformToken = metaApi.token;
+    // Optional operator override for the provisioning host. Absent → the
+    // client library default. Rejected unless absolute https.
+    const rawProvisioningBase = process.env.METAAPI_PROVISIONING_BASE_URL;
+    let provisioningBaseUrl: string | null = null;
+    if (rawProvisioningBase !== undefined && rawProvisioningBase.trim() !== "") {
+      try {
+        const parsed = new URL(rawProvisioningBase.trim());
+        if (parsed.protocol === "https:") {
+          provisioningBaseUrl = parsed.href.replace(/\/+$/, "");
+        } else {
+          console.log(
+            JSON.stringify({
+              level: "warn",
+              event: "metaapi.provisioning.base_url_rejected",
+              code: "MA-004",
+              message: "METAAPI_PROVISIONING_BASE_URL must be an absolute https:// URL.",
+            }),
+          );
+        }
+      } catch {
+        console.log(
+          JSON.stringify({
+            level: "warn",
+            event: "metaapi.provisioning.base_url_rejected",
+            code: "MA-004",
+            message: "METAAPI_PROVISIONING_BASE_URL must be an absolute https:// URL.",
+          }),
+        );
+      }
+    }
+    capabilities.provisioning = new MetaApiProvisioningService({
+      accounts: accountStore,
+      credentials: credentialStore,
+      operations: new PgProvisioningStore(pool),
+      audit: new PgAuditStore(pool),
+      // Read through the holder at call time; never captured as a bare string
+      // in module scope and never logged.
+      platformToken: () => platformToken.reveal(),
+      // DELIBERATELY NOT `metaApi.baseUrl`. That value is the CLIENT/history
+      // host (mt-client-api-v1…); provisioning lives on a DIFFERENT host
+      // (mt-provisioning-api-v1…). The legacy system derives one from the
+      // other by string replacement (MetaApiService.php:55-56), which silently
+      // breaks for any host that does not contain the expected substring.
+      // Modern states the provisioning host explicitly: an operator override,
+      // else the client's documented default. Validated https-only, because a
+      // bearer token and a broker password travel on this connection.
+      clientOptions: provisioningBaseUrl !== null ? { baseUrl: provisioningBaseUrl } : {},
+    });
+    console.log(JSON.stringify({ level: "info", event: "metaapi.provisioning.enabled" }));
   }
 
   const app = createApp({

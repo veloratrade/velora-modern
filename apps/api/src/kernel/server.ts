@@ -30,6 +30,10 @@ import { OwnershipService } from "../auth/ownershipService.js";
 import { AccountService, AccountError } from "../accounts/accountService.js";
 import { TradeService, TradeError } from "../trades/tradeService.js";
 import { CredentialService, CredentialError } from "../credentials/credentialService.js";
+import {
+  MetaApiProvisioningService,
+  ProvisioningServiceError,
+} from "../metaapi/provisioningService.js";
 import { EntitlementError } from "../entitlements/entitlementService.js";
 import { resolveClientIp, type RateLimitDecision } from "@velora/domain";
 import { FixedWindowRateLimiter, type RateLimiter } from "../ratelimits/rateLimiter.js";
@@ -58,6 +62,12 @@ export interface ApiConfig {
    * missing or invalid: the capability disappears rather than degrading.
    */
   readonly credentials?: CredentialService;
+  /**
+   * OD-MP-1 MetaAPI provisioning / account binding. Absent → the connect and
+   * disconnect routes fail closed (503). Absence is the NORMAL state when
+   * either the credential capability or METAAPI_PLATFORM_TOKEN is missing.
+   */
+  readonly provisioning?: MetaApiProvisioningService;
   /** Phase C rate limiting (inc 7). Absent → createApp builds a default
    *  fixed-window limiter on a per-process memory store (PHP applies
    *  throttling unconditionally at dispatch; a per-app instance preserves
@@ -577,6 +587,64 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
     return accountsRoute(async (accounts, claims) => {
       const id = decodeURIComponent(path.split("/")[4] ?? "");
       const result = await accounts.deleteAccount(id, claims.sub);
+      return { status: 200, body: ok(result) };
+    });
+  }
+
+  // ---- MetaAPI provisioning / binding (OD-MP-1, OD-MP-3) -------------------
+  //
+  // OWNERSHIP, NOT RBAC — the same rule the credential routes use, and for the
+  // same reason (ADR-016): this server resolves a System Owner who satisfies
+  // every permission, so a permission check here would hand that owner the
+  // ability to spend another user's broker credential. The owner is ALWAYS
+  // `claims.sub`, and NO route accepts a user id from the client.
+  const provisioningRoute = (
+    fn: (
+      provisioning: MetaApiProvisioningService,
+      claims: { sub: string },
+    ) => Promise<RouteResult>,
+  ): Promise<RouteResult> => {
+    if (config.auth === undefined || config.provisioning === undefined) {
+      return Promise.resolve({
+        status: 503,
+        body: fail("SERVICE_UNAVAILABLE", "provisioning not configured", sec.requestId),
+      });
+    }
+    const claims = authenticateRequest(req, config.auth);
+    if (claims === null) {
+      return Promise.resolve({
+        status: 401,
+        body: fail("UNAUTHENTICATED", "Unauthenticated.", sec.requestId),
+      });
+    }
+    return fn(config.provisioning, claims).catch((err: unknown) => {
+      if (err instanceof ProvisioningServiceError) {
+        return { status: err.status, body: fail(err.code, err.message, sec.requestId, err.details) };
+      }
+      throw err;
+    });
+  };
+
+  if (method === "POST" && /^\/api\/v1\/accounts\/[^/]+\/metaapi\/connect$/.test(path)) {
+    return provisioningRoute(async (provisioning, claims) => {
+      const id = decodeURIComponent(path.split("/")[4] ?? "");
+      const body = await parseJsonBody(req);
+      // claims.sub is the ONLY identity source; `id` is validated by ownership
+      // inside the service, never trusted from the path alone.
+      const result = await provisioning.connect({ id: claims.sub, requestId: sec.requestId }, id, body);
+      return { status: 200, body: ok(result) };
+    });
+  }
+
+  if (method === "POST" && /^\/api\/v1\/accounts\/[^/]+\/metaapi\/disconnect$/.test(path)) {
+    return provisioningRoute(async (provisioning, claims) => {
+      const id = decodeURIComponent(path.split("/")[4] ?? "");
+      const body = await parseJsonBody(req);
+      const result = await provisioning.disconnect(
+        { id: claims.sub, requestId: sec.requestId },
+        id,
+        body,
+      );
       return { status: 200, body: ok(result) };
     });
   }

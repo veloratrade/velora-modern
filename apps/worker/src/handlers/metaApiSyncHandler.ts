@@ -15,7 +15,7 @@
 // and never sees a broker login, an investor password, credential ciphertext,
 // or CREDENTIAL_MASTER_KEY.
 import type { Pool } from "pg";
-import type { MetaApiDeal, MetaApiSyncPayload, NormalizedFill } from "@velora/contracts";
+import type { MetaApiDeal, MetaApiSyncPayload, NormalizedFill, SyncErrorCode } from "@velora/contracts";
 import type { QueuedJob } from "../queue/QueuePort.js";
 import { ClassifiedError, classifyError, type WorkerErrorCode } from "../observability/safeError.js";
 import { fetchHistoryDeals } from "./../metaapi/historyDealsClient.js";
@@ -36,9 +36,27 @@ export interface MetaApiSyncDeps {
   readonly now?: () => Date;
 }
 
-/** Codes that map cleanly onto the non-secret `last_sync_error_code` vocabulary. */
-const PERSISTABLE: ReadonlySet<WorkerErrorCode> = new Set([
-  "PROVIDER_REJECTED", "PROVIDER_UNAVAILABLE", "PROVIDER_MALFORMED", "NOT_CONFIGURED",
+/**
+ * Codes that map cleanly onto the non-secret `last_sync_error_code` vocabulary.
+ *
+ * TYPED AS A MAP, NOT A SET (OD-MP Phase 15). `WorkerErrorCode` is the wider
+ * worker-wide union; `SyncErrorCode` is the narrower vocabulary the column
+ * accepts. A `Set<WorkerErrorCode>` could only tell us "this code is
+ * persistable" — it could not tell the COMPILER that the value narrows, which
+ * is why the previous code needed a cast. An explicit map from one union to
+ * the other carries that proof in the type system: `PERSISTABLE.get(code)`
+ * returns `SyncErrorCode | undefined`, and the `undefined` check IS the
+ * narrowing. Adding a member to either union without updating this table is a
+ * compile error rather than a silent runtime surprise.
+ */
+const PERSISTABLE: ReadonlyMap<WorkerErrorCode, SyncErrorCode> = new Map<
+  WorkerErrorCode,
+  SyncErrorCode
+>([
+  ["PROVIDER_REJECTED", "PROVIDER_REJECTED"],
+  ["PROVIDER_UNAVAILABLE", "PROVIDER_UNAVAILABLE"],
+  ["PROVIDER_MALFORMED", "PROVIDER_MALFORMED"],
+  ["NOT_CONFIGURED", "NOT_CONFIGURED"],
 ]);
 
 export function createMetaApiSyncHandler(deps: MetaApiSyncDeps) {
@@ -103,8 +121,12 @@ export function createMetaApiSyncHandler(deps: MetaApiSyncDeps) {
       }, normalized, to, nowFn());
     } catch (err) {
       const code = classifyError(err);
-      if (PERSISTABLE.has(code)) {
-        await recordSyncError(deps.pool, accountId, code as never);
+      // No cast: `persistable` is `SyncErrorCode | undefined`, so the guard
+      // below is what narrows it. Behaviour is identical to the previous
+      // `PERSISTABLE.has(code)` check — the same four codes are persisted.
+      const persistable = PERSISTABLE.get(code);
+      if (persistable !== undefined) {
+        await recordSyncError(deps.pool, accountId, persistable);
       }
       throw err; // the runner logs a CODE only; the raw error is never logged
     } finally {

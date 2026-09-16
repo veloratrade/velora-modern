@@ -101,4 +101,68 @@ export interface AccountStore {
     now: Date,
   ): Promise<AccountRecord | null>;
   deleteForUser(id: string, userId: string): Promise<boolean>;
+
+  /**
+   * OD-MP-1: the ONLY production writer of `trading_accounts.metaapi_account_id`.
+   *
+   * An explicit, ownership-scoped method rather than ad-hoc SQL from a route or
+   * service: the column is protected by a GLOBAL partial UNIQUE index, and the
+   * single place that writes it is the place where that invariant is enforced
+   * and its 23505 translated into a domain outcome.
+   *
+   * `expectUnbound` makes the write a compare-and-set:
+   *   • true  → binds only when the row is currently NULL, so a concurrent
+   *             second binder loses the race instead of overwriting.
+   *   • false → used by reconciliation, where the SAME id may be re-asserted.
+   *
+   * Returns the updated record, or null when the account is missing, not owned,
+   * or already bound to a different id. Throws AccountBindingConflictError when
+   * ANOTHER account (any user) already holds that provider id.
+   *
+   * @param binding the non-secret MetaAPI account identifier. NEVER a credential.
+   */
+  bindMetaApiAccount?(
+    id: string,
+    userId: string,
+    binding: string,
+    now: Date,
+    expectUnbound: boolean,
+    tx?: import("../persistence/pg.js").QueryFn,
+  ): Promise<AccountRecord | null>;
+
+  /**
+   * OD-MP-3 A: LOCAL UNBINDING ONLY.
+   *
+   * Clears `metaapi_account_id`, which stops the credential-free worker from
+   * ever selecting this account again (the scheduler's query is filtered on
+   * `metaapi_account_id IS NOT NULL`). It deletes NO trade, rewrites NO P/L
+   * and touches NO trade event.
+   *
+   * This is NOT provider deletion and NOT credential revocation — OD-MP-3 F
+   * requires the three to stay distinct operations.
+   *
+   * Returns the previous binding (for the audit `before_state`), or null when
+   * the account is missing, not owned, or was not bound.
+   */
+  unbindMetaApiAccount?(
+    id: string,
+    userId: string,
+    now: Date,
+    tx?: import("../persistence/pg.js").QueryFn,
+  ): Promise<string | null>;
+
+  /** Ownership-scoped read of the current binding. Null when absent/not owned. */
+  getMetaApiBinding?(id: string, userId: string): Promise<string | null>;
+}
+
+/**
+ * Raised when a MetaAPI account id is already bound to a different Velora
+ * account. Surfaces the global UNIQUE index as a domain outcome rather than a
+ * raw SQLSTATE, so the route can answer 409 without inspecting driver errors.
+ */
+export class AccountBindingConflictError extends Error {
+  constructor() {
+    super("This MetaAPI account is already linked to another trading account.");
+    this.name = "AccountBindingConflictError";
+  }
 }

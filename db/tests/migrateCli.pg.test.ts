@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
+import { readdirSync } from "node:fs";
 import { Client } from "pg";
 import { expectedHead } from "../migrate.ts";
 
@@ -92,22 +93,31 @@ test("deploy safety on real PostgreSQL", { skip: ADMIN_URL === undefined }, asyn
     assert.equal(after.head, expectedHead(MIGRATIONS), "database head must match disk");
   });
 
-  await t.test("reported head matches the database and all migrations through 0010 applied", async () => {
+  await t.test("reported head matches the database and every migration on disk is applied", async () => {
     const url = await freshDb("ds_head");
     const r = await runCli({ MIGRATION_DATABASE_URL: url });
     assert.equal(r.code, 0);
-    assert.match(r.stdout, /migration head: 0010_user_credentials\.sql/);
+    // Derived from disk, not a hardcoded filename: the same convention this
+    // file already uses for "database head must match disk" above. A literal
+    // rots the moment a migration is added (it was pinned at 0010 while disk
+    // had reached 0014), which makes the test fail for a reason that has
+    // nothing to do with the deploy-safety behaviour it exists to prove.
+    const head = expectedHead(MIGRATIONS);
+    assert.ok(head !== null, "there must be migrations on disk");
+    assert.match(r.stdout, new RegExp(`migration head: ${head!.replace(/\./g, "\\.")}`));
 
     const c = new Client({ connectionString: url });
     await c.connect();
     try {
       const rows = await c.query("SELECT name FROM schema_migrations ORDER BY name");
       const names = rows.rows.map((x) => String(x.name));
-      assert.equal(names.length, 10, "all ten migrations must be recorded");
+      const onDisk = readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql")).sort();
+      assert.deepEqual(names, onDisk,
+        "the tracking table must record exactly the migrations present on disk");
       assert.equal(names[0], "0001_core.sql");
-      assert.equal(names[9], "0010_user_credentials.sql");
+      assert.equal(names[names.length - 1], head);
       // The tracking table must agree with what the CLI printed.
-      assert.ok(r.stdout.includes(names[9]));
+      assert.ok(r.stdout.includes(names[names.length - 1]!));
     } finally {
       await c.end();
     }
@@ -134,7 +144,8 @@ test("deploy safety on real PostgreSQL", { skip: ADMIN_URL === undefined }, asyn
     assert.equal(second.code, 0);
     assert.match(second.stdout, /up to date/);
     assert.ok(!/applied:/.test(second.stdout), "nothing may be reapplied");
-    assert.match(second.stdout, /migration head: 0010_user_credentials\.sql/);
+    const head2 = expectedHead(MIGRATIONS);
+    assert.match(second.stdout, new RegExp(`migration head: ${head2!.replace(/\./g, "\\.")}`));
   });
 
   await t.test("an unreachable database leaves no false success and no partial schema", async () => {

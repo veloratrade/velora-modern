@@ -111,10 +111,15 @@ test("B-2/7: an audit record carries no secret-bearing field", async () => {
   ]) {
     assert.equal(keys.includes(forbidden), false, `record must have no ${forbidden} field`);
   }
-  // The full shape is exactly the 11 contract fields.
+  // The full shape is exactly the 12 contract fields. This stays a CLOSED
+  // world: any field added to the record that is not listed here fails the
+  // assertion. `tradingAccountId` (migration 0014) is a nullable numeric
+  // account reference — an identifier, never a secret — added so that
+  // ACCOUNT_BINDING_CHANGED can name the account it refers to.
   assert.deepEqual(keys.sort(), [
     "action", "actorUserId", "afterState", "beforeState", "credentialId",
     "id", "occurredAt", "outcome", "provider", "requestId", "targetUserId",
+    "tradingAccountId",
   ]);
 });
 

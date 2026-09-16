@@ -31,6 +31,7 @@ interface AuditRow {
   occurred_at: Date | string;
   credential_id: string | number | null;
   provider: string | null;
+  trading_account_id: string | number | null;
 }
 
 function mapAudit(r: AuditRow): AuditRecord {
@@ -46,13 +47,14 @@ function mapAudit(r: AuditRow): AuditRecord {
     occurredAt: iso(r.occurred_at),
     credentialId: r.credential_id === null ? null : String(r.credential_id),
     provider: r.provider === null ? null : (r.provider as AuditProvider),
+    tradingAccountId: r.trading_account_id === null ? null : String(r.trading_account_id),
   };
 }
 
 const INSERT_SQL = `INSERT INTO audit_log
     (action, actor_user_id, target_user_id, before_state, after_state, request_id, occurred_at,
-     outcome, credential_id, provider)
-  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     outcome, credential_id, provider, trading_account_id)
+  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
   RETURNING *`;
 
 export class PgAuditStore implements AuditStore {
@@ -83,6 +85,9 @@ export class PgAuditStore implements AuditStore {
       entry.outcome ?? "success",
       entry.credentialId ?? null,
       entry.provider ?? null,
+      // OD-MP-2: account reference for binding events; null for every other
+      // action, keeping all pre-0014 call sites byte-identical in behaviour.
+      entry.tradingAccountId ?? null,
     ]);
     const row = rows[0];
     if (row === undefined) throw new Error("audit append: INSERT returned no row");

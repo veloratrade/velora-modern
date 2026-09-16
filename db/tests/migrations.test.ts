@@ -468,3 +468,132 @@ test("0011 audit: credential_id is a historical id with no FK, so history outliv
       "the audit row must survive deletion of the credential it describes");
   } finally { await engine.close(); }
 });
+
+// --- 0014: provisioning + binding contract (OD-MP-1 / OD-MP-2) --------------
+// Same convention as the 0010/0011 blocks: these are PGlite assertions on the
+// migration's own guarantees. The concurrency, cross-connection and
+// hard-delete-durability proofs that PGlite cannot give are in
+// db/tests/metaapiProvisioning.pg.test.ts against real PostgreSQL 17.10.
+
+test("0014 audit: the two authorized actions are accepted and CREDENTIAL_REVEALED is still refused", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    const uid = await seedCredUser(engine, "audit0014@example.com");
+
+    // Every pre-0014 action must survive the CHECK swap — an additive
+    // migration may not invalidate history it did not write.
+    for (const action of [
+      "OWNERSHIP_CLAIMED", "USER_ROLE_CHANGED", "USER_STATUS_CHANGED",
+      "CREDENTIAL_CREATED", "CREDENTIAL_DELETED",
+    ]) {
+      await engine.query(
+        `INSERT INTO audit_log(action, actor_user_id) VALUES ('${action}', ${uid})`);
+    }
+
+    // OD-MP-2 vocabulary: authorized use, both outcomes.
+    await engine.query(
+      `INSERT INTO audit_log(action, actor_user_id, credential_id, provider, outcome)
+       VALUES ('CREDENTIAL_USED', ${uid}, 77, 'METAAPI', 'success')`);
+    await engine.query(
+      `INSERT INTO audit_log(action, actor_user_id, credential_id, provider, outcome)
+       VALUES ('CREDENTIAL_USED', ${uid}, 77, 'METAAPI', 'denied')`);
+    // Binding direction travels in before_state/after_state, not in the name.
+    await engine.query(
+      `INSERT INTO audit_log(action, actor_user_id, trading_account_id, before_state, after_state, outcome)
+       VALUES ('ACCOUNT_BINDING_CHANGED', ${uid}, 4242, 'unbound', 'bound', 'success')`);
+
+    // The reveal action stays OUT of the vocabulary: 0014 widened the CHECK
+    // for authorized USE, and must not have smuggled in a disclosure event.
+    await assert.rejects(
+      engine.query(`INSERT INTO audit_log(action, actor_user_id) VALUES ('CREDENTIAL_REVEALED', ${uid})`),
+      /violates check constraint|check constraint/i,
+      "CREDENTIAL_REVEALED must remain rejected by the database");
+    await assert.rejects(
+      engine.query(`INSERT INTO audit_log(action, actor_user_id) VALUES ('ACCOUNT_BOUND', ${uid})`),
+      /violates check constraint|check constraint/i,
+      "an unauthorized binding action name must be rejected");
+  } finally { await engine.close(); }
+});
+
+test("0014 audit: trading_account_id is a historical id with no FK, so binding history outlives the account", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    const uid = await seedCredUser(engine, "audit0014fk@example.com");
+
+    // An account id that never existed is accepted: no referential constraint.
+    await engine.query(
+      `INSERT INTO audit_log(action, actor_user_id, trading_account_id, outcome)
+       VALUES ('ACCOUNT_BINDING_CHANGED', ${uid}, 999999999, 'success')`);
+    const orphan = await engine.query(
+      `SELECT count(*)::int AS n FROM audit_log WHERE trading_account_id = 999999999`);
+    assert.equal((orphan.rows[0] as { n: number }).n, 1);
+
+    // The column is nullable, so every pre-0014 row and every non-binding
+    // event remains writable without it.
+    await engine.query(
+      `INSERT INTO audit_log(action, actor_user_id) VALUES ('USER_ROLE_CHANGED', ${uid})`);
+    const nulls = await engine.query(
+      `SELECT count(*)::int AS n FROM audit_log WHERE trading_account_id IS NULL`);
+    assert.ok((nulls.rows[0] as { n: number }).n >= 1,
+      "trading_account_id must be optional for events that are not about an account");
+  } finally { await engine.close(); }
+});
+
+test("0014 provisioning_operations: the database enforces idempotency and refuses malformed identifiers", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    const uid = await seedCredUser(engine, "prov0014@example.com");
+    // Minimal insert: every column added after 0001 carries a DEFAULT.
+    const acc = await engine.query(
+      `INSERT INTO trading_accounts(user_id, external_account_id)
+       VALUES (${uid}, 'acct-0014') RETURNING id`);
+    const aid = String((acc.rows[0] as { id: string | number }).id);
+
+    const KEY = "a".repeat(64);
+    const MARKER = `velora-${"b".repeat(32)}`;
+    await engine.query(
+      `INSERT INTO provisioning_operations(user_id, account_id, operation_key, provider_marker)
+       VALUES (${uid}, ${aid}, '${KEY}', '${MARKER}')`);
+
+    // THE convergence invariant: the same operation key cannot exist twice for
+    // a user, so a double-submitted connect collides in the DB rather than
+    // provisioning a second provider account.
+    await assert.rejects(
+      engine.query(
+        `INSERT INTO provisioning_operations(user_id, account_id, operation_key, provider_marker)
+         VALUES (${uid}, ${aid}, '${KEY}', 'velora-${"c".repeat(32)}')`),
+      /duplicate key|unique/i, "one operation per (user, operation_key)");
+
+    // The reconciliation marker must be globally unique, or a provider search
+    // could match two different operations.
+    await assert.rejects(
+      engine.query(
+        `INSERT INTO provisioning_operations(user_id, account_id, operation_key, provider_marker)
+         VALUES (${uid}, ${aid}, '${"d".repeat(64)}', '${MARKER}')`),
+      /duplicate key|unique/i, "the provider marker must be unique");
+
+    // Shape constraints: each of these would otherwise let a non-derived (and
+    // possibly secret-bearing) string into the table.
+    for (const [sql, label] of [
+      [`INSERT INTO provisioning_operations(user_id, account_id, operation_key, provider_marker)
+        VALUES (${uid}, ${aid}, 'not-hex', 'velora-${"e".repeat(32)}')`, "operation_key must be hex sha-256"],
+      [`INSERT INTO provisioning_operations(user_id, account_id, operation_key, provider_marker)
+        VALUES (${uid}, ${aid}, '${"f".repeat(64)}', 'arbitrary-name')`, "provider_marker must be the derived form"],
+      [`INSERT INTO provisioning_operations(user_id, account_id, operation_key, provider_marker, transaction_id)
+        VALUES (${uid}, ${aid}, '${"1".repeat(64)}', 'velora-${"1".repeat(32)}', 'too-short')`, "transaction_id must be 32 chars"],
+      [`INSERT INTO provisioning_operations(user_id, account_id, operation_key, provider_marker, status)
+        VALUES (${uid}, ${aid}, '${"2".repeat(64)}', 'velora-${"2".repeat(32)}', 'WHATEVER')`, "status is a closed vocabulary"],
+      [`INSERT INTO provisioning_operations(user_id, account_id, operation_key, provider_marker, provider_account_id)
+        VALUES (${uid}, ${aid}, '${"3".repeat(64)}', 'velora-${"3".repeat(32)}', 'has space')`, "provider account id charset"],
+      [`INSERT INTO provisioning_operations(user_id, account_id, operation_key, provider_marker, last_error_code)
+        VALUES (${uid}, ${aid}, '${"4".repeat(64)}', 'velora-${"4".repeat(32)}', 'provider said: bad password')`, "error code is a code, never a message"],
+      [`INSERT INTO provisioning_operations(user_id, account_id, operation_key, provider_marker, attempts)
+        VALUES (${uid}, ${aid}, '${"5".repeat(64)}', 'velora-${"5".repeat(32)}', -1)`, "attempts cannot go negative"],
+    ] as Array<[string, string]>) {
+      await assert.rejects(engine.query(sql), /violates check constraint|check constraint/i, label);
+    }
+  } finally { await engine.close(); }
+});

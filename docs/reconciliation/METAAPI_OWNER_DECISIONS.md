@@ -1,8 +1,16 @@
-# VELORA MODERN — MetaAPI Owner Decisions (OD-M1 … OD-M4 + TZ-M1, D-1, D-2, D-3, D-4, D-5, D-7)
+# VELORA MODERN — MetaAPI Owner Decisions (OD-M1 … OD-M4 + TZ-M1, D-1, D-2, D-3, D-4, D-5, D-7, OD-MP-1, OD-MP-2, OD-MP-3)
 
 ## 1. Status
 
 **Status:** OWNER-APPROVED 2026-09-15 (explicit owner directive, this session).
+**Amended 2026-09-16 — OD-MP-1, OD-MP-2, OD-MP-3 RATIFIED (see §2F).** Governance-only.
+These three decisions move API-side MetaAPI provisioning, the audit vocabulary for authorized
+credential use, and disconnect/revocation semantics from **NOT AUTHORIZED** to **AUTHORIZED FOR
+FUTURE IMPLEMENTATION**. **Nothing is implemented by this amendment**: no route, no provisioning
+client, no credential-consumption call site, no binding service, no disconnect behaviour, no
+migration, no schema change, no privilege change, no worker change, no deployment change. The
+prior audit classification (`BLOCKED — OWNER DECISION REQUIRED`) is superseded **at the
+governance level only**; the implementation remains a separate, future change.
 **Amended 2026-09-15 — D-7 RATIFIED IN PART (see §2E).** Governance-only, from **official MetaAPI
 documentation only** (no authenticated call, no provider mutation). The header-identity question
 is **settled**: the documented mechanism is **`transaction-id`**, and **`Idempotency-Key` is NOT a
@@ -633,6 +641,205 @@ nothing that is currently authorized**. It must be resolved — by provider supp
 
 ---
 
+## 2F. Owner decisions — OD-MP-1, OD-MP-2, OD-MP-3 (ratified 2026-09-16)
+
+**Scope of this section: AUTHORIZATION ONLY.** Each decision below changes the *permission
+state* of a future change. None of them is implemented, and this amendment implements none of
+them. Where a prior section of this record said these things were "NOT unlocked" or "Still NOT
+authorized", **this section supersedes that text** and the superseded statements have been
+corrected in place (§5, §6, §7, §9, §10) so the document carries no contradiction.
+
+**Evidence basis (read-only audit, 2026-09-16, HEAD `029a9769`):** `CredentialStore.reveal(id,
+userId)` is declared at `apps/api/src/credentials/credentialStore.ts:116` and implemented at
+`apps/api/src/credentials/pgCredentialStore.ts:143-152`, and has **zero production callers** —
+verified by `git grep "\.reveal(" -- apps/**` excluding tests. `CREDENTIAL_MASTER_KEY` is read
+only under `apps/api/src/credentials/`; in `apps/worker/**` it appears solely inside prohibition
+comments. `trading_accounts.metaapi_account_id` (migration `0013:45-73`) has **no production
+writer**. The audit-log action vocabulary is closed at five values
+(`0011_audit_log_credential_events.sql:60-68`).
+
+---
+
+### OD-MP-1 — API-side MetaAPI provisioning authorization
+
+**Previous status:** NOT AUTHORIZED (§9 "connect/provisioning route", "credential reveal in any
+form"). **New status: AUTHORIZED FOR FUTURE IMPLEMENTATION.**
+
+An authenticated, **user-scoped** Modern API flow **may** consume the requesting user's broker
+credentials through the existing encrypted credential boundary, **for the sole purpose of
+MetaAPI account provisioning and account binding**.
+
+Binding rules — all thirteen are conditions of the authorization, not guidance:
+
+1. The operation **MUST** always be scoped to `claims.sub`.
+2. The client **MUST NOT** supply an arbitrary user ID.
+3. Admin and System Owner privileges **MUST NOT** create a generic credential-reveal or
+   credential-consumption capability for another user.
+4. `CredentialStore.reveal(id, userId)` **remains owner-scoped** and its signature is unchanged.
+5. The API may consume the credential **only inside the future provisioning application
+   service** — nowhere else.
+6. Plaintext credentials **MUST NEVER** be: persisted · logged · written into audit rows ·
+   placed on `QueuePort` · placed in pg-boss payloads · placed in DLQ payloads · exposed in an
+   HTTP response · made available to the Worker.
+7. The Worker remains **credential-free**.
+8. The Worker **MUST** continue to use only `METAAPI_PLATFORM_TOKEN`, `metaapi_account_id`, and
+   other non-secret sync identifiers.
+9. The future provisioning flow may persist **only** the resulting `metaapi_account_id` and
+   other explicitly approved **non-secret** account metadata.
+10. This authorization does **NOT** authorize any generic `revealAny`, `adminReveal`, or System
+    Owner credential-access API.
+11. This authorization does **NOT** authorize credential disclosure to administrators.
+12. The provisioning route must be **user-scoped and ownership-based**.
+13. This authorization applies to **MetaAPI provisioning only**. It does not authorize unrelated
+    providers or any other credential-consumption path.
+
+**Authorized architecture (unchanged from the audited design):**
+
+```
+API:     claims.sub → user-scoped account → CredentialStore.reveal(credentialId, userId)
+           → MetaAPI provisioning → metaapi_account_id → short DB transaction → binding
+Worker:  METAAPI_PLATFORM_TOKEN + metaapi_account_id → historical sync
+```
+
+**Explicitly still forbidden by OD-MP-1:** moving provisioning into the Worker · introducing a
+credential broker · introducing Redis · introducing a new queue for provisioning (absent a
+future Owner Decision) · holding a database transaction open across a MetaAPI HTTP request.
+
+**What OD-MP-1 does NOT do:** it creates no route, no client, no service, no call site. D-2
+(§2A) is untouched and still governs the worker boundary: provisioning is API-hosted and
+credential-consuming, synchronization is worker-hosted and credential-free.
+
+---
+
+### OD-MP-2 — Audit vocabulary for authorized credential consumption and binding
+
+**Previous status:** NOT AUTHORIZED (§5 non-decision 11; §9 "`CREDENTIAL_REVEALED` /
+`CREDENTIAL_USED` audit events"; ADR-016 Future Work 1). **New status: AUTHORIZED FOR FUTURE
+IMPLEMENTATION.**
+
+Widening the append-only audit vocabulary is authorized **so that the future provisioning
+implementation can record security-relevant lifecycle events**.
+
+**Existing vocabulary (verified, `0011:60-68` and `apps/api/src/auth/auditStore.ts:41-50`):**
+`OWNERSHIP_CLAIMED` · `USER_ROLE_CHANGED` · `USER_STATUS_CHANGED` · `CREDENTIAL_CREATED` ·
+`CREDENTIAL_DELETED`, with `outcome IN ('success','denied')`.
+
+**Authorized future action vocabulary — exactly two new names:**
+
+| Action | Records | Why it is necessary |
+|---|---|---|
+| **`CREDENTIAL_USED`** | An authorized, owner-scoped consumption of a stored credential by the provisioning service. `outcome='success'` = the credential was used; `outcome='denied'` = the attempt was refused. | The security event is *use of the secret to act against an external system on the owner's behalf*, which is the event ADR-016 §"Application authority does not imply secret disclosure authority" cares about. |
+| **`ACCOUNT_BINDING_CHANGED`** | Establishment or removal of the Velora ↔ MetaAPI binding (`before_state`/`after_state` carry the binding state, never a secret). | Binding and unbinding change which external account a Velora account is attached to. The existing `before_state`/`after_state` columns already express exactly this shape, as they do for `USER_ROLE_CHANGED`. |
+
+**Rationale for `CREDENTIAL_USED` over `CREDENTIAL_REVEALED` — required by the owner directive.**
+`CREDENTIAL_REVEALED` is rejected. Three reasons, each grounded in existing repository text:
+(a) `0011:58-59` and `auditStore.ts:46-48` state that name was *deliberately* omitted because
+"reveal has no production consumer, and an action nothing can emit is dead contract surface" —
+the omission was about *disclosure*, and OD-MP-1 does not authorize disclosure; (b) "revealed"
+describes a secret being **shown to somebody**, which OD-MP-1 explicitly forbids (rules 6, 10,
+11), whereas what is authorized is **server-side use** with no human recipient — the action name
+must not imply a disclosure capability the system does not have; (c) the existing vocabulary is
+verb-past-tense on the object acted upon (`CREDENTIAL_CREATED`, `CREDENTIAL_DELETED`), so
+`CREDENTIAL_USED` is the consistent construction.
+
+**Deliberately NOT authorized — no redundant names.** Separate actions for
+provisioning-succeeded, provisioning-failed, disconnect, and revocation are **rejected as
+redundant**: `outcome` already distinguishes `success` from `denied`, `CREDENTIAL_DELETED`
+already covers credential revocation, and `ACCOUNT_BINDING_CHANGED` covers both directions of
+binding via `before_state`/`after_state`. The five required distinctions in the owner directive
+are satisfied by **two new actions plus the existing `outcome` column**:
+
+| Required distinction | Representation |
+|---|---|
+| Successful credential use for provisioning | `CREDENTIAL_USED` + `outcome='success'` |
+| Refused/denied credential use | `CREDENTIAL_USED` + `outcome='denied'` |
+| Successful MetaAPI account binding | `ACCOUNT_BINDING_CHANGED`, `after_state` = bound |
+| Security-relevant failed provisioning/binding | `CREDENTIAL_USED` + `outcome='denied'` |
+| Disconnect / revocation (per OD-MP-3) | `ACCOUNT_BINDING_CHANGED`, `after_state` = unbound; credential revocation stays `CREDENTIAL_DELETED` |
+
+Requirements binding the future implementation:
+
+1. Audit rows carry **metadata only**.
+2. Plaintext passwords, investor passwords, credential ciphertext, access tokens, auth tokens
+   and provider secrets **MUST NEVER** be stored in an audit row.
+3. The audit record **MUST NOT** become a credential-disclosure mechanism.
+4. Existing **append-only** semantics are unchanged.
+5. Existing **actor/ownership** semantics are unchanged — `actor_user_id` stays server-derived.
+6. The current frozen audit guarantees are preserved; widening is **additive only**.
+7. Any migration widening `audit_log.action` must be **additive and migration-safe**, following
+   the `0011` pattern (`DROP CONSTRAINT IF EXISTS` → `ADD CONSTRAINT` with the full value list;
+   existing rows remain valid).
+8. Per AGENTS.md rule 11, ADR-016 and this document are amended **in the same change as the
+   implementation** of the audit widening. ADR-016 is amended by the present change to record
+   the authorization itself; the *implementation* amendment lands with the code.
+
+> **MIGRATION REQUIRED IN THE IMPLEMENTATION COMMIT.** The schema is **deliberately unchanged**
+> here. Widening the `audit_log.action` CHECK and the `AuditAction` union is an **implementation
+> concern**, not a governance artifact: this record's own convention (D-3, D-5, A-1 — "no
+> migration now; it lands with the implementation under rule 11") applies unchanged. No
+> migration file is created or modified by this amendment.
+
+---
+
+### OD-MP-3 — Disconnect / revocation semantics
+
+**Previous status:** UNDECIDED — the 2026-09-16 audit recorded disconnect semantics as
+`NOT VERIFIED — no governance decision found`. **New status: AUTHORIZED FOR FUTURE
+IMPLEMENTATION.**
+
+**A. User-facing disconnect means:** remove the Velora ↔ MetaAPI account binding; prevent future
+synchronization for that Velora account; and revoke/delete the provider-side MetaAPI account
+**only if** the future implementation explicitly performs provider deletion as part of the
+approved disconnect operation.
+
+**B. Imported trades survive disconnect.** Historical Velora trades already imported from MetaAPI
+**MUST NOT** be physically deleted as a side effect of disconnect.
+
+**C.** Existing immutable trade/event semantics (ADR-002 D-01: immutable ledger, correction
+events, tombstone deletion, append-only events) remain **authoritative and unchanged**.
+
+**D.** Disconnect **MUST NOT** silently rewrite historical P/L, timestamps, provenance, or trade
+events.
+
+**E.** `metaapi_account_id` may be cleared **only** through the future authorized disconnect
+operation, and **only after** its exact provider-side behaviour has been determined.
+
+**F. Three separate lifecycle operations — MUST NOT be conflated:**
+
+| Operation | Effect | Not implied by the others |
+|---|---|---|
+| **Local unbinding** | Clears the Velora ↔ MetaAPI binding; stops future sync | Does not delete the provider account, does not delete the credential |
+| **Provider deletion** | Deletes the MetaAPI-side account | Does not by itself unbind locally, does not delete the credential |
+| **Credential deletion / revocation** | Removes the stored `user_credentials` row (existing hard delete, `CREDENTIAL_DELETED`) | Does not unbind, does not delete the provider account |
+
+**G.** If provider deletion is performed, **404 / not-found handling must be explicitly defined
+by the implementation and tested.**
+
+**H.** Disconnect remains **user-owned**: it must never allow an admin or System Owner to use
+another user's credentials.
+
+**I.** **No automatic physical deletion of imported trades is authorized.**
+
+**What OD-MP-3 does NOT do:** it implements no `DELETE` behaviour, no disconnect route, no
+provider-deletion call, and no clearing of `metaapi_account_id`. ADR-002 is **not amended** — its
+immutability guarantees already produce the required outcome, and OD-MP-3 adds no exception to
+them.
+
+---
+
+### Status summary for OD-MP-1 … OD-MP-3
+
+| Decision | Previous state | New state | Implemented? |
+|---|---|---|---|
+| **OD-MP-1** API-side provisioning + owner-scoped credential consumption | NOT AUTHORIZED | **AUTHORIZED FOR FUTURE IMPLEMENTATION** | **NO** |
+| **OD-MP-2** `CREDENTIAL_USED` + `ACCOUNT_BINDING_CHANGED` audit vocabulary | NOT AUTHORIZED | **AUTHORIZED FOR FUTURE IMPLEMENTATION** | **NO — migration deferred to the implementation commit** |
+| **OD-MP-3** Disconnect / revocation semantics | UNDECIDED | **AUTHORIZED FOR FUTURE IMPLEMENTATION** | **NO** |
+
+**No code, no route, no client, no service, no schema, no migration, no privilege change, no
+worker change, no Railway change, and no deployment is produced by this amendment.**
+
+---
+
 ## 3. Rationale
 
 **OD-M1.** The audit verified from the legacy implementation that MetaAPI authenticates
@@ -772,7 +979,12 @@ This record does **NOT** decide, and nothing below may be inferred from it:
    legacy defect. Still **not decided here**: general duplicate/retention semantics (**NOT
    PROVEN**), and any provisioning implementation.
 10. **Webhook ingestion** (ADR-008 remains "Implementation not started").
-11. **Credential disclosure auditing** (`CREDENTIAL_USED` or equivalent) — still DEFERRED.
+11. ~~**Credential disclosure auditing** (`CREDENTIAL_USED` or equivalent) — still DEFERRED.~~
+    **SUPERSEDED 2026-09-16 by OD-MP-2 (§2F).** Audit vocabulary for *authorized credential use*
+    (`CREDENTIAL_USED`) and for *binding changes* (`ACCOUNT_BINDING_CHANGED`) is now **authorized
+    for future implementation**. Note the corrected framing: the authorized event is credential
+    **use**, not credential **disclosure** — disclosure remains forbidden (OD-MP-1 rules 10-11).
+    The migration is deferred to the implementation commit; **no schema change here**.
 12. **Key rotation** — remains deferred by ADR-016.
 
 ---
@@ -826,6 +1038,13 @@ Compromise of any one does not imply compromise of the others. Specifically:
 9. Fail closed when key configuration is unavailable.
 10. Provider error bodies are scrubbed before logging or surfacing.
 
+**Unchanged by OD-MP-1 (§2F).** All ten constraints above survive the provisioning
+authorization verbatim. OD-MP-1 authorizes **owner-scoped, server-side consumption inside one
+application service** — it does **not** relax constraint 6 (no disclosure to System Owner, admin
+or super_admin), constraint 7 (server-derived ownership), or constraint 8 (no generic credential
+reveal endpoint, ever). Constraints 1-5 and 9-10 bind the future provisioning implementation as
+written, and OD-MP-1 rule 6 restates them at the plaintext-lifetime level.
+
 ---
 
 ## 8. Required ADR amendments before implementation
@@ -871,11 +1090,19 @@ PRIVILEGES` for `velora_worker`, which would auto-grant DML on **future** tables
   governance gates: **A-2/A-5** (at implementation, rule 11). **Implementation itself is still not
   authorized**, and the worker deployment decision (B10-a) is unchanged.
 
-**NOT unlocked — implementation remains blocked:**
+**NOT unlocked — implementation remains blocked** *(as written 2026-09-15; amended twice — see
+§9.1 for Phase 2 and §9.2 for OD-MP-1…OD-MP-3)*:
 
 MetaAPI client · provider routing · connect/provisioning route · account discovery ·
 historical or incremental sync · webhooks · credential reveal in any form ·
 `CREDENTIAL_REVEALED`/`CREDENTIAL_USED` audit events · any migration · any privilege change.
+
+> **AMENDED 2026-09-16 (§9.2).** Three items in the list above are superseded by OD-MP-1 and
+> OD-MP-2: the **connect/provisioning route**, **owner-scoped credential consumption** (never
+> "reveal in any form" — disclosure stays forbidden), and the **`CREDENTIAL_USED` /
+> `ACCOUNT_BINDING_CHANGED` audit vocabulary**. They are now **AUTHORIZED FOR FUTURE
+> IMPLEMENTATION** and **remain unimplemented**. Every other item in the list is unchanged and
+> still blocked.
 
 ### 9.1 Owner authorization — Phase 2 implementation (2026-09-16)
 
@@ -894,10 +1121,19 @@ history-deals client, deal normalizer, `sync_fills` → `trades` import path, th
 pg-boss-scheduled producer, the `velora_worker` pg-boss grant model, and the
 rule-11 amendments **A-2** (ADR-004) and **A-5** (ADR-002).
 
-**Still NOT authorized** (unchanged): incremental/webhook sync, the connect /
+**Still NOT authorized** *(as written 2026-09-16 under Phase 2; partially superseded the same day
+by §9.2)*: incremental/webhook sync, the connect /
 provisioning route, account discovery, credential reveal in any form,
 `CREDENTIAL_REVEALED` / `CREDENTIAL_USED` audit events, and **deployment of a
 worker service (B10-a)**.
+
+> **SUPERSEDED IN PART by OD-MP-1 / OD-MP-2 (§2F, §9.2).** The **connect/provisioning route**,
+> **owner-scoped API-side credential consumption**, and the **`CREDENTIAL_USED` /
+> `ACCOUNT_BINDING_CHANGED`** audit vocabulary are now **AUTHORIZED FOR FUTURE IMPLEMENTATION**
+> and are **not implemented**. `CREDENTIAL_REVEALED` specifically remains **rejected** (see the
+> OD-MP-2 rationale). **Still NOT authorized, unchanged:** incremental sync, webhook sync,
+> account discovery, generic credential reveal/disclosure, and **worker-service deployment
+> (B10-a)**.
 
 **Scheduling mechanism — no new architecture was invented.** ADR-007 already
 adopted pg-boss, and pg-boss 10.4.2 **ships a native cron scheduler**
@@ -906,6 +1142,37 @@ its internal `__pgboss__send-it` queue with `singletonSeconds: 60`). The
 producer uses that. No second service, no host cron, and **no new npm
 dependency** were introduced. `cron-parser` is already vendored as a pg-boss
 dependency.
+
+---
+
+### 9.2 Owner authorization — MetaAPI provisioning governance (2026-09-16)
+
+The owner **explicitly authorized** OD-MP-1, OD-MP-2 and OD-MP-3 (§2F), superseding the "NOT
+unlocked" list above **for the items named here and nothing else**:
+
+| # | Now authorized | Limit |
+|---|---|---|
+| 1 | **Connect / provisioning route**, authenticated and user-scoped to `claims.sub` | MetaAPI only; ownership-based; no client-supplied user ID |
+| 2 | **API-side, owner-scoped credential consumption** inside the future provisioning application service | Not disclosure; no `revealAny`/`adminReveal`; no admin or System Owner access to another user's credential |
+| 3 | **Audit vocabulary** `CREDENTIAL_USED` + `ACCOUNT_BINDING_CHANGED` | Metadata only; additive migration deferred to the implementation commit |
+| 4 | **Disconnect / revocation semantics** (OD-MP-3) | Imported trades never physically deleted; unbinding, provider deletion and credential revocation stay separate |
+
+**Unlocked for IMPLEMENTATION in a SEPARATE, FUTURE change — nothing here is implemented.**
+This amendment adds no route, no client, no service, no call site, no migration and no test.
+
+**Still NOT authorized** (unchanged by §9.2): incremental sync · webhook sync · account
+discovery · any generic credential-reveal or admin-disclosure capability · moving provisioning
+into the Worker · a credential broker · Redis · a new provisioning queue · holding a DB
+transaction open across a MetaAPI HTTP call · **worker-service deployment (B10-a)**.
+
+**Rule 11 disposition.** AGENTS.md rule 11 requires "ADR updates in the same change when a
+decision is affected". This change affects ADR-016 (credential consumption + audit events), so
+ADR-016 is amended in **this same change**. ADR-002, ADR-007, ADR-010 and ADR-014 are **not**
+amended: no decision of theirs is altered — ADR-002's immutability guarantees already deliver
+OD-MP-3 B/C/D, ADR-007 gains no job class, ADR-010's DB-identity model is untouched, and
+ADR-014's platform-token separation is unchanged. The *schema* widening authorized by OD-MP-2
+lands with its implementation, under the same rule 11 convention already used by D-3, D-5 and
+A-1.
 
 ---
 
@@ -922,11 +1189,23 @@ dependency.
 | **B7** | pg-boss never integration-tested; `pgBossAdapter.claim()` hardcodes `attempts: 0` | Worker phase | **OPEN / NOT PROVEN** |
 | **B8** | Import write model cannot represent provider data — `TradeRecord.source` typed `"manual"`; `externalDealId` absent from the write model | G-4 / trade-import phase | **OPEN** |
 | **B9** | Platform token has no governed storage | **D-1 + A-3** | **CLOSED (governance) 2026-09-15 — ADR-014 ratified.** Implementation pending Phase 3 |
+| **B12** | No authorization for API-side credential consumption; `CredentialStore.reveal()` has **zero production callers** and `trading_accounts.metaapi_account_id` has **no production writer** (verified 2026-09-16 at HEAD `029a9769`) | **OD-MP-1 (§2F)** | **CLOSED (governance) 2026-09-16.** Owner-scoped API-side consumption for MetaAPI provisioning is authorized. **Implementation NOT started** — the route, client, service and binding write remain absent |
+| **B13** | Audit vocabulary cannot express authorized credential use or binding changes (`0011:60-68` closes `action` at five values) | **OD-MP-2 (§2F)** | **CLOSED (governance) 2026-09-16.** `CREDENTIAL_USED` + `ACCOUNT_BINDING_CHANGED` authorized; `CREDENTIAL_REVEALED` rejected. **Migration deliberately deferred to the implementation commit** — schema unchanged here |
+| **B14** | Disconnect/revocation semantics undecided (audit 2026-09-16: `NOT VERIFIED — no governance decision found`) | **OD-MP-3 (§2F)** | **CLOSED (governance) 2026-09-16.** Imported trades survive; unbinding / provider deletion / credential revocation are distinct. **No `DELETE` behaviour implemented** |
 
-**MetaAPI implementation is NOT unlocked.** Four decisions of principle are recorded
+**MetaAPI implementation is NOT unlocked** *(as written 2026-09-15; amended — see below)*. Four
+decisions of principle are recorded
 (OD-M1…OD-M4 + TZ-M1), clearing B1 at the decision level. **D-1 (ADR-014) and D-2
 (§2A) are now RATIFIED, and A-3 is satisfied**, which closes **B1, B9 and B2** at the
 governance level.
+
+> **AMENDED 2026-09-16 (OD-MP-1…OD-MP-3, §2F/§9.2).** The **provisioning and account-binding
+> path is now unlocked at the governance level** — authorized for a **separate, future**
+> implementation change. It is **NOT implemented**: no route, no provisioning client, no
+> credential-consumption call site, no binding service, no disconnect behaviour and no migration
+> exist at this HEAD. Sync-path implementation was separately authorized by §9.1. Everything
+> else in this paragraph stands, and **B10-a (worker deployment) remains an unresolved Owner
+> Decision**, so no MetaAPI capability is operational.
 
 **Still outstanding before the first line of MetaAPI implementation code:** the operational
 blockers below, plus **A-2/A-5** at their implementation phase. **D-3, D-4, D-5 and D-6 are
@@ -1010,6 +1289,28 @@ requires a **deployment decision** that is outside implementation authority. See
   `runNextSyncJob`, `AccountRepository.php`) and this repository's `railway.json`,
   `db/roles.sql`, ADR-007, ADR-014 and ADR-016. **That amendment changed this document
   only** — no ADR, no code, no schema, no migration, no privilege.
-- **This record changes no ADR, no schema, no code.** Where it differs from any
+- **OD-MP-1 / OD-MP-2 / OD-MP-3 ratification (2026-09-16), recorded at HEAD `029a9769`:**
+  API-side MetaAPI provisioning authorization, the audit vocabulary for authorized credential
+  use and binding changes, and disconnect/revocation semantics (§2F, §9.2). These decisions
+  **supersede** the prior "NOT authorized" statements in §5 (non-decision 11), §9 and §9.1, and
+  supersede the read-only audit's `BLOCKED — OWNER DECISION REQUIRED` classification **at the
+  governance level only**. Claims verified before recording, by read-only inspection at this
+  HEAD: `CredentialStore.reveal(id, userId)` declared at `credentialStore.ts:116`, implemented
+  at `pgCredentialStore.ts:143-152`, with **zero production callers**; `CREDENTIAL_MASTER_KEY`
+  read only under `apps/api/src/credentials/` and present in `apps/worker/**` only as
+  prohibition comments; `trading_accounts.metaapi_account_id` (`0013:45-73`, nullable, CHECK
+  `^[A-Za-z0-9._:-]{1,64}$`, global partial UNIQUE) with **no production writer** — both
+  `pgAccountStore` INSERTs (`:108`, `:152`) omit it; the audit action CHECK closed at five
+  values (`0011:60-68`) mirrored by `auditStore.ts:41-50`, with `outcome IN
+  ('success','denied')`; and `0011:58-59` / `auditStore.ts:46-48` recording that
+  `CREDENTIAL_REVEALED` was deliberately omitted — which is why OD-MP-2 selects
+  **`CREDENTIAL_USED`** instead. **Governance only: no code, no route, no client, no service, no
+  schema, no migration, no privilege change, no worker change, no Railway change, no deployment,
+  no database write.** ADR-016 is amended in the same change (rule 11); ADR-002, ADR-007,
+  ADR-010 and ADR-014 are unchanged because no decision of theirs is affected.
+- **This record changes no schema and no code.** *(Originally "no ADR, no schema, no code";
+  corrected 2026-09-16 — the OD-MP amendment also amends **ADR-016**, as AGENTS.md rule 11
+  requires when a decision affects an ADR. No other ADR is touched, and no schema or code is
+  changed by any amendment to this document.)* Where it differs from any
   recommendation in the readiness audit, **this record is authoritative**; audit
   recommendations were not converted into decisions unless the owner approved them above.

@@ -44,10 +44,21 @@ export type AuditAction =
   | "USER_STATUS_CHANGED"
   // B-2 credential lifecycle (migration 0011). Representable here; NOT yet
   // emitted anywhere — the CredentialService wiring is B-3.
-  // CREDENTIAL_REVEALED is deliberately absent: reveal has no production
-  // consumer, and an action nothing can emit is dead contract surface.
   | "CREDENTIAL_CREATED"
-  | "CREDENTIAL_DELETED";
+  | "CREDENTIAL_DELETED"
+  // OD-MP-2 (migration 0014). Authorized credential CONSUMPTION and binding
+  // lifecycle for MetaAPI provisioning.
+  //
+  // CREDENTIAL_REVEALED remains deliberately absent, and its absence now means
+  // something stronger than it did in 0011: a production consumer exists, but
+  // it does not REVEAL anything. The plaintext is used server-side against
+  // MetaAPI on the owning user's behalf and is never disclosed to any caller,
+  // so an action named "revealed" would describe a capability the system does
+  // not have. OD-MP-2 selects CREDENTIAL_USED for exactly that reason.
+  | "CREDENTIAL_USED"
+  // Bind AND unbind. Direction is carried by beforeState/afterState rather
+  // than by two action names — the same shape USER_ROLE_CHANGED already uses.
+  | "ACCOUNT_BINDING_CHANGED";
 
 /**
  * Result of the audited attempt. Mirrors the 0011 outcome CHECK.
@@ -100,6 +111,21 @@ export interface AuditEntry {
    */
   readonly credentialId?: string | null;
   readonly provider?: AuditProvider | null;
+  /**
+   * OD-MP-2 / migration 0014 — OPTIONAL, METADATA ONLY.
+   *
+   * Which trading account a binding change applies to. Required because
+   * `targetUserId` identifies the USER, and a user may hold several accounts,
+   * so a binding row would otherwise be ambiguous about WHICH account changed.
+   *
+   * Like `credentialId` this is a HISTORICAL identifier with no foreign key:
+   * account deletion is a hard delete, and the audit trail must outlive the
+   * account it describes (see migration 0014 for the full rationale).
+   *
+   * SECURITY: never a secret. The MetaAPI account id itself is non-secret, but
+   * it belongs in beforeState/afterState as a lifecycle value, not here.
+   */
+  readonly tradingAccountId?: string | null;
 }
 
 /** A persisted audit record (read back for verification/tests only). */
@@ -116,6 +142,8 @@ export interface AuditRecord {
   /** Credential metadata when the action is a credential event; else null. */
   readonly credentialId: string | null;
   readonly provider: AuditProvider | null;
+  /** Account reference when the action is a binding event; else null. */
+  readonly tradingAccountId: string | null;
 }
 
 export interface AuditStore {

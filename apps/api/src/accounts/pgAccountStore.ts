@@ -14,9 +14,9 @@
 // (id, user_id) — a miss is indistinguishable from "not yours" (non-disclosing
 // 404 mapping happens in AccountService).
 import type { Pool } from "pg";
-import { poolQuery, withTransaction, iso, type QueryFn } from "../persistence/pg.js";
+import { poolQuery, withTransaction, iso, isUniqueViolation, type QueryFn } from "../persistence/pg.js";
 import type { AccountStore, AccountRecord, AccountCreatePayload } from "./accountStore.js";
-import { AccountQuotaExceededError } from "./accountStore.js";
+import { AccountQuotaExceededError, AccountBindingConflictError } from "./accountStore.js";
 
 interface AccountRow {
   id: string;
@@ -194,5 +194,90 @@ export class PgAccountStore implements AccountStore {
       [id, userId],
     );
     return (res.rowCount ?? 0) > 0;
+  }
+
+  /**
+   * OD-MP-1: bind a provider account id to an OWNED Velora account.
+   *
+   * The `metaapi_account_id IS NULL` predicate (when expectUnbound) is the
+   * compare-and-set: two concurrent binders both pass application checks, but
+   * only one satisfies the WHERE clause, and the loser updates zero rows. The
+   * global partial UNIQUE index is the second, independent guarantee — it
+   * fires as 23505 even for two DIFFERENT accounts racing for one provider id.
+   */
+  async bindMetaApiAccount(
+    id: string,
+    userId: string,
+    binding: string,
+    now: Date,
+    expectUnbound: boolean,
+    tx?: QueryFn,
+  ): Promise<AccountRecord | null> {
+    const run = tx ?? this.q;
+    const guard = expectUnbound
+      ? "AND metaapi_account_id IS NULL"
+      : // Reconciliation may re-assert the SAME id; it may never silently
+        // replace a different one.
+        "AND (metaapi_account_id IS NULL OR metaapi_account_id = $3)";
+    try {
+      const rows = await run(
+        `UPDATE trading_accounts
+            SET metaapi_account_id = $3, updated_at = $4
+          WHERE id = $1 AND user_id = $2 ${guard}
+        RETURNING *`,
+        [id, userId, binding, now],
+      );
+      return rows.length === 0 ? null : mapAccount(rows[0] as unknown as AccountRow);
+    } catch (err) {
+      // The UNIQUE index is global by design (OD-MP-1 / migration 0013): one
+      // MetaAPI account can back exactly one Velora account, across all users.
+      if (isUniqueViolation(err, "trading_accounts_metaapi_unique")) {
+        throw new AccountBindingConflictError();
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * OD-MP-3 A: clear the binding. Returns the PREVIOUS value for the audit
+   * trail. No trade, trade event, P/L value or timestamp is touched — this
+   * statement's entire footprint is two columns on one row.
+   */
+  async unbindMetaApiAccount(
+    id: string,
+    userId: string,
+    now: Date,
+    tx?: QueryFn,
+  ): Promise<string | null> {
+    const run = tx ?? this.q;
+    // A CTE captures the PRIOR value explicitly. `RETURNING` alone would give
+    // the new (NULL) value, and a subquery in RETURNING would depend on
+    // snapshot subtleties; `FOR UPDATE` also serializes two concurrent
+    // unbinders so only one observes a non-NULL previous binding.
+    const rows = await run(
+      `WITH prev AS (
+         SELECT id, metaapi_account_id
+           FROM trading_accounts
+          WHERE id = $1 AND user_id = $2 AND metaapi_account_id IS NOT NULL
+          FOR UPDATE
+       )
+       UPDATE trading_accounts t
+          SET metaapi_account_id = NULL, updated_at = $3
+         FROM prev
+        WHERE t.id = prev.id
+       RETURNING prev.metaapi_account_id AS previous`,
+      [id, userId, now],
+    );
+    const row = rows[0] as { previous?: string | null } | undefined;
+    return row?.previous ?? null;
+  }
+
+  async getMetaApiBinding(id: string, userId: string): Promise<string | null> {
+    const rows = await this.q(
+      "SELECT metaapi_account_id FROM trading_accounts WHERE id = $1 AND user_id = $2",
+      [id, userId],
+    );
+    const row = rows[0] as { metaapi_account_id?: string | null } | undefined;
+    return row?.metaapi_account_id ?? null;
   }
 }

@@ -4,6 +4,8 @@
 
 **Accepted — owner decision D-18 (2026-09-15), via post-audit governance-alignment directive.**
 
+**Amendment — 2026-09-16 (owner decisions OD-MP-1 and OD-MP-2, `docs/reconciliation/METAAPI_OWNER_DECISIONS.md` §2F): owner-scoped, server-side credential consumption is AUTHORIZED for the specific MetaAPI provisioning use case, and audit metadata may record authorized credential-use lifecycle events.** This amendment is **authorization only — nothing is implemented**: there is no provisioning route, no provisioning client, no credential-consumption call site, no binding service and no migration at this HEAD. **Every cryptographic and isolation guarantee below is unchanged**: AES-256-GCM, externally supplied 32-byte master key, 12-byte random IV, 16-byte full tag, AAD `v<enc_version>:k<key_version>:aes-256-gcm`, fail-closed, no automatic key generation, no secrets in the repository, no plaintext persistence, **no generic admin reveal**, and **no System Owner credential disclosure**. See *Amendment — authorized server-side consumption (OD-MP-1/OD-MP-2)*.
+
 This ADR is **governance-only**: it ratifies the security model already
 implemented by capability C-22 (commit `a361847`, migration `0010`) and binds
 all future work on stored third-party credentials. It introduces **no** schema
@@ -194,6 +196,49 @@ behalf of the owning user**, and must not introduce an operator-facing reveal
 path. A support or debugging workflow that requires plaintext is **not**
 approved by this ADR and requires a superseding decision.
 
+### Amendment — authorized server-side consumption (OD-MP-1/OD-MP-2, 2026-09-16)
+
+The clause immediately above anticipated exactly one kind of future capability. **OD-MP-1 is
+that decision, and it is now ratified** — for **MetaAPI account provisioning and account
+binding only.**
+
+**What is authorized.** An authenticated, user-scoped API flow **may call
+`CredentialStore.reveal(credentialId, userId)`** and use the resulting plaintext to provision a
+MetaAPI account on behalf of **the requesting user**, where `userId` is always the
+server-derived `claims.sub`. Consumption is permitted **only inside that one provisioning
+application service**. The interface is **unchanged**: `reveal(id, userId)` keeps its
+owner-scoped signature, and no by-id-without-owner accessor is added.
+
+**This is consumption, not disclosure.** The distinction is the whole point of this section. The
+plaintext is used **server-side, against MetaAPI, on behalf of its owner**, and is never
+returned to any caller — not to the owning user, and not to an operator. Nothing here creates a
+"reveal endpoint", and the structural protection is untouched: **`revealAny`, `adminReveal`,
+`findByIdAsAdmin`, `listAll` and `findAny` still do not exist and must not be added.**
+
+**What remains forbidden — unchanged and restated because this amendment must not be misread:**
+
+- **No generic admin reveal**, and no support or debugging plaintext path.
+- **No System Owner credential disclosure.** The System Owner satisfies every RBAC permission
+  and **still cannot read another user's credential plaintext**. Administrative authority over
+  an account never becomes authority to impersonate its owner to a third party.
+- **No admin or System Owner may use another user's credentials** to provision, bind, or
+  disconnect that user's MetaAPI account.
+- **No Worker access.** The Worker never receives `CREDENTIAL_MASTER_KEY`, ciphertext, or
+  plaintext; it authenticates with `METAAPI_PLATFORM_TOKEN` plus the non-secret
+  `metaapi_account_id` (D-2). `db/roles.sql` keeps `REVOKE ALL ON user_credentials FROM
+  velora_worker` and is **not** weakened by this amendment.
+- **No plaintext egress.** Plaintext must never be persisted, logged, written to an audit row,
+  placed on `QueuePort`, placed in a pg-boss or DLQ payload, or returned in an HTTP response.
+- **No extension by analogy.** This authorization covers **MetaAPI provisioning only**. Any
+  other provider, or any other credential-consuming capability, requires its own decision.
+
+**Persistence limit.** The provisioning flow may persist only the resulting non-secret
+`metaapi_account_id` and other explicitly approved non-secret account metadata. **Plaintext
+persistence remains prohibited without exception.**
+
+**Status: authorization only.** No provisioning route, client, service, call site or migration
+exists at this HEAD. `CredentialStore.reveal()` still has **zero production callers**.
+
 At the database layer the same boundary is enforced independently
 (`db/roles.sql`): `velora_worker` and `velora_readonly` hold **no privileges at
 all** on `user_credentials`; only `app_readwrite` may read or write it. This is
@@ -308,6 +353,14 @@ This ADR does **not** authorize or describe as existing:
 - a specific cloud secret manager
 - any administrative or support plaintext-reveal capability
 
+**Amended 2026-09-16 (OD-MP-1/OD-MP-2).** Two entries above are now *authorized but still
+unimplemented*, and the list is read accordingly: **MetaAPI connection logic** — specifically
+provisioning and account binding — and **credential audit events** are **AUTHORIZED FOR FUTURE
+IMPLEMENTATION**, and this ADR still does **not describe them as existing**. Every other
+non-goal is unchanged; in particular **"any administrative or support plaintext-reveal
+capability" remains a hard non-goal**, and authorized server-side consumption is not such a
+capability.
+
 ## Consequences
 
 **Accepted:**
@@ -330,20 +383,38 @@ administrative disclosure, and database-layer least privilege.
 
 ## Future Work
 
-Each item requires its own decision; **none is approved here**:
+Each item requires its own decision. **As originally written (2026-09-15) none was approved
+here; amended 2026-09-16 — items 1 and 4 are now APPROVED by OD-MP-1/OD-MP-2 and remain
+UNIMPLEMENTED. Items 2, 3 and 5 are still unapproved.**
 
-1. **Credential audit events** — blocked today because migration `0009`
-   constrains `audit_log.action` to exactly `OWNERSHIP_CLAIMED`,
-   `USER_ROLE_CHANGED`, `USER_STATUS_CHANGED`. Recording credential
-   create/reveal/revoke requires widening that frozen CHECK and the
-   `AuditAction` union. Events must describe the **lifecycle operation only** —
-   never the secret value, nonce, tag or ciphertext.
-2. **Rotation implementation** — the nine requirements above.
-3. **Additional providers** — migration + CHECK widening, same envelope.
-4. **Authorized server-side consumption** (C-27/C-29) — must preserve the
-   isolation boundary and the no-plaintext-logging rule.
+1. **Credential audit events** — **APPROVED 2026-09-16 (OD-MP-2); NOT IMPLEMENTED.** Originally
+   blocked because migration `0009` constrained `audit_log.action` to exactly
+   `OWNERSHIP_CLAIMED`, `USER_ROLE_CHANGED`, `USER_STATUS_CHANGED`; migration `0011` later added
+   `CREDENTIAL_CREATED` and `CREDENTIAL_DELETED`. The owner has authorized widening that CHECK
+   and the `AuditAction` union by exactly **two** further values — **`CREDENTIAL_USED`** and
+   **`ACCOUNT_BINDING_CHANGED`** — with the existing `outcome IN ('success','denied')` carrying
+   the success/refusal distinction. **`CREDENTIAL_REVEALED` is rejected**, because the
+   authorized event is server-side *use*, not disclosure, and this ADR forbids disclosure.
+   Events must describe the **lifecycle operation only** — never the secret value, nonce, tag or
+   ciphertext, and never an access token or provider secret. The audit record **must not become
+   a credential-disclosure mechanism**. Append-only semantics and server-derived
+   `actor_user_id` are unchanged. **The migration is deferred to the implementation commit**
+   (AGENTS.md rule 11); it must be additive and migration-safe, following the `0011` pattern.
+2. **Rotation implementation** — the nine requirements above. **Still not approved.**
+3. **Additional providers** — migration + CHECK widening, same envelope. **Still not approved.**
+4. **Authorized server-side consumption** (C-27) — **APPROVED 2026-09-16 (OD-MP-1) for MetaAPI
+   provisioning and account binding only; NOT IMPLEMENTED.** It preserves the isolation boundary
+   and the no-plaintext-logging rule as conditions of the authorization: owner-scoped to
+   `claims.sub`, confined to the provisioning application service, no plaintext persistence, no
+   plaintext in logs, audit rows, queue or DLQ payloads, or HTTP responses, and no Worker
+   access. See *Amendment — authorized server-side consumption*. Trade sync (C-29) is
+   credential-free and is **not** a consumer.
 5. **Revocation semantics** — whether hard delete remains correct once audit
-   events exist.
+   events exist. **Still not approved as an ADR-016 change.** OD-MP-3 separately fixes the
+   *MetaAPI disconnect* lifecycle: local unbinding, provider-side deletion and credential
+   deletion/revocation are **three distinct operations that must not be conflated**, and
+   credential revocation continues to use the existing hard delete recorded as
+   `CREDENTIAL_DELETED`.
 
 ## Verification / Implementation Mapping
 
@@ -365,11 +436,13 @@ Every file below was verified to exist at HEAD
 | Unit coverage (19 tests) | `apps/api/src/credentials/credentialStore.test.ts` | **IMPLEMENTED** |
 | Real-PostgreSQL coverage (8 tests) | `db/tests/credentialStore.pg.test.ts` | **IMPLEMENTED** |
 | Schema-constraint regression (2 cases) | `db/tests/migrations.test.ts` | **IMPLEMENTED** |
-| Credential audit events | — | **NOT IMPLEMENTED** (blocked by `0009` CHECK) |
+| Credential audit events | — | **NOT IMPLEMENTED** — *authorized* 2026-09-16 (OD-MP-2); `action` CHECK still five values at `0011:60-68`; migration deferred to the implementation commit |
 | Key rotation tooling | — | **NOT IMPLEMENTED / DEFERRED** |
 | Dual-key decrypt window | — | **NOT IMPLEMENTED / DEFERRED** |
 | Additional providers | — | **NOT IMPLEMENTED** (out of scope) |
-| Authorized server-side consumption (C-27/C-29) | — | **NOT IMPLEMENTED** (gated) |
+| Authorized server-side consumption (C-27/C-29) | — | **NOT IMPLEMENTED** — *authorized* 2026-09-16 (OD-MP-1) for MetaAPI provisioning only; `reveal()` still has **zero production callers** at HEAD `029a9769` |
+| MetaAPI provisioning route / client / binding service | — | **NOT IMPLEMENTED** (authorized, future separate change) |
+| Disconnect / unbinding behaviour (OD-MP-3) | — | **NOT IMPLEMENTED** (authorized, future separate change) |
 
 ## Audit trail
 
@@ -378,3 +451,13 @@ Every file below was verified to exist at HEAD
   the Program Baseline Audit (gate A).
 - This ADR ratifies the shipped design. It changes no code and no schema.
 - Supersedes nothing. Superseded by nothing.
+- **Amendment 2026-09-16 (OD-MP-1, OD-MP-2), recorded at HEAD `029a9769`.** Authorizes
+  owner-scoped server-side credential consumption for **MetaAPI provisioning and account binding
+  only**, and the audit actions **`CREDENTIAL_USED`** and **`ACCOUNT_BINDING_CHANGED`**
+  (`CREDENTIAL_REVEALED` rejected). Landed in the same change as the owner-decision record, per
+  AGENTS.md rule 11. **Authorization only — no code, no route, no client, no service, no schema,
+  no migration, no privilege change, no worker change, no deployment.** Verified before
+  amending: `reveal()` declared `credentialStore.ts:116`, implemented `pgCredentialStore.ts:143-152`,
+  **zero production callers**; `CREDENTIAL_MASTER_KEY` absent from `apps/worker/**` except
+  prohibition comments; `audit_log.action` CHECK still exactly five values at `0011:60-68`.
+  **No cryptographic guarantee, isolation rule or non-goal of this ADR is weakened.**

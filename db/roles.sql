@@ -173,6 +173,33 @@ REVOKE ALL ON TABLE user_credentials FROM velora_worker;
 -- Reporting/analytics must never read credential ciphertext or its envelope.
 REVOKE ALL ON TABLE user_credentials FROM velora_readonly;
 
+-- `provisioning_operations` (OD-MP-1, migration 0014) is the durable record of
+-- MetaAPI provisioning attempts. It is written ONLY by the API-side
+-- provisioning service, which is the single authorized consumer of a decrypted
+-- user credential. Discharges the standing obligation recorded in section 5:
+-- ALTER DEFAULT PRIVILEGES would otherwise have auto-granted full DML on this
+-- new table to velora_worker (B11).
+--
+-- THE WORKER GETS NO ACCESS AT ALL. Under OD-MP-1 the sync worker is
+-- credential-free: it receives a flat scalar payload carrying an already-bound
+-- metaapi_account_id and never participates in provisioning. Reading this table
+-- would tell a background job which users hold provider credentials and let it
+-- observe provisioning state it has no business seeing; writing it could forge
+-- the evidence that makes provisioning idempotent. Neither is work the worker
+-- is authorized to do, so the narrowest correct grant is none.
+REVOKE ALL ON TABLE provisioning_operations FROM velora_worker;
+-- Reporting must not mine provisioning activity either: the row set reveals
+-- which users connected which broker accounts and when. Analytics has no
+-- legitimate need for provider-operation state.
+REVOKE ALL ON TABLE provisioning_operations FROM velora_readonly;
+-- The API may create and advance an operation, but never erase the evidence:
+-- TRUNCATE would wipe exactly the durable record that prevents a lost provider
+-- account after a local failure. UPDATE and DELETE are retained deliberately —
+-- unlike a ledger, an operation is a state machine (PENDING → ACCEPTED →
+-- COMPLETED/AMBIGUOUS/FAILED) whose progress is recorded in place, and
+-- reconciliation must be able to close out a resolved row.
+REVOKE TRUNCATE ON TABLE provisioning_operations FROM app_readwrite;
+
 -- `schema_migrations` is migrator-owned bookkeeping: runtime roles never write it.
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE schema_migrations FROM app_readwrite, velora_worker;
 

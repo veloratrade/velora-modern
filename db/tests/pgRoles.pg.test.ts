@@ -406,3 +406,76 @@ test("PG D5 P16: no unnecessary privileges — PUBLIC cannot CREATE in schema pu
     assert.equal(createdb.rows[0].any_admin, false, "no Velora role may hold CREATEDB/CREATEROLE");
   } finally { await close(); }
 });
+
+// ── P17 — OD-MP-1 provisioning table: the worker is locked out ─────────────
+// This is the EXECUTED discharge of the B11 obligation for
+// `provisioning_operations` (migration 0014). Section 5's ALTER DEFAULT
+// PRIVILEGES auto-grants full DML on every new table to both runtime roles,
+// so without the explicit REVOKE in roles.sql the credential-free worker would
+// silently gain read/write access to provisioning state. P15b above proves
+// that auto-grant really happens, which is exactly why this test is needed.
+
+test("PG D5 P17: velora_worker has NO privilege of any kind on provisioning_operations", { skip: SKIP }, async () => {
+  const { pool, close } = await harness();
+  try {
+    for (const priv of ["SELECT", "INSERT", "UPDATE", "DELETE"]) {
+      const res = await pool.query(
+        "SELECT has_table_privilege('velora_worker','provisioning_operations',$1) AS p", [priv]);
+      assert.equal(res.rows[0].p, false,
+        `velora_worker must not hold ${priv} on provisioning_operations`);
+    }
+    // Reporting must not be able to mine which users connected which accounts.
+    const ro = await pool.query(
+      "SELECT has_table_privilege('velora_readonly','provisioning_operations','SELECT') AS p");
+    assert.equal(ro.rows[0].p, false, "velora_readonly must not read provisioning activity");
+  } finally { await close(); }
+});
+
+test("PG D5 P17b: velora_worker attempting to read or write provisioning_operations → 42501", { skip: SKIP }, async () => {
+  const { pool, close } = await harness();
+  try {
+    // Privilege introspection above is the grid; these are the real statements
+    // the database actually refuses.
+    await assertDenied(pool, "velora_worker", "SELECT * FROM provisioning_operations");
+    await assertDenied(pool, "velora_worker",
+      `INSERT INTO provisioning_operations(user_id, account_id, operation_key, provider_marker)
+       VALUES (1, 1, '${"a".repeat(64)}', 'velora-${"a".repeat(32)}')`);
+    await assertDenied(pool, "velora_worker", "DELETE FROM provisioning_operations");
+  } finally { await close(); }
+});
+
+test("PG D5 P17c: the API role can run the operation state machine but cannot erase the evidence", { skip: SKIP }, async () => {
+  const { pool, close } = await harness();
+  try {
+    // app_readwrite must retain INSERT/SELECT/UPDATE: an operation is a state
+    // machine (PENDING → ACCEPTED → COMPLETED/AMBIGUOUS/FAILED), not a ledger.
+    for (const priv of ["SELECT", "INSERT", "UPDATE"]) {
+      const res = await pool.query(
+        "SELECT has_table_privilege('app_readwrite','provisioning_operations',$1) AS p", [priv]);
+      assert.equal(res.rows[0].p, true,
+        `app_readwrite needs ${priv} to advance a provisioning operation`);
+    }
+    // TRUNCATE would wipe exactly the durable record that prevents a lost
+    // provider account after a local failure.
+    await assertDenied(pool, "app_readwrite", "TRUNCATE TABLE provisioning_operations");
+  } finally { await close(); }
+});
+
+test("PG D5 P18: the audit trail's new account reference does not weaken append-only", { skip: SKIP }, async () => {
+  const { pool, close } = await harness();
+  try {
+    // Migration 0014 added audit_log.trading_account_id. Adding a column must
+    // not have re-granted anything on a table whose whole contract is that
+    // history cannot be rewritten or erased.
+    for (const priv of ["UPDATE", "DELETE", "TRUNCATE"]) {
+      const res = await pool.query(
+        "SELECT has_table_privilege('app_readwrite','audit_log',$1) AS p", [priv]);
+      assert.equal(res.rows[0].p, false, `audit_log must stay append-only (${priv})`);
+    }
+    for (const priv of ["SELECT", "INSERT", "UPDATE", "DELETE"]) {
+      const res = await pool.query(
+        "SELECT has_table_privilege('velora_worker','audit_log',$1) AS p", [priv]);
+      assert.equal(res.rows[0].p, false, `velora_worker must hold no ${priv} on audit_log`);
+    }
+  } finally { await close(); }
+});

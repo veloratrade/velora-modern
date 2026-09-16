@@ -29,6 +29,8 @@ export class MemoryAuditStore implements AuditStore {
       occurredAt: entry.occurredAt.toISOString(),
       credentialId: entry.credentialId ?? null,
       provider: entry.provider ?? null,
+      // OD-MP-2: same defaulting as the PG adapter so the two cannot drift.
+      tradingAccountId: entry.tradingAccountId ?? null,
     });
     this.records.push(record);
     return record;
