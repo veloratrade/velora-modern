@@ -140,14 +140,93 @@ wiring, restore drills (interface already staged in
 - MUST fail closed per-field, with tests covering every failure mode.
 - Adds no schema today: this ADR authorizes **no database tables or changes**.
 
+## Amendment A — retention law and mechanism (owner decision, 2026-09-16)
+
+**Status: Accepted.** The original ADR deferred *mechanism* to "a separate owner
+decision" (see "Future implementation boundary"). That decision has now been
+made by the owner and is recorded here, in the same change that implements it,
+per AGENTS.md Rule 11. The law in the body above is **unchanged and not
+weakened** — this amendment only fills the deliberately-empty mechanism slot and
+adds the retention rule the original ADR did not specify.
+
+### A.1 Retention law (new — the ADR previously had none)
+
+Scope is **independent per `(environment × backup_type)`** chain — i.e.
+`staging×database`, `staging×persistent_files`, `production×database`,
+`production×persistent_files`.
+
+> The newest successfully verified and officially stored backup of each chain is
+> **protected indefinitely**. When a newer backup of the same chain is
+> (1) created, (2) integrity-verified, (3) officially stored and
+> (4) storage-verified, the immediately previous backup enters a **14-day**
+> retention window measured **from the successor's successful storage time** —
+> not from the predecessor's own creation time.
+
+Worked example (normative): A stored day 0 → protected. B stored day 5 → A
+expires day 19. C stored day 12 → B expires day 26, **and A still expires day
+19** (an existing expiry is never recomputed).
+
+A database backup never advances a `persistent_files` chain, and a staging
+backup never affects production retention.
+
+### A.2 Deletion safety
+
+Timer expiry alone NEVER authorises deletion. All seven conditions must hold:
+the candidate is not the chain head; a successor exists in the *same* chain; the
+successor is still present; still `INTEGRITY_VERIFIED`; still storage-verified;
+the window has genuinely expired; and the candidate is exactly the intended
+backup. Deletion must never leave a chain with zero valid backups.
+
+### A.3 Mechanism (fills the deferred slot)
+
+| Slot | Decision |
+|---|---|
+| Producer | `pg_dump` (PostgreSQL) — the Reference's MySQL/PHP/FTP/cPanel producer is **not** portable and is explicitly NOT adopted |
+| Storage | **Reuse** the existing private `veloratrade/velora-backups` (Release assets + `backups/<env>/` metadata) — no new repository |
+| Validator | `ops/backup/backup_gate.py` — the Reference six-field contract adopted **verbatim**, extended with `backup_type`, `storage_status`, and `NOT_APPLICABLE` |
+| Retention | `ops/backup/retention.py` |
+| Freshness | Enforced when `MAX_BACKUP_AGE_SECONDS` is supplied; no default is invented here |
+
+### A.4 `NOT_APPLICABLE` — bounded, non-bypass
+
+Modern currently has **no persistent runtime files** (audited 2026-09-16: the
+only Railway volume is `postgres-volume`, the API performs no filesystem writes,
+and no storage adapter is implemented). The `persistent_files` chain is
+therefore `NOT_APPLICABLE` rather than falsely reported as successful. This is
+**not** a bypass: `NOT_APPLICABLE` is accepted only for a type explicitly
+declared inapplicable for that target, and can never excuse a missing database
+backup (enforced, with a dedicated test). If persistent files are introduced
+later, the declaration must be removed and a real file backup implemented.
+
+### A.5 What this amendment does NOT do
+
+It does not weaken fail-closed behaviour, add any skip/force/ignore path, change
+the evidence contract's required fields, or authorise any production operation.
+Deployment wiring remains outstanding — see "Remaining boundary" below.
+
+### A.6 Remaining boundary (still an owner decision)
+
+Modern deploys via **Railway GitHub triggers**, not GitHub Actions, and those
+triggers do not wait for CI (`checkSuites=false`). There is consequently **no
+job graph in which this gate can currently block a deploy**. Making the gate a
+real blocking dependency requires choosing a deployment-control model (move
+deploys into Actions, or adopt a platform-native pre-deploy check). Until that
+is decided, the gate is enforceable for *manually invoked* operations only, and
+the compliant outcome for any covered automatic mutation remains
+**BLOCKED — no verified backup gate**.
+
 ## Acceptance criteria
 
 - [x] This ADR + decision-ledger entry D-16 exist (this change).
 - [x] AGENTS.md carries the law as a non-negotiable rule pointing here.
 - [ ] Any future mutation mechanism references this ADR in its design and
       implements the gate as a blocking precondition (review gate).
-- [ ] When implemented, the validator fails closed on each missing/invalid
-      field, with per-field tests (mechanism acceptance).
+- [x] When implemented, the validator fails closed on each missing/invalid
+      field, with per-field tests (mechanism acceptance) — `ops/backup/`,
+      42 tests, Amendment A.
+- [x] Retention law specified and implemented per chain (Amendment A.1/A.2).
+- [ ] Gate wired as a blocking dependency of deployment — **BLOCKED** on the
+      deployment-control decision in A.6.
 
 ## Audit trail
 

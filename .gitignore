@@ -9,3 +9,16 @@ coverage/
 !.env.example
 .session/
 /tmp/
+
+# Backup artifacts (ADR-012 Amendment A): database dumps must NEVER enter Git.
+# Dumps live only in the private repo veloratrade/velora-backups as Release
+# assets. Evidence JSON is small and secret-free, but the bytes never are.
+backup-artifacts/
+backups/
+*.dump
+*.dump.gz
+*.sql.gz
+
+# Python bytecode (ops/backup tooling)
+__pycache__/
+*.py[cod]
