@@ -1,0 +1,194 @@
+# Deploy Staging (GATED) — the ONLY sanctioned staging deployment path.
+#
+# DEPLOY REQUEST -> CI -> BACKUP -> VERIFY -> OFFICIAL STORAGE -> STORAGE VERIFY
+#               -> BACKUP GATE -> DEPLOY CONTROLLER -> STAGING TARGET
+#
+# Every stage is a hard `needs:` dependency, so GitHub will not schedule the
+# deploy job unless every predecessor succeeded. There is no skip input, no
+# force input, and no bootstrap attestation.
+#
+# WHY THE BACKUP RUNS INSIDE RAILWAY
+# ==================================
+# The staging PostgreSQL has no public endpoint (tcpProxies = 0) and
+# `postgres.railway.internal` resolves only inside Railway's network. Rather
+# than exposing the database publicly — which is prohibited — the producer is
+# executed in-network over `railway ssh`. The runner only ever handles the
+# resulting artifact.
+#
+# KNOWN RESIDUAL RISK (documented, not silently accepted)
+# =======================================================
+# Railway's GitHub trigger `staging -> staging` (checkSuites=false) still
+# deploys on push, bypassing this workflow entirely. This workflow cannot
+# revoke that trigger; doing so is an owner action in the Railway UI. Until the
+# trigger is removed or repointed, this pipeline is the *sanctioned* path but
+# not yet the *exclusive* one. See ADR-012 A.6 and the deployment audit.
+name: Deploy Staging (gated)
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Gates only; do not deploy (default true)'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+env:
+  RAILWAY_PROJECT_ID: 56d1762e-79d3-4518-b788-5eda1d93dd22
+  RAILWAY_SERVICE: velora-modern
+  RAILWAY_DB_SERVICE: postgres
+  RAILWAY_ENVIRONMENT: staging
+
+jobs:
+  ci:
+    name: CI (build, typecheck, tests, secret scan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run secret-scan
+      - name: Backup system tests (Python)
+        run: python3 -m unittest discover -s ops/backup/tests -p "test_*.py" -v
+
+  backup:
+    name: Backup — create, verify, store, verify storage
+    needs: [ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require the dedicated backup credential (no fallback)
+        env:
+          BACKUP_REPO_TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
+        run: |
+          if [ -z "$BACKUP_REPO_TOKEN" ]; then
+            echo "::error::CREDENTIAL REQUIRED: BACKUP_REPO_TOKEN is not configured."
+            echo "::error::Fine-grained token for veloratrade/velora-backups ONLY (contents:write, metadata:read)."
+            echo "::error::GITHUB_TOKEN is deliberately NOT accepted as a fallback."
+            exit 1
+          fi
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Register ephemeral SSH key
+        env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          ssh-keygen -t ed25519 -N "" -C "ci-backup-${{ github.run_id }}" -f ~/.ssh/id_ed25519
+          ssh-keyscan -t ed25519,rsa ssh.railway.com >> ~/.ssh/known_hosts 2>/dev/null
+          railway ssh keys add --key ~/.ssh/id_ed25519.pub --name "ci-backup-${{ github.run_id }}"
+
+      - name: Create + verify backup INSIDE the Railway network
+        env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          B64=$(base64 -w0 ops/backup/create_pg_backup.sh)
+          railway ssh --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" \
+            --service "$RAILWAY_DB_SERVICE" "
+              set -e
+              echo '$B64' | base64 -d > /tmp/producer.sh
+              [ \"\$RAILWAY_ENVIRONMENT_NAME\" = 'staging' ] || { echo 'NOT STAGING'; exit 1; }
+              export DATABASE_URL=\"postgresql://\$POSTGRES_USER:\$POSTGRES_PASSWORD@localhost:5432/\$POSTGRES_DB\"
+              export ENVIRONMENT=staging
+              export SOURCE_COMMIT_SHA=${{ github.sha }}
+              rm -rf /tmp/bk && bash /tmp/producer.sh /tmp/bk
+              ls /tmp/bk
+            " | tee /tmp/producer.log
+          BID=$(grep -oE 'db-backup-staging-[0-9]+-[0-9a-f]+' /tmp/producer.log | head -1)
+          echo "BID=$BID" >> "$GITHUB_ENV"
+          mkdir -p evidence
+          railway ssh --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" \
+            --service "$RAILWAY_DB_SERVICE" "base64 -w0 /tmp/bk/$BID.dump.gz" \
+            | tr -d '\r\n ' | base64 -d > "evidence/$BID.dump.gz"
+          railway ssh --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" \
+            --service "$RAILWAY_DB_SERVICE" "cat /tmp/bk/$BID.json" > "evidence/$BID.json"
+          gzip -t "evidence/$BID.dump.gz"
+
+      - name: Upload to official storage + verify stored bytes
+        env:
+          BACKUP_REPO_TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 ops/backup/upload_backup.py \
+            --evidence "evidence/$BID.json" \
+            --artifact "evidence/$BID.dump.gz"
+          python3 -c "
+          import json,sys
+          ev=json.load(open('evidence/$BID.json'))
+          assert ev['storage_status']=='STORAGE_VERIFIED', ev['storage_status']
+          json.dump({'database':ev}, open('evidence/evidence.json','w'), indent=2)
+          print('storage verified:', ev['backup_id'])"
+          rm -f "evidence/$BID.dump.gz"   # the dump never leaves official storage
+
+      - name: Revoke ephemeral SSH key
+        if: always()
+        env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+        run: railway ssh keys remove --name "ci-backup-${{ github.run_id }}" || true
+
+      - name: Publish evidence (metadata only, never the dump)
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-evidence
+          path: evidence/evidence.json
+          retention-days: 14
+
+  backup_gate:
+    name: Backup gate
+    needs: [ci, backup]
+    uses: ./.github/workflows/backup-gate.yml
+    with:
+      expected_env: staging
+      expected_commit_sha: ${{ github.sha }}
+      inapplicable_backup_types: persistent_files
+      max_backup_age_seconds: '7200'
+
+  deploy:
+    name: Deploy controller -> Railway staging
+    needs: [ci, backup, backup_gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refuse to run if any gate did not succeed
+        run: |
+          echo "ci=${{ needs.ci.result }} backup=${{ needs.backup.result }} gate=${{ needs.backup_gate.result }}"
+          for r in "${{ needs.ci.result }}" "${{ needs.backup.result }}" "${{ needs.backup_gate.result }}"; do
+            [ "$r" = "success" ] || { echo "::error::gate not satisfied"; exit 1; }
+          done
+
+      - name: Dry run (no deploy)
+        if: ${{ inputs.dry_run }}
+        run: echo "DRY RUN — gates passed; nothing deployed." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy
+        if: ${{ !inputs.dry_run }}
+        env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          npm install -g @railway/cli
+          railway link --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT" --service "$RAILWAY_SERVICE"
+          railway up --detach
