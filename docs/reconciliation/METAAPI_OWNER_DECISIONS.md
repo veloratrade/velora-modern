@@ -831,12 +831,33 @@ them.
 
 | Decision | Previous state | New state | Implemented? |
 |---|---|---|---|
-| **OD-MP-1** API-side provisioning + owner-scoped credential consumption | NOT AUTHORIZED | **AUTHORIZED FOR FUTURE IMPLEMENTATION** | **NO** |
-| **OD-MP-2** `CREDENTIAL_USED` + `ACCOUNT_BINDING_CHANGED` audit vocabulary | NOT AUTHORIZED | **AUTHORIZED FOR FUTURE IMPLEMENTATION** | **NO — migration deferred to the implementation commit** |
-| **OD-MP-3** Disconnect / revocation semantics | UNDECIDED | **AUTHORIZED FOR FUTURE IMPLEMENTATION** | **NO** |
+| **OD-MP-1** API-side provisioning + owner-scoped credential consumption | NOT AUTHORIZED | **AUTHORIZED FOR FUTURE IMPLEMENTATION** | **NO** at the time of this amendment · **IMPLEMENTED 2026-09-16** at `6d9fd95` — see the status note below |
+| **OD-MP-2** `CREDENTIAL_USED` + `ACCOUNT_BINDING_CHANGED` audit vocabulary | NOT AUTHORIZED | **AUTHORIZED FOR FUTURE IMPLEMENTATION** | **NO — migration deferred to the implementation commit** at the time of this amendment · **IMPLEMENTED 2026-09-16** (migration `0014`) |
+| **OD-MP-3** Disconnect / revocation semantics | UNDECIDED | **AUTHORIZED FOR FUTURE IMPLEMENTATION** | **NO** at the time of this amendment · **IMPLEMENTED 2026-09-16** (disconnect route; provider deletion opt-in) |
 
 **No code, no route, no client, no service, no schema, no migration, no privilege change, no
 worker change, no Railway change, and no deployment is produced by this amendment.**
+*(That statement describes the governance amendment itself and remains true of it. The
+authorized implementation landed afterwards, in a separate commit — see the note below.)*
+
+> **STATUS NOTE — added 2026-09-16 (AUD-06), documentation-only.**
+> This section is the record of a **governance amendment**; its decisions
+> **OD-MP-1 / OD-MP-2 / OD-MP-3 are unchanged and remain frozen**. Only the
+> *implementation status* columns above and the blocker rows in §10 are
+> corrected, because the authorized work has since been implemented at
+> `6d9fd95` and the previous "NOT started / NO" wording contradicted the
+> repository.
+>
+> | Claim | Accurate status |
+> |---|---|
+> | Route, client, service, binding write | **IMPLEMENTED** — proven by unit, route (`provisioningRoutes.test.ts`, 19/19) and real-PostgreSQL tests |
+> | Audit vocabulary + migration `0014` | **IMPLEMENTED** — `CREDENTIAL_USED` + `ACCOUNT_BINDING_CHANGED`; `CREDENTIAL_REVEALED` DB-rejected (23514, tested) |
+> | Disconnect / opt-in provider deletion | **IMPLEMENTED** — trades and `trade_events` proven untouched on real PostgreSQL |
+> | Bind + terminal state + audit atomicity | **IMPLEMENTED 2026-09-16 (AUD-03 remediation)** — single transaction, proven by a rollback test with a verified negative control |
+> | **Real MetaAPI provisioning** | **NOT PROVEN** — no real provider call has ever been made; every provider interaction is stubbed at the `fetch` boundary |
+> | **Documented 202 replay semantics** | **AUTHORIZED, DELIBERATELY DEVIATED** — resolved by marker reconciliation instead; recorded in the implementation report §5.1 |
+> | **Deployed worker execution** | **DEPLOYMENT BLOCKED** — `railway.json` defines a single API service; B10-a is unresolved, so the provisioning→sync flow cannot complete in production |
+> | **`db/roles.sql` applied in production** | **NOT PROVEN** — applied by `db/provision.ts`/CI, not by the Railway start command |
 
 ---
 
@@ -1182,16 +1203,16 @@ A-1.
 |---|---|---|---|
 | **B1** | Credential model contradiction (platform vs user secret) | **OD-M1** | **RESOLVED at decision level**; storage mechanism open (D-1) |
 | **B2** | Worker cannot reach credentials — no tsconfig reference, no dependency, no barrel export, and `velora_worker` holds `REVOKE ALL` on `user_credentials` | **D-2 (ratified 2026-09-15)** | **CLOSED — DISSOLVED.** Sync is credential-free, so no credential path is needed. The `REVOKE ALL` is correct and stays. A-4 not required |
-| **B3** | `TRADE_IMPORTED` forbids actor `sync` (verified by executing `assertOwnership`) | **OD-M3 + A-1 (ratified 2026-09-15)** | **CLOSED (governance).** The domain still encodes `["system"]`; the one-line change is now AUTHORIZED and lands with the trade-import implementation (AGENTS.md rule 11). **No migration.** **D-3 is now RATIFIED (§2C)**: the final set is `["system", "sync"]`, with `system` = migration/system-origin and `sync` = provider-synchronization provenance |
-| **B4** | No sync substrate: no `last_synced_at`, no operation reservation, no fill ledger, no `quarantined` column | **D-6** migrations | **OPEN** |
+| **B3** | `TRADE_IMPORTED` forbids actor `sync` (verified by executing `assertOwnership`) | **OD-M3 + A-1 (ratified 2026-09-15)** | **CLOSED (governance).** **IMPLEMENTED** — the domain now encodes `["system", "sync"]` (landed before `6d9fd95`); the row's original "still encodes `["system"]`" wording is superseded. **No migration.** **D-3 is now RATIFIED (§2C)**: the final set is `["system", "sync"]`, with `system` = migration/system-origin and `sync` = provider-synchronization provenance |
+| **B4** | No sync substrate: no `last_synced_at`, no operation reservation, no fill ledger, no `quarantined` column | **D-6** migrations | **IMPLEMENTED** — the sync substrate landed in migrations `0012`/`0013`; `provisioning_operations` (operation reservation for provisioning) landed in `0014`. Row superseded |
 | **B5** | Three verified log/payload leak vectors (`runner.ts` `err.message`; `index.ts` event log; pg-boss persists payloads) | G-3 hardening | **OPEN — must close before plaintext egress** |
 | **B6** | Provisioning idempotency header mismatch (`transaction-id` vs `Idempotency-Key`) | **D-7 (§2E, 2026-09-15)** | **CLOSED (governance) — mismatch resolved.** Official docs require **`transaction-id`**; `Idempotency-Key` is undocumented, so legacy is wrong. **Sync path unaffected** (no such header documented). Residual dedup/retention semantics remain **NOT PROVEN** and gate only a future provisioning implementation |
 | **B7** | pg-boss never integration-tested; `pgBossAdapter.claim()` hardcodes `attempts: 0` | Worker phase | **OPEN / NOT PROVEN** |
-| **B8** | Import write model cannot represent provider data — `TradeRecord.source` typed `"manual"`; `externalDealId` absent from the write model | G-4 / trade-import phase | **OPEN** |
+| **B8** | Import write model cannot represent provider data — `TradeRecord.source` typed `"manual"`; `externalDealId` absent from the write model | G-4 / trade-import phase | **IMPLEMENTED** — `externalDealId` exists in `packages/contracts/src/trades.ts`; the write model represents provider-sourced trades. Row superseded |
 | **B9** | Platform token has no governed storage | **D-1 + A-3** | **CLOSED (governance) 2026-09-15 — ADR-014 ratified.** Implementation pending Phase 3 |
-| **B12** | No authorization for API-side credential consumption; `CredentialStore.reveal()` has **zero production callers** and `trading_accounts.metaapi_account_id` has **no production writer** (verified 2026-09-16 at HEAD `029a9769`) | **OD-MP-1 (§2F)** | **CLOSED (governance) 2026-09-16.** Owner-scoped API-side consumption for MetaAPI provisioning is authorized. **Implementation NOT started** — the route, client, service and binding write remain absent |
-| **B13** | Audit vocabulary cannot express authorized credential use or binding changes (`0011:60-68` closes `action` at five values) | **OD-MP-2 (§2F)** | **CLOSED (governance) 2026-09-16.** `CREDENTIAL_USED` + `ACCOUNT_BINDING_CHANGED` authorized; `CREDENTIAL_REVEALED` rejected. **Migration deliberately deferred to the implementation commit** — schema unchanged here |
-| **B14** | Disconnect/revocation semantics undecided (audit 2026-09-16: `NOT VERIFIED — no governance decision found`) | **OD-MP-3 (§2F)** | **CLOSED (governance) 2026-09-16.** Imported trades survive; unbinding / provider deletion / credential revocation are distinct. **No `DELETE` behaviour implemented** |
+| **B12** | No authorization for API-side credential consumption; `CredentialStore.reveal()` has **zero production callers** and `trading_accounts.metaapi_account_id` has **no production writer** (verified 2026-09-16 at HEAD `029a9769`) | **OD-MP-1 (§2F)** | **CLOSED (governance) 2026-09-16.** Owner-scoped API-side consumption for MetaAPI provisioning is authorized. **IMPLEMENTED 2026-09-16** at `6d9fd95` (post-dates this row's original wording): `POST /api/v1/accounts/{id}/metaapi/connect` (`kernel/server.ts`), `provisioningClient.ts`, `provisioningService.ts`, and the binding write `bindMetaApiAccount` (`pgAccountStore.ts`). `reveal()` now has exactly **one** production caller (`provisioningService.ts`). **Route-layer behaviour proven** by `provisioningRoutes.test.ts` (19/19, negative-control verified). **NOT PROVEN:** no real MetaAPI call has ever been made |
+| **B13** | Audit vocabulary cannot express authorized credential use or binding changes (`0011:60-68` closes `action` at five values) | **OD-MP-2 (§2F)** | **CLOSED (governance) 2026-09-16.** `CREDENTIAL_USED` + `ACCOUNT_BINDING_CHANGED` authorized; `CREDENTIAL_REVEALED` rejected. **IMPLEMENTED 2026-09-16** at `6d9fd95`: migration `0014_metaapi_provisioning.sql` widens the `action` CHECK from five to seven values, adding exactly `CREDENTIAL_USED` and `ACCOUNT_BINDING_CHANGED`. `CREDENTIAL_REVEALED` remains DB-rejected (SQLSTATE 23514, tested on real PostgreSQL) |
+| **B14** | Disconnect/revocation semantics undecided (audit 2026-09-16: `NOT VERIFIED — no governance decision found`) | **OD-MP-3 (§2F)** | **CLOSED (governance) 2026-09-16.** Imported trades survive; unbinding / provider deletion / credential revocation are distinct. **IMPLEMENTED 2026-09-16** at `6d9fd95`: `POST /api/v1/accounts/{id}/metaapi/disconnect` performs a local unbind; provider deletion is **opt-in** (`deleteProviderAccount: true`) and a provider 404 is treated as success. Trades, `trade_events` and P/L are untouched — proven byte-identical on real PostgreSQL. **NOT PROVEN:** no real provider DELETE has been issued |
 
 **MetaAPI implementation is NOT unlocked** *(as written 2026-09-15; amended — see below)*. Four
 decisions of principle are recorded

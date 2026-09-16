@@ -15,46 +15,83 @@
 // 404 mapping happens in AccountService).
 import type { Pool } from "pg";
 import { poolQuery, withTransaction, iso, isUniqueViolation, type QueryFn } from "../persistence/pg.js";
-import type { AccountStore, AccountRecord, AccountCreatePayload } from "./accountStore.js";
+import type {
+  AccountStore, AccountRecord, AccountCreatePayload,
+  AccountProvider, AccountStatus, SyncStatus,
+} from "./accountStore.js";
 import { AccountQuotaExceededError, AccountBindingConflictError } from "./accountStore.js";
 
-interface AccountRow {
-  id: string;
-  user_id: string;
-  provider: string;
-  platform: string;
-  label: string;
-  account_number_masked: string;
-  currency: string;
-  leverage: string;
-  timezone: string | null;
-  timezone_source: string;
-  status: string;
-  sync_status: string;
-  balance: string;
-  equity: string;
-  created_at: Date | string;
-  updated_at: Date | string;
+/**
+ * A row exactly as the driver hands it back (AUD-04).
+ *
+ * `QueryFn` yields `Record<string, unknown>`, so the mapper takes that shape
+ * directly and narrows each column itself. This deliberately avoids the
+ * `as unknown as <RowInterface>` idiom: a double cast asserts a shape nothing
+ * checks, which is precisely how a schema/mapper drift survives typechecking.
+ * Same approach as `pgProvisioningStore.mapOperation`.
+ */
+type Row = Record<string, unknown>;
+
+/** Narrow a NOT NULL text column. */
+function str(v: unknown): string {
+  return typeof v === "string" ? v : String(v);
 }
 
-function mapAccount(r: AccountRow): AccountRecord {
+/** Narrow a nullable text column, preserving SQL NULL as `null`. */
+function strOrNull(v: unknown): string | null {
+  return v === null || v === undefined ? null : str(v);
+}
+
+/**
+ * Narrow a NOT NULL timestamptz. node-postgres returns a `Date` by default but
+ * a string when date parsing is overridden, so both are accepted and anything
+ * else is a real defect rather than something to coerce silently.
+ */
+function ts(v: unknown): Date | string {
+  if (v instanceof Date || typeof v === "string") return v;
+  throw new Error("trading_accounts timestamp column is neither Date nor string");
+}
+
+/**
+ * Validate a value against a closed vocabulary that the database already
+ * enforces with a CHECK constraint. Validated rather than asserted: if a future
+ * migration widens the constraint without updating the union here, the failure
+ * surfaces as a loud, precise error instead of an invalid value flowing
+ * silently into the domain. Carries no row data into the message.
+ */
+function oneOf<T extends string>(v: unknown, allowed: readonly T[], column: string): T {
+  const s = str(v);
+  const found = allowed.find((k) => k === s);
+  if (found === undefined) {
+    throw new Error(`trading_accounts.${column} has an unknown value: ${s}`);
+  }
+  return found;
+}
+
+const PROVIDERS: readonly AccountProvider[] = ["MT4", "MT5", "MANUAL"];
+const STATUSES: readonly AccountStatus[] = ["connected", "error", "disconnected"];
+const SYNC_STATUSES: readonly SyncStatus[] = [
+  "DISCONNECTED", "CONNECTING", "SYNCING", "CONNECTED", "ERROR",
+];
+
+function mapAccount(r: Row): AccountRecord {
   return {
-    id: String(r.id),
-    userId: String(r.user_id),
-    provider: r.provider as AccountRecord["provider"],
-    platform: r.platform,
-    label: r.label,
-    accountNumber: r.account_number_masked,
-    currency: r.currency,
-    leverage: r.leverage,
-    timezone: r.timezone,
-    timezoneSource: r.timezone_source,
-    status: r.status as AccountRecord["status"],
-    syncStatus: r.sync_status as AccountRecord["syncStatus"],
+    id: str(r.id),
+    userId: str(r.user_id),
+    provider: oneOf(r.provider, PROVIDERS, "provider"),
+    platform: str(r.platform),
+    label: str(r.label),
+    accountNumber: str(r.account_number_masked),
+    currency: str(r.currency),
+    leverage: str(r.leverage),
+    timezone: strOrNull(r.timezone),
+    timezoneSource: str(r.timezone_source),
+    status: oneOf(r.status, STATUSES, "status"),
+    syncStatus: oneOf(r.sync_status, SYNC_STATUSES, "sync_status"),
     balance: Number(r.balance).toFixed(2),
     equity: Number(r.equity).toFixed(2),
-    createdAt: iso(r.created_at),
-    updatedAt: iso(r.updated_at),
+    createdAt: iso(ts(r.created_at)),
+    updatedAt: iso(ts(r.updated_at)),
   };
 }
 
@@ -70,7 +107,7 @@ export class PgAccountStore implements AccountStore {
       "SELECT * FROM trading_accounts WHERE user_id = $1 ORDER BY created_at DESC",
       [userId],
     );
-    return rows.map((r) => mapAccount(r as unknown as AccountRow));
+    return rows.map((r) => mapAccount(r));
   }
 
   async findByIdForUser(id: string, userId: string): Promise<AccountRecord | null> {
@@ -78,7 +115,7 @@ export class PgAccountStore implements AccountStore {
       id,
       userId,
     ]);
-    return rows.length === 0 ? null : mapAccount(rows[0] as unknown as AccountRow);
+    return rows.length === 0 ? null : mapAccount(rows[0]!);
   }
 
   async countByUser(userId: string): Promise<number> {
@@ -124,7 +161,7 @@ export class PgAccountStore implements AccountStore {
     );
     const row = rows[0];
     if (row === undefined) throw new Error("create: INSERT returned no row");
-    return mapAccount(row as unknown as AccountRow);
+    return mapAccount(row);
   }
 
   async createWithQuotaGuard(
@@ -168,7 +205,7 @@ export class PgAccountStore implements AccountStore {
       );
       const row = rows[0];
       if (row === undefined) throw new Error("createWithQuotaGuard: INSERT returned no row");
-      return mapAccount(row as unknown as AccountRow);
+      return mapAccount(row);
     });
   }
 
@@ -184,7 +221,7 @@ export class PgAccountStore implements AccountStore {
        WHERE id = $4 AND user_id = $5 RETURNING *`,
       [timezone, timezoneSource, now, id, userId],
     );
-    return rows.length === 0 ? null : mapAccount(rows[0] as unknown as AccountRow);
+    return rows.length === 0 ? null : mapAccount(rows[0]!);
   }
 
   async deleteForUser(id: string, userId: string): Promise<boolean> {
@@ -227,7 +264,7 @@ export class PgAccountStore implements AccountStore {
         RETURNING *`,
         [id, userId, binding, now],
       );
-      return rows.length === 0 ? null : mapAccount(rows[0] as unknown as AccountRow);
+      return rows.length === 0 ? null : mapAccount(rows[0]!);
     } catch (err) {
       // The UNIQUE index is global by design (OD-MP-1 / migration 0013): one
       // MetaAPI account can back exactly one Velora account, across all users.

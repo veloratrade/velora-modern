@@ -29,6 +29,7 @@ import { AccountBindingConflictError } from "../accounts/accountStore.js";
 import type { CredentialStore } from "../credentials/credentialStore.js";
 import type { AuditStore } from "../auth/auditStore.js";
 import type { ProvisioningStore } from "./provisioningStore.js";
+import type { QueryFn } from "../persistence/pg.js";
 import {
   createMetaApiAccount,
   deleteMetaApiAccount,
@@ -78,6 +79,24 @@ export interface ProvisioningDeps {
   readonly pollDelayMs?: number | undefined;
   /** Injected so tests do not sleep in real time. */
   readonly sleep?: ((ms: number) => Promise<void>) | undefined;
+  /**
+   * AUD-03: runs `fn` inside ONE PostgreSQL transaction, passing the handle so
+   * the binding UPDATE, the terminal operation state and the
+   * ACCOUNT_BINDING_CHANGED audit row commit or roll back together.
+   *
+   * Optional and injected rather than a `Pool`, for two reasons: the service
+   * depends on ports (not on a driver), and the in-memory composition has no
+   * database at all. When absent, each write runs in its own autocommit
+   * statement exactly as before — the same graceful-degradation shape
+   * `pgOwnershipStore.claim` already uses for its audit callback.
+   *
+   * NEVER wrapped around a MetaAPI HTTP call: OD-MP-1 forbids holding a
+   * transaction open across the provider request, and no plaintext credential
+   * is in scope by the time this runs.
+   */
+  readonly runInTransaction?:
+    | (<T>(fn: (tx: QueryFn) => Promise<T>) => Promise<T>)
+    | undefined;
 }
 
 /** Non-secret view returned to the client. Carries no credential material. */
@@ -335,7 +354,24 @@ export class MetaApiProvisioningService {
       }
     }
 
-    const unbound = await this.deps.accounts.unbindMetaApiAccount!(accountId, actor.id, this.now());
+    // AUD-03: unbind + ACCOUNT_BINDING_CHANGED commit together, so a crash can
+    // never clear a binding without recording who cleared it.
+    const atomically = this.deps.runInTransaction ?? (async <T,>(fn: (tx?: QueryFn) => Promise<T>) => fn(undefined));
+    const unbound = await atomically(async (tx?: QueryFn) => {
+      const previousBinding = await this.deps.accounts.unbindMetaApiAccount!(
+        accountId, actor.id, this.now(), tx,
+      );
+      if (previousBinding === null) return null;
+      await this.appendAudit(actor, {
+        action: "ACCOUNT_BINDING_CHANGED",
+        outcome: "success",
+        tradingAccountId: accountId,
+        // The transition is unambiguous: a concrete provider id -> none.
+        beforeState: previousBinding,
+        afterState: null,
+      }, tx);
+      return previousBinding;
+    });
     if (unbound === null) {
       // Lost a race with a concurrent disconnect. Nothing further to do, and
       // nothing was corrupted — report the same 409 as "not connected".
@@ -346,15 +382,7 @@ export class MetaApiProvisioningService {
       );
     }
 
-    await this.appendAudit(actor, {
-      action: "ACCOUNT_BINDING_CHANGED",
-      outcome: "success",
-      tradingAccountId: accountId,
-      // The transition is unambiguous: a concrete provider id -> none.
-      beforeState: unbound,
-      afterState: null,
-    });
-
+    // The ACCOUNT_BINDING_CHANGED row was written inside the transaction above.
     return { accountId, status: "disconnected", providerAccountDeleted };
   }
 
@@ -432,24 +460,51 @@ export class MetaApiProvisioningService {
     providerAccountId: string,
     reconciled: boolean,
   ): Promise<ConnectResult> {
-    // Persist the provider outcome BEFORE attempting the binding. If the bind
-    // fails, this row is what makes the provider account recoverable.
+    // Persist the provider outcome BEFORE attempting the binding, in its OWN
+    // committed statement. If everything after this point fails, this row is
+    // what makes the provider account recoverable — so it must survive the
+    // rollback of the atomic block below, and therefore cannot be inside it.
     await this.deps.operations.markStatus(operationId, "ACCEPTED", this.now(), {
       providerAccountId,
       incrementAttempts: true,
     });
 
+    // AUD-03: bind + terminal state + audit are ONE transaction. Previously
+    // these were three autocommit statements, so a crash between them could
+    // leave a bound account with no ACCOUNT_BINDING_CHANGED row — a silent hole
+    // in a trail whose entire value is completeness.
+    const atomically = this.deps.runInTransaction ?? (async <T,>(fn: (tx?: QueryFn) => Promise<T>) => fn(undefined));
+
     let bound: AccountRecord | null;
     try {
-      bound = await this.deps.accounts.bindMetaApiAccount!(
-        account.id,
-        actor.id,
-        providerAccountId,
-        this.now(),
-        // Reconciliation may re-assert the same id; a first bind must find the
-        // column empty.
-        !reconciled,
-      );
+      bound = await atomically(async (tx?: QueryFn) => {
+        const result = await this.deps.accounts.bindMetaApiAccount!(
+          account.id,
+          actor.id,
+          providerAccountId,
+          this.now(),
+          // Reconciliation may re-assert the same id; a first bind must find
+          // the column empty.
+          !reconciled,
+          tx,
+        );
+        // A CAS loss is NOT an error: it is resolved after the transaction so
+        // the convergence read sees committed state. Nothing was written here,
+        // so returning null rolls nothing back.
+        if (result === null) return null;
+
+        await this.deps.operations.markStatus(
+          operationId, "COMPLETED", this.now(), { providerAccountId }, tx,
+        );
+        await this.appendAudit(actor, {
+          action: "ACCOUNT_BINDING_CHANGED",
+          outcome: "success",
+          tradingAccountId: account.id,
+          beforeState: null,
+          afterState: providerAccountId,
+        }, tx);
+        return result;
+      });
     } catch (err) {
       if (err instanceof AccountBindingConflictError) {
         await this.deps.operations.markStatus(operationId, "FAILED", this.now(), {
@@ -492,18 +547,8 @@ export class MetaApiProvisioningService {
       );
     }
 
-    await this.deps.operations.markStatus(operationId, "COMPLETED", this.now(), {
-      providerAccountId,
-    });
-
-    await this.appendAudit(actor, {
-      action: "ACCOUNT_BINDING_CHANGED",
-      outcome: "success",
-      tradingAccountId: account.id,
-      beforeState: null,
-      afterState: providerAccountId,
-    });
-
+    // The terminal state and the ACCOUNT_BINDING_CHANGED row were written
+    // INSIDE the transaction above, together with the binding itself (AUD-03).
     return {
       accountId: account.id,
       metaapiAccountId: providerAccountId,
@@ -576,6 +621,8 @@ export class MetaApiProvisioningService {
       beforeState?: string | null | undefined;
       afterState?: string | null | undefined;
     },
+    /** AUD-03: when present, the audit row joins the caller's transaction. */
+    tx?: QueryFn,
   ): Promise<void> {
     await this.deps.audit.append({
       action: entry.action,
@@ -591,7 +638,7 @@ export class MetaApiProvisioningService {
       tradingAccountId: entry.tradingAccountId,
       requestId: actor.requestId ?? null,
       occurredAt: this.now(),
-    });
+    }, tx);
   }
 
   /**

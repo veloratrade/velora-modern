@@ -52,6 +52,8 @@ import { makeDbProbe } from "./kernel/dbProbe.js";
 import type { MailPort } from "./mail/mailPort.js";
 import { ResendMailProvider } from "./mail/resendMailProvider.js";
 import { LogMailProvider } from "./mail/logMailProvider.js";
+// AUD-03: the single transaction primitive used across the API adapters.
+import { withTransaction } from "./persistence/pg.js";
 
 
 async function main(): Promise<void> {
@@ -322,6 +324,10 @@ async function main(): Promise<void> {
       // else the client's documented default. Validated https-only, because a
       // bearer token and a broker password travel on this connection.
       clientOptions: provisioningBaseUrl !== null ? { baseUrl: provisioningBaseUrl } : {},
+      // AUD-03: the binding UPDATE, the terminal operation state and the
+      // ACCOUNT_BINDING_CHANGED audit row commit or roll back together. Uses
+      // the repository's single transaction primitive — no second abstraction.
+      runInTransaction: (fn) => withTransaction(pool, fn),
     });
     console.log(JSON.stringify({ level: "info", event: "metaapi.provisioning.enabled" }));
   }

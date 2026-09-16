@@ -79,9 +79,57 @@ grep: the only other `.reveal(` in production is the unrelated
 - Account id is read from `response.id` and shape-validated; a malformed body
   is a typed error, not a crash.
 - Documented **202** flow: `Retry-After` / `metadata.recommendedRetryTime` is
-  captured, polling reuses the **same** transaction-id under a bounded policy,
-  and **no database transaction is held across any HTTP call**.
+  captured, polling runs under a bounded policy, and **no database transaction
+  is held across any HTTP call**.
 - Provider-side deduplication is **not** assumed.
+
+### 5.1 202 resolution — DOCUMENTED DEVIATION from the vendor's replay wording (AUD-05)
+
+The vendor documents one retry semantic for `POST /users/current/accounts`:
+*"If your request has returned 202 status code, please reuse the same
+transaction id value to poll the result."* The six statements below record
+exactly what this implementation does instead, and why.
+
+1. **What the provider documents.** 202 (`AcceptedError`) means accepted but
+   not yet complete, carrying `metadata.recommendedRetryTime`; the documented
+   way to learn the outcome is to **replay the create request with the same
+   `transaction-id`**.
+2. **What this implementation actually does.** On 202 it does **not** replay
+   the POST. It sleeps (`Retry-After` → `recommendedRetryTime` → default
+   2000 ms, capped at 30 s) and then polls
+   **`GET /users/current/accounts?query=<marker>`**, matching the deterministic
+   secret-free marker `velora-<32 hex>` exactly on `name`
+   (`provisioningService.ts:415-421`, `provisioningClient.ts:305-325`). The
+   read carries `auth-token` only — **no `transaction-id` header**, asserted at
+   `provisioningClient.test.ts:222`.
+3. **Why.** Replaying a *create* to discover a result requires trusting
+   undocumented provider deduplication: if the transaction id is not honoured
+   as a dedup key, the replay creates a **second billable account**. OD-MP-1
+   forbids assuming provider dedup. The marker search asks a read-only question
+   the documented read endpoint can answer, so the worst case of a lost
+   response is a redundant read, never a duplicate account.
+4. **The mandatory part of the contract is still satisfied.** `transaction-id`
+   is documented as **Required on account creation**, and it is always sent on
+   POST (`provisioningClient.ts:246`), always 32 crypto-random hex characters,
+   and **persisted** on the operation row. When a later attempt genuinely
+   re-POSTs (a retry of an unresolved operation, not a 202 poll), it reuses the
+   **stored** id — `operation.transactionId ?? newTransactionId()`
+   (`provisioningService.ts:291`) — so the documented replay identity is
+   preserved where a replay actually occurs. **No mandatory provider contract
+   is violated**; the deviation is confined to the *optional* choice of how to
+   resolve a 202, so no STOP condition is triggered.
+5. **What this costs.** The documented 202 resolution path is **not the one
+   exercised**. If MetaAPI's marker search were eventually consistent, a poll
+   could miss a just-created account; the budget (5 attempts) would then be
+   exhausted and the outcome deliberately classified `PROVIDER_UNAVAILABLE`
+   **ambiguous — never "failed"** — leaving the operation row recoverable by
+   marker instead of retried blindly.
+6. **Proof status: NOT PROVEN against the real provider.** No real 202 has ever
+   been observed. The 202 branch, the retry-hint precedence, the bounded budget
+   and the ambiguity classification are proven only against a stubbed `fetch`
+   (`provisioningClient.test.ts`, `provisioningService.test.ts`). Real 202
+   timing, and whether `?query=` is read-your-write consistent, remain
+   unverified and are listed in §10.
 - Provider response bodies never reach logs, error messages or stacks: a 400
   surfaces literally as `"status 400"` (test-proven).
 - Provisioning host is distinct from the client/history host and is settable
@@ -102,6 +150,16 @@ grep: the only other `.reveal(` in production is the unrelated
 - Transaction boundary (Phase 9): short txn (reserve operation + lock) →
   **commit** → `reveal()` → HTTP/poll → short txn (bind + operation state +
   audit).
+
+> **ACCURACY CORRECTION (AUD-03).** As originally written for `6d9fd95`, the
+> final bullet above was **an overstatement**: the bind, the terminal operation
+> state and the audit append each ran on their own connection, so a crash or an
+> audit failure between them could commit a binding with no audit row. The
+> audit caught this. It became true only with the remediation commit, which
+> runs all three inside one `withTransaction` block and proves the rollback on
+> real PostgreSQL with a verified negative control. `markStatus(ACCEPTED)`
+> remains deliberately **outside** that transaction: it is the record that
+> makes a provider-side account recoverable, so it must survive a rollback.
 
 ## 7. Audit
 

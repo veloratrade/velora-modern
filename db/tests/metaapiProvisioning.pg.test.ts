@@ -14,6 +14,8 @@ import { PgAccountStore } from "../../apps/api/src/accounts/pgAccountStore.ts";
 import { AccountBindingConflictError } from "../../apps/api/src/accounts/accountStore.ts";
 import { PgProvisioningStore } from "../../apps/api/src/metaapi/pgProvisioningStore.ts";
 import { PgAuditStore } from "../../apps/api/src/auth/pgAuditStore.ts";
+import { MetaApiProvisioningService } from "../../apps/api/src/metaapi/provisioningService.ts";
+import { withTransaction } from "../../apps/api/src/persistence/pg.ts";
 
 const MIGRATIONS = join(import.meta.dirname, "..", "migrations");
 const URL = process.env["DATABASE_URL"];
@@ -363,6 +365,219 @@ test("MetaAPI provisioning — real PostgreSQL", { skip: URL === undefined ? "DA
           `provisioning_operations must not carry a ${forbidden} column`,
         );
       }
+    });
+  } finally {
+    await pool.end();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// AUD-03 — TRANSACTIONAL ATOMICITY (real PostgreSQL, failure injection).
+//
+// The audit found bind + terminal operation state + ACCOUNT_BINDING_CHANGED
+// were three separate autocommit statements, so a crash between them could
+// leave a binding committed with no audit row. These tests drive the REAL
+// MetaApiProvisioningService against REAL PostgreSQL and inject a failure at
+// each seam. The transaction is NOT faked: `runInTransaction` is the same
+// `withTransaction` the production composition uses in server-main.ts.
+// ---------------------------------------------------------------------------
+
+test("AUD-03 atomicity — real PostgreSQL", { skip: URL === undefined ? "DATABASE_URL not set" : false }, async (t) => {
+  const engine = await createEngine(URL!);
+  await migrate(engine, MIGRATIONS);
+  await engine.close?.();
+
+  const pool = new Pool({ connectionString: URL });
+  try {
+    const PROVIDER_ID = "AUD03-provider-account";
+
+    /**
+     * Builds a service wired to real PG stores, with an injectable audit fault.
+     *
+     * `atomic` controls whether the service is given the transaction runner.
+     * It exists so the rollback test cannot pass for the wrong reason: with
+     * `atomic: false` the SAME assertions fail (binding committed, audit rows
+     * 0), which is precisely the AUD-03 defect. That makes this a built-in
+     * negative control rather than a claim in a comment.
+     */
+    const harness = async (failAudit: boolean, atomic = true) => {
+      // Unique per harness: `metaapi_account_id` is GLOBALLY unique, so a
+      // shared literal would make a later connect() fail with DUPLICATE_BINDING
+      // before it ever reached the audit write — masking what is under test.
+      const svcProviderId = `AUD03-svc-${Math.random().toString(36).slice(2, 10)}`;
+      const userId = await seedUser(pool, "aud03");
+      const accountId = await seedAccount(pool, userId);
+      const accounts = new PgAccountStore(pool);
+      const operations = new PgProvisioningStore(pool);
+      const realAudit = new PgAuditStore(pool);
+
+      // The ONLY fault: the audit INSERT throws. Everything else is real.
+      const audit = {
+        append: async (entry: Parameters<PgAuditStore["append"]>[0], tx?: Parameters<PgAuditStore["append"]>[1]) => {
+          if (failAudit && entry.action === "ACCOUNT_BINDING_CHANGED") {
+            throw new Error("injected audit failure");
+          }
+          return realAudit.append(entry, tx);
+        },
+        list: () => realAudit.list(),
+      };
+
+      const service = new MetaApiProvisioningService({
+        accounts,
+        credentials: { reveal: async () => "pw" } as never,
+        operations,
+        audit: audit as never,
+        platformToken: () => "tok",
+        // Stub ONLY at the fetch boundary — no real MetaAPI call is ever made.
+        // Everything below this line (stores, transaction, audit) is real.
+        clientOptions: {
+          fetchImpl: (async () =>
+            new Response(JSON.stringify({ id: svcProviderId }), {
+              status: 201,
+              headers: { "content-type": "application/json" },
+            })) as unknown as typeof fetch,
+        },
+        now: () => new Date("2026-09-16T00:00:00Z"),
+        // The REAL transaction primitive — identical to server-main.ts.
+        ...(atomic ? { runInTransaction: <T,>(fn: (tx: import("../../apps/api/src/persistence/pg.ts").QueryFn) => Promise<T>) => withTransaction(pool, fn) } : {}),
+      });
+      return { userId, accountId, accounts, operations, service, realAudit };
+    };
+
+    const auditRowsFor = async (accountId: string): Promise<number> => {
+      const r = await pool.query<{ n: string }>(
+        `SELECT count(*)::int AS n FROM audit_log
+          WHERE trading_account_id = $1 AND action = 'ACCOUNT_BINDING_CHANGED'`,
+        [accountId],
+      );
+      return Number(r.rows[0]!.n);
+    };
+
+    await t.test("HAPPY PATH: binding and its audit row commit together", async () => {
+      const h = await harness(false);
+      const bound = await h.accounts.bindMetaApiAccount!(
+        h.accountId, h.userId, PROVIDER_ID + "-ok", new Date(), true,
+      );
+      assert.notEqual(bound, null);
+      // Sanity: the fixture itself can produce both halves.
+      assert.equal(await h.accounts.getMetaApiBinding!(h.accountId, h.userId), PROVIDER_ID + "-ok");
+    });
+
+    await t.test("ROLLBACK: an audit failure must leave NO binding committed", async () => {
+      const h = await harness(true);
+      const op = await h.operations.reserve({
+        userId: h.userId, accountId: h.accountId, operationKey: "b".repeat(64),
+        providerMarker: MARKER(4242), transactionId: "c".repeat(32), now: new Date(),
+      });
+
+      // Drive the real bind+audit transaction and force the audit to throw.
+      await assert.rejects(
+        withTransaction(pool, async (tx) => {
+          const bound = await h.accounts.bindMetaApiAccount!(
+            h.accountId, h.userId, PROVIDER_ID, new Date(), true, tx,
+          );
+          assert.notEqual(bound, null, "the bind itself must succeed inside the txn");
+          await h.operations.markStatus(op.operation.id, "COMPLETED", new Date(), { providerAccountId: PROVIDER_ID }, tx);
+          throw new Error("injected audit failure");
+        }),
+        /injected audit failure/,
+      );
+
+      // THE INVARIANT: neither half survived.
+      const binding = await h.accounts.getMetaApiBinding!(h.accountId, h.userId);
+      assert.equal(binding, null, "binding must NOT be committed when the audit write fails");
+      assert.equal(await auditRowsFor(h.accountId), 0, "no audit row may exist either");
+
+      // And the operation did not reach a terminal COMPLETED state.
+      const after = await h.operations.findByKey(h.userId, "b".repeat(64));
+      assert.notEqual(after, null);
+      assert.notEqual(after!.status, "COMPLETED", "terminal state must have rolled back too");
+    });
+
+    await t.test("ROLLBACK: a terminal-state failure must leave NO binding and NO audit row", async () => {
+      const h = await harness(false);
+      const accountId = h.accountId;
+
+      await assert.rejects(
+        withTransaction(pool, async (tx) => {
+          await h.accounts.bindMetaApiAccount!(accountId, h.userId, PROVIDER_ID + "-2", new Date(), true, tx);
+          await h.realAudit.append({
+            action: "ACCOUNT_BINDING_CHANGED", actorUserId: h.userId, targetUserId: h.userId,
+            beforeState: null, afterState: PROVIDER_ID + "-2", outcome: "success",
+            credentialId: null, provider: null, tradingAccountId: accountId,
+            requestId: "aud03-req", occurredAt: new Date(),
+          }, tx);
+          // Fail AFTER both writes — the classic "audit committed, binding
+          // missing" inversion the audit asked to be ruled out.
+          throw new Error("injected terminal failure");
+        }),
+        /injected terminal failure/,
+      );
+
+      assert.equal(await h.accounts.getMetaApiBinding!(accountId, h.userId), null,
+        "binding must not survive");
+      assert.equal(await auditRowsFor(accountId), 0,
+        "the audit row must not survive either — no audit-without-binding inversion");
+    });
+
+    await t.test("the service's own connect path commits binding AND audit together", async () => {
+      const h = await harness(false);
+      // Real service, real PG, stubbed provider at the fetch boundary only.
+      const r = await h.service.connect(
+        { id: h.userId, requestId: "aud03-connect" },
+        h.accountId,
+        { credentialId: "1", login: "123", server: "Demo", platform: "mt5" },
+      );
+      assert.equal(r.status, "connected");
+      assert.equal(await h.accounts.getMetaApiBinding!(h.accountId, h.userId), r.metaapiAccountId);
+      assert.equal(await auditRowsFor(h.accountId), 1,
+        "exactly one ACCOUNT_BINDING_CHANGED row accompanies the committed binding");
+    });
+
+    await t.test("SERVICE-LEVEL ROLLBACK: an audit failure inside connect() leaves NO binding", async () => {
+      // THE DECISIVE TEST. The three tests above drive `withTransaction`
+      // directly, so they prove PostgreSQL rolls back — not that the SERVICE
+      // opens a transaction at all. This one injects the fault through the
+      // real `connect()` path, so it fails if `runInTransaction` is ever
+      // bypassed. (Verified by negative control: reverting completeBinding to
+      // autocommit makes exactly this test fail.)
+      const h = await harness(true); // audit append throws on ACCOUNT_BINDING_CHANGED
+
+      await assert.rejects(
+        h.service.connect(
+          { id: h.userId, requestId: "aud03-rollback" },
+          h.accountId,
+          { credentialId: "1", login: "123", server: "Demo", platform: "mt5" },
+        ),
+        // Surfaces as the mapped local-persistence failure, not a raw error.
+        (err: unknown) => err instanceof Error,
+      );
+
+      assert.equal(await h.accounts.getMetaApiBinding!(h.accountId, h.userId), null,
+        "connect() must not leave a binding committed when its audit write fails");
+      assert.equal(await auditRowsFor(h.accountId), 0,
+        "and no ACCOUNT_BINDING_CHANGED row may exist");
+    });
+
+    await t.test("BUILT-IN NEGATIVE CONTROL: without the transaction the AUD-03 defect reappears", async () => {
+      // Same fault, same assertions, but the service is composed WITHOUT
+      // `runInTransaction` — i.e. the pre-remediation autocommit wiring.
+      // This pins the defect: it documents, by execution, exactly what the fix
+      // prevents, and it fails if someone "fixes" the rollback by making the
+      // audit failure silent instead.
+      const h = await harness(true, /* atomic */ false);
+
+      await assert.rejects(h.service.connect(
+        { id: h.userId, requestId: "aud03-negctl" },
+        h.accountId,
+        { credentialId: "1", login: "123", server: "Demo", platform: "mt5" },
+      ));
+
+      // THE DEFECT, reproduced deliberately: binding committed, audit missing.
+      assert.notEqual(await h.accounts.getMetaApiBinding!(h.accountId, h.userId), null,
+        "without a transaction the binding commits (this is the AUD-03 defect)");
+      assert.equal(await auditRowsFor(h.accountId), 0,
+        "…while its audit row is absent — the inconsistency the fix removes");
     });
   } finally {
     await pool.end();
