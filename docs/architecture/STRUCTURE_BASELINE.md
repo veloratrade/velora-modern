@@ -38,6 +38,7 @@
   "selected_second_level_boundaries": [
     ".github/workflows",
     "docs/admin",
+    "docs/adr",
     "docs/architecture",
     "docs/governance",
     "docs/infrastructure",
