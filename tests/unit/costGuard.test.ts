@@ -6,6 +6,10 @@ import {
   validateWorkflows,
   splitTopLevelJobs,
   validateRunnerLabel,
+  evaluateSchedulePolicy,
+  stripYamlComments,
+  SCHEDULED_WORKFLOW_ALLOWLIST,
+  WEEKLY_CRON_RE,
 } from '../../scripts/validate-github-cost.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -184,5 +188,107 @@ jobs:
     } finally {
       fs.rmSync(fixtureDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('QG-14 scheduled-workflow policy (weekly retention exception)', () => {
+  const RETENTION_PATH = '.github/workflows/backup-retention.yml';
+  const retentionSource = (cron = '30 3 * * 0') => `
+name: Backup Retention
+on:
+  schedule:
+    - cron: '${cron}'
+  workflow_dispatch:
+jobs:
+  reap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - run: python3 ops/backup/reap_retention.py --environment staging
+`;
+
+  // --- §11 D: weekly schedule PASSES -------------------------------------
+  it('D: allows the exact retention workflow on a weekly cron', () => {
+    expect(evaluateSchedulePolicy(RETENTION_PATH, retentionSource('30 3 * * 0'))).toEqual([]);
+  });
+
+  // --- §11 E/F: daily and hourly FAIL ------------------------------------
+  it('E: rejects a DAILY cron even for the allowlisted workflow', () => {
+    const errs = evaluateSchedulePolicy(RETENTION_PATH, retentionSource('30 3 * * *'));
+    expect(errs.length).toBe(1);
+    expect(errs[0]).toContain('must be weekly');
+  });
+
+  it('F: rejects an HOURLY cron even for the allowlisted workflow', () => {
+    expect(evaluateSchedulePolicy(RETENTION_PATH, retentionSource('0 * * * *'))[0]).toContain(
+      'must be weekly',
+    );
+  });
+
+  it('F2: rejects sub-hourly step syntax such as */5 * * * *', () => {
+    expect(evaluateSchedulePolicy(RETENTION_PATH, retentionSource('*/5 * * * *'))[0]).toContain(
+      'must be weekly',
+    );
+    expect(WEEKLY_CRON_RE.test('*/5 * * * *')).toBe(false);
+    expect(WEEKLY_CRON_RE.test('30 3 * * 0')).toBe(true);
+  });
+
+  it('F3: rejects twice-weekly and multi-cron declarations', () => {
+    expect(evaluateSchedulePolicy(RETENTION_PATH, retentionSource('30 3 * * 0,3'))[0]).toContain(
+      'must be weekly',
+    );
+    const twoCrons = retentionSource('30 3 * * 0').replace(
+      "- cron: '30 3 * * 0'",
+      "- cron: '30 3 * * 0'\n    - cron: '30 4 * * 3'",
+    );
+    expect(evaluateSchedulePolicy(RETENTION_PATH, twoCrons)[0]).toContain('exactly one schedule');
+  });
+
+  // --- §11 G/H/I: everything else still FAILS ----------------------------
+  it('G: an arbitrary scheduled workflow is still prohibited, even weekly', () => {
+    const errs = evaluateSchedulePolicy('.github/workflows/nightly-thing.yml', retentionSource());
+    expect(errs[0]).toContain('scheduled workflows are prohibited');
+  });
+
+  it('H: an unauthorized deploy workflow is prohibited, and deploy authority disqualifies', () => {
+    expect(
+      evaluateSchedulePolicy('.github/workflows/deploy-weekly.yml', retentionSource())[0],
+    ).toContain('scheduled workflows are prohibited');
+
+    for (const [capability, line] of [
+      ['deployment', 'railway up'],
+      ['migration', 'npm run migrate'],
+      ['MetaAPI', 'curl https://metaapi.cloud/x'],
+      ['worker', 'npm run start:worker'],
+    ] as const) {
+      const src = retentionSource().replace(
+        '      - run: python3',
+        `      - run: ${line}\n      - run: python3`,
+      );
+      const errs = evaluateSchedulePolicy(RETENTION_PATH, src);
+      expect(errs.some((e) => e.includes(`no ${capability} authority`))).toBe(true);
+    }
+  });
+
+  it('I: the allowlist is path-exact — a renamed copy is rejected', () => {
+    expect(SCHEDULED_WORKFLOW_ALLOWLIST.size).toBe(1);
+    expect(SCHEDULED_WORKFLOW_ALLOWLIST.has(RETENTION_PATH)).toBe(true);
+    expect(
+      evaluateSchedulePolicy('.github/workflows/backup-retention-copy.yml', retentionSource())[0],
+    ).toContain('scheduled workflows are prohibited');
+  });
+
+  it('comment prose can neither grant nor revoke the exception', () => {
+    expect(stripYamlComments('a: 1 # railway up\n# metaapi\nb: 2')).not.toContain('railway up');
+    expect(stripYamlComments("a: '# not a comment'")).toContain('# not a comment');
+    // a workflow whose ONLY mention of deployment is prose stays allowed
+    const prose = '# This never calls railway up and never touches MetaAPI.\n' + retentionSource();
+    expect(evaluateSchedulePolicy(RETENTION_PATH, prose)).toEqual([]);
+  });
+
+  it('the real repository workflow set passes QG-14 end to end', () => {
+    const result = validateWorkflows();
+    expect(result.errors).toEqual([]);
+    expect(result.passed).toBe(true);
   });
 });

@@ -58,6 +58,13 @@ as a provenance pointer, not as an instruction to use it.
   standard Linux runners only, `timeout-minutes` on every real job (≤30),
   no schedules, no `repository_dispatch`/`workflow_run`, no write permissions
   by default, artifact retention ≤14 days.
+- Scheduled-workflow exception (narrow, fail-closed): the Backup Retention
+  maintenance workflow may run once every 7 days because it performs retention
+  maintenance only and has no deployment, migration, MetaAPI or worker
+  authority. Enforced by identity + weekly-cron + capability checks in
+  `scripts/validate-github-cost.ts`; every other scheduled workflow still fails
+  QG-14. The 14-day retention law is unaffected — weekly is the check interval,
+  not the retention period.
 - CI minutes are a budget, not a free good: prefer fast static gates on every
   push and reserve the full battery for the release gate.
 - PHP posture adaptation (explicit, D12 — NOT silently transferred): PHP
