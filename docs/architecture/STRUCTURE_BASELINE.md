@@ -29,6 +29,7 @@
     ".github",
     "docs",
     "locales",
+    "ops",
     "prisma",
     "scripts",
     "src",
