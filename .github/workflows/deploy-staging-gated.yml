@@ -32,6 +32,12 @@ on:
         required: false
         default: true
         type: boolean
+  # Push runs the FULL chain (CI -> backup -> verify -> store -> storage-verify
+  # -> gate) as continuous proof that the pipeline works. It can NEVER deploy:
+  # see the `deploy_effective` guard below. Deploying requires an explicit
+  # workflow_dispatch with dry_run=false.
+  push:
+    branches: ['reconcile/foundation-first']
 
 permissions:
   contents: read
@@ -178,12 +184,37 @@ jobs:
             [ "$r" = "success" ] || { echo "::error::gate not satisfied"; exit 1; }
           done
 
+      # FAIL-SAFE DEPLOY DECISION.
+      # On a `push` event the `inputs` context is EMPTY, so `!inputs.dry_run`
+      # would evaluate to TRUE and deploy silently. Deployment is therefore
+      # opt-in by construction: it happens ONLY for an explicit
+      # workflow_dispatch that sets dry_run=false. Any other event, and any
+      # unset/blank value, resolves to a dry run.
+      - name: Decide deploy mode (defaults to dry run)
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && \
+             [ "${{ inputs.dry_run }}" = "false" ]; then
+            echo "deploy_effective=true" >> "$GITHUB_OUTPUT"
+            echo "mode=REAL DEPLOY (explicitly requested)"
+          else
+            echo "deploy_effective=false" >> "$GITHUB_OUTPUT"
+            echo "mode=DRY RUN (event=${{ github.event_name }})"
+          fi
+
       - name: Dry run (no deploy)
-        if: ${{ inputs.dry_run }}
-        run: echo "DRY RUN — gates passed; nothing deployed." >> "$GITHUB_STEP_SUMMARY"
+        if: steps.mode.outputs.deploy_effective != 'true'
+        run: |
+          {
+            echo "## DRY RUN — gates passed, nothing deployed"
+            echo ""
+            echo "- event: \`${{ github.event_name }}\`"
+            echo "- commit: \`${{ github.sha }}\`"
+            echo "- CI / backup / storage-verify / gate: all succeeded"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Deploy
-        if: ${{ !inputs.dry_run }}
+        if: steps.mode.outputs.deploy_effective == 'true'
         env:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
         run: |

@@ -101,6 +101,37 @@ class TestGatedDeploymentGraph(unittest.TestCase):
         self.assertIn("evidence/evidence.json", raw)
         self.assertIn("exit 1", raw)
 
+    # --- fail-safe deploy decision --------------------------------------- #
+    def test_deploy_is_opt_in_not_opt_out(self):
+        """On `push`, the inputs context is EMPTY.
+
+        A naive `if: ${{ !inputs.dry_run }}` evaluates to TRUE there and would
+        deploy silently on every push. Deployment must therefore be gated on an
+        explicit workflow_dispatch with dry_run == 'false'.
+        """
+        raw = DEPLOY_WF.read_text()
+        self.assertNotIn("if: ${{ !inputs.dry_run }}", raw,
+                         "negated-input guard deploys on push; use an explicit event check")
+        self.assertIn("github.event_name", raw)
+        self.assertIn("deploy_effective", raw)
+
+    def test_deploy_step_requires_explicit_true(self):
+        deploy_steps = [s for s in self.jobs["deploy"]["steps"]
+                        if s.get("name") == "Deploy"]
+        self.assertEqual(len(deploy_steps), 1)
+        cond = str(deploy_steps[0].get("if", ""))
+        self.assertIn("deploy_effective == 'true'", cond,
+                      "deploy must require an affirmative decision, never a negation")
+
+    def test_push_trigger_cannot_deploy(self):
+        """If push is a trigger, the decision step must exclude it."""
+        on = self.deploy.get(True) or self.deploy.get("on")
+        if "push" not in on:
+            self.skipTest("no push trigger configured")
+        raw = DEPLOY_WF.read_text()
+        self.assertIn('[ "${{ github.event_name }}" = "workflow_dispatch" ]', raw,
+                      "push events must not be able to satisfy the deploy condition")
+
     # --- credential policy ---------------------------------------------- #
     def test_backup_job_requires_dedicated_credential(self):
         body = yaml.dump(self.jobs["backup"])
