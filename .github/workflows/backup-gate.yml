@@ -1,0 +1,101 @@
+# Velora Modern — BACKUP GATE (reusable, fail-closed).
+#
+# Enforces ADR-012 + Amendment A: no deployment or data mutation proceeds
+# without a backup that is BOTH integrity-verified AND storage-verified.
+#
+# DIFFERENCE FROM THE EARLIER `backup-evidence-gate.yml` ON `main`
+# ================================================================
+# That workflow accepts an `EMPTY-TARGET-BOOTSTRAP` attestation INSTEAD of
+# evidence. That escape hatch was lawful only while both environments were
+# provably empty. Staging is now data-bearing (19 tables, 14 migrations
+# applied, verified 2026-09-16), and
+# docs/reconciliation/RECONCILIATION_DECISIONS.md OD-4 records the bootstrap
+# exception as NOT APPROVED. This gate therefore has NO bootstrap path, NO
+# skip, NO force, and NO continue-on-error.
+#
+# The validator is target-independent Python (ops/backup/backup_gate.py); this
+# workflow is only transport.
+name: Backup Gate (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      expected_env:
+        description: 'staging | production'
+        required: true
+        type: string
+      expected_commit_sha:
+        description: 'The commit being deployed. Evidence must name it.'
+        required: true
+        type: string
+      evidence_artifact:
+        description: 'Name of the artifact containing evidence.json'
+        required: false
+        default: 'backup-evidence'
+        type: string
+      inapplicable_backup_types:
+        description: 'Comma-separated types provably N/A for this target'
+        required: false
+        default: ''
+        type: string
+      max_backup_age_seconds:
+        description: 'Freshness bound; empty disables the check'
+        required: false
+        default: ''
+        type: string
+    outputs:
+      gate_result:
+        description: 'PASS (job fails outright on BLOCK)'
+        value: ${{ jobs.gate.outputs.gate_result }}
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Backup gate (fail-closed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      gate_result: ${{ steps.verdict.outputs.gate_result }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download backup evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.evidence_artifact }}
+          path: evidence
+
+      - name: Evidence must exist (no silent pass)
+        run: |
+          if [ ! -f evidence/evidence.json ]; then
+            echo "::error::BACKUP GATE: no evidence.json — refusing to deploy."
+            exit 1
+          fi
+
+      - name: Run the backup gate
+        id: verdict
+        env:
+          EXPECTED_ENV: ${{ inputs.expected_env }}
+          EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha }}
+          INAPPLICABLE_BACKUP_TYPES: ${{ inputs.inapplicable_backup_types }}
+          MAX_BACKUP_AGE_SECONDS: ${{ inputs.max_backup_age_seconds }}
+          BACKUP_EVIDENCE_FILE: evidence/evidence.json
+        run: |
+          set -o pipefail
+          python3 ops/backup/backup_gate.py
+          echo "gate_result=PASS" >> "$GITHUB_OUTPUT"
+
+      - name: Record verdict
+        if: always()
+        run: |
+          {
+            echo "## Backup Gate — ${{ inputs.expected_env }}"
+            echo ""
+            echo "- commit: \`${{ inputs.expected_commit_sha }}\`"
+            echo "- result: \`${{ steps.verdict.outcome }}\`"
+            echo ""
+            echo "No bootstrap/skip/force path exists in this gate."
+          } >> "$GITHUB_STEP_SUMMARY"
