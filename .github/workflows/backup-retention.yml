@@ -1,0 +1,114 @@
+# Velora Modern — BACKUP RETENTION (scheduled, dry-run by default).
+#
+# Operationalises the owner-approved 14-day retention law that
+# `ops/backup/retention.py` already encodes. This workflow is transport and
+# schedule ONLY; every deletion decision is made by
+# `retention.evaluate_deletion` and re-validated against live state immediately
+# before any deletion occurs.
+#
+# WHY THIS CANNOT DEPLOY OR MUTATE THE APPLICATION
+# ================================================
+# It runs a single Python entrypoint with the stdlib only. It never installs the
+# Railway CLI, never calls `railway up`, never touches MetaAPI, never starts the
+# worker, and never reads application secrets. `permissions: contents: read` is
+# the minimum GitHub grant; the ONLY write capability in this job is the
+# dedicated BACKUP_REPO_TOKEN, which is scoped to the private backup repository
+# and cannot reach the application repo or any deployment surface.
+#
+# WHY THE SCHEDULE CANNOT DELETE
+# ==============================
+# The scheduled run passes dry_run=true explicitly. Deletion requires a manual
+# workflow_dispatch whose `dry_run` input is set to the exact string 'false'
+# (see `deletion_authorized`). The negation pattern `!inputs.dry_run` is never
+# used: on a schedule event the `inputs` context is empty, and a negation would
+# evaluate TRUE and start deleting. Destructive mode is opt-in by construction.
+name: Backup Retention
+
+on:
+  schedule:
+    # 03:30 UTC every Sunday — reporting only; the schedule can never delete.
+    #
+    # WEEKLY IS A CHECK INTERVAL, NOT A RETENTION PERIOD.
+    # The retention law is unchanged and remains 14 days (336 hours,
+    # 1,209,600 seconds) measured from the successor's `stored_at`. This cron
+    # only decides how OFTEN the reaper looks for backups that have ALREADY
+    # become eligible. A backup that becomes eligible on 2026-10-01T12:44:48Z
+    # may be observed on 2026-10-04 or 2026-10-11, but can never be deleted
+    # before 2026-10-01T12:44:48Z: eligibility is computed in
+    # `retention.evaluate_deletion`, which never reads this schedule.
+    # Weekly instead of daily is ~52 instead of ~365 runs/year.
+    - cron: '30 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Which chain to evaluate (explicit; never "all")'
+        required: true
+        type: choice
+        options: [staging, production]
+        default: staging
+      backup_type:
+        description: 'Retention chains are independent per backup type'
+        required: true
+        type: choice
+        options: [database, persistent_files]
+        default: database
+      dry_run:
+        description: "Type exactly 'false' to actually delete. Anything else = dry run."
+        required: false
+        type: string
+        default: 'true'
+
+permissions:
+  contents: read
+
+concurrency:
+  # One reaper at a time. `cancel-in-progress: false` so a run that may already
+  # have deleted a release is never interrupted half-way.
+  group: backup-retention-${{ inputs.environment || 'staging' }}-${{ inputs.backup_type || 'database' }}
+  cancel-in-progress: false
+
+jobs:
+  retention:
+    name: Evaluate retention (dry run unless explicitly overridden)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require the dedicated backup credential (no fallback)
+        env:
+          BACKUP_REPO_TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
+        run: |
+          if [ -z "${BACKUP_REPO_TOKEN}" ]; then
+            echo "::error::BACKUP_REPO_TOKEN is not configured. Refusing to fall back to GITHUB_TOKEN."
+            exit 1
+          fi
+          echo "backup credential present (value never printed)"
+
+      - name: Retention tests must pass before touching any real backup
+        run: python3 -m unittest discover -s ops/backup/tests -p "test_*.py"
+
+      - name: Decide retention mode (defaults to dry run)
+        id: mode
+        run: |
+          # Affirmative check only. A schedule event has an empty `inputs`
+          # context, so this resolves to the safe branch automatically.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && \
+             [ "${{ inputs.dry_run }}" = "false" ]; then
+            echo "dry_run=false" >> "$GITHUB_OUTPUT"
+            echo "mode=APPLY (deletion explicitly requested)"
+          else
+            echo "dry_run=true" >> "$GITHUB_OUTPUT"
+            echo "mode=DRY RUN (event=${{ github.event_name }})"
+          fi
+          echo "environment=${{ inputs.environment || 'staging' }}" >> "$GITHUB_OUTPUT"
+          echo "backup_type=${{ inputs.backup_type || 'database' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Run retention
+        env:
+          BACKUP_REPO_TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
+        run: |
+          python3 ops/backup/reap_retention.py \
+            --environment "${{ steps.mode.outputs.environment }}" \
+            --backup-type "${{ steps.mode.outputs.backup_type }}" \
+            --dry-run "${{ steps.mode.outputs.dry_run }}"

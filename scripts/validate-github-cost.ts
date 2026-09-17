@@ -12,6 +12,101 @@ export const ALLOWED_RUNNERS = new Set(['ubuntu-latest', 'ubuntu-24.04', 'ubuntu
 export const MAX_ARTIFACT_RETENTION_DAYS = 14;
 export const ALLOWED_WRITE_PERMISSIONS = new Set<string>(); // None required by default
 
+// ---------------------------------------------------------------------------
+// QG-14 scheduled-workflow policy
+// ---------------------------------------------------------------------------
+// Scheduled workflows remain PROHIBITED BY DEFAULT. This is a single, narrow,
+// fail-closed exception: the Backup Retention maintenance workflow may run once
+// every 7 days because it performs retention maintenance only and holds no
+// deployment, migration, MetaAPI or worker authority.
+//
+// This is deliberately NOT a general "allow schedules" flag. A workflow earns
+// the exception only if it satisfies EVERY condition below; any failure falls
+// straight back to the default prohibition.
+//
+//   1. identity     — exact path match against SCHEDULED_WORKFLOW_ALLOWLIST
+//   2. frequency    — exactly one schedule, and that cron must be weekly
+//   3. authority    — no deploy/migration/Railway/MetaAPI/worker capability
+//
+// Weekly-only is enforced structurally by WEEKLY_CRON_RE rather than by
+// blacklisting daily/hourly forms, so unanticipated high-frequency spellings
+// (`*/5 * * * *`, `0 * * * *`, `30 3 * * *`, multiple crons) fail closed.
+export const SCHEDULED_WORKFLOW_ALLOWLIST = new Set(['.github/workflows/backup-retention.yml']);
+
+// A weekly cron: fixed minute, fixed hour, every day-of-month, every month,
+// and exactly one fixed day-of-week. `30 3 * * 0` matches; `30 3 * * *`
+// (daily), `0 * * * 0` (hourly), `30 3 * * 0,3` (twice weekly) and any
+// step/range form such as `*/10` or `1-5` do not.
+export const WEEKLY_CRON_RE = /^\s*(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+([0-7])\s*$/;
+
+// Capabilities that disqualify a workflow from the scheduled-maintenance
+// exception. Matched against the workflow source with comments stripped, so
+// prose explaining why a capability is absent can never grant the exception.
+export const SCHEDULE_DISQUALIFYING_CAPABILITIES: Array<{ label: string; re: RegExp }> = [
+  { label: 'deployment', re: /railway\s+up|@railway\/cli|railway\s+link|\bnpm\s+run\s+deploy\b/i },
+  { label: 'migration', re: /\bmigrate\b|\bmigration\b|roles\.sql/i },
+  { label: 'MetaAPI', re: /metaapi|agiliumtrade/i },
+  { label: 'worker', re: /start:worker|apps\/worker/i },
+];
+
+/** Strip full-line and trailing `#` comments so prose cannot satisfy a check. */
+export function stripYamlComments(source: string): string {
+  return source
+    .split('\n')
+    .map((line) => {
+      let inSingle = false;
+      let inDouble = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === "'" && !inDouble) inSingle = !inSingle;
+        else if (ch === '"' && !inSingle) inDouble = !inDouble;
+        else if (ch === '#' && !inSingle && !inDouble) return line.slice(0, i);
+      }
+      return line;
+    })
+    .join('\n');
+}
+
+/**
+ * Decide whether a scheduled workflow is covered by the narrow retention
+ * exception. Returns the policy errors; an empty array means "allowed".
+ * Fail-closed: anything unrecognised produces the default prohibition error.
+ */
+export function evaluateSchedulePolicy(relPath: string, source: string): string[] {
+  const normalised = relPath.split(path.sep).join('/');
+  const prohibition = `${relPath}: scheduled workflows are prohibited; use explicit manual/push policy`;
+
+  if (!SCHEDULED_WORKFLOW_ALLOWLIST.has(normalised)) {
+    return [prohibition];
+  }
+
+  const code = stripYamlComments(source);
+  const crons = Array.from(code.matchAll(/^\s*-\s*cron:\s*['"]?([^'"#\n]+?)['"]?\s*$/gm)).map((m) =>
+    m[1].trim(),
+  );
+
+  if (crons.length !== 1) {
+    return [
+      `${relPath}: allowlisted maintenance workflow must declare exactly one schedule (found ${crons.length})`,
+    ];
+  }
+  if (!WEEKLY_CRON_RE.test(crons[0])) {
+    return [
+      `${relPath}: allowlisted maintenance schedule must be weekly (once per 7 days); found cron '${crons[0]}'`,
+    ];
+  }
+
+  const errors: string[] = [];
+  for (const cap of SCHEDULE_DISQUALIFYING_CAPABILITIES) {
+    if (cap.re.test(code)) {
+      errors.push(
+        `${relPath}: allowlisted maintenance workflow must hold no ${cap.label} authority`,
+      );
+    }
+  }
+  return errors;
+}
+
 export interface CostGuardResult {
   passed: boolean;
   errors: string[];
@@ -133,10 +228,11 @@ export function validateWorkflows(
     }
 
     // 2. Prohibited triggers
+    // Scheduled workflows are prohibited by default. `evaluateSchedulePolicy`
+    // grants one narrow, fail-closed exception (see its comment block) for the
+    // weekly Backup Retention maintenance workflow; everything else still fails.
     if (/^\s*schedule:\s*$|^\s*-\s*cron:\s*/im.test(source)) {
-      errors.push(
-        `${relPath}: scheduled workflows are prohibited; use explicit manual/push policy`,
-      );
+      errors.push(...evaluateSchedulePolicy(relPath, source));
     }
     if (/^\s*repository_dispatch:\s*/im.test(source)) {
       errors.push(`${relPath}: repository_dispatch trigger is prohibited`);
@@ -280,7 +376,8 @@ export function main(workflowsDir: string = WORKFLOWS_DIR): number {
       `runners=${result.runnerCount} real_jobs=${result.realJobCount} ` +
       `allowed=${Array.from(ALLOWED_RUNNERS).sort().join(',')} ` +
       `artifact_rules=${result.artifactCount} retention_max=${MAX_ARTIFACT_RETENTION_DAYS}d ` +
-      'schedule=none repository_dispatch=none workflow_run=none ' +
+      `schedule=default-prohibited(+${SCHEDULED_WORKFLOW_ALLOWLIST.size} weekly-maintenance-allowlisted) ` +
+      'repository_dispatch=none workflow_run=none ' +
       'cache=none packages=none docker=none npm_publish=none ' +
       'id_token=none unexpected_writes=none timeouts=enforced',
   );
