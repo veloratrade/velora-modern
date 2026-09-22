@@ -94,6 +94,17 @@ export interface SubscriptionStore {
     cancelAtPeriodEnd: boolean;
   }): Promise<void>;
   setUserPlan(userId: string, plan: string): Promise<void>;
+  /**
+   * The user's EFFECTIVE plan — `users.plan`, the single input
+   * `entitlementService` reads.
+   *
+   * It is deliberately a separate read from `findForUser`: a `subscriptions` row
+   * records what was PURCHASED (0017 forbids storing 'free' there), while
+   * entitlement is what the account can actually do. After a cancellation the
+   * two legitimately differ, and reporting the purchased plan would overstate a
+   * cancelled user's access.
+   */
+  effectivePlan(userId: string): Promise<string>;
   /** Resolve the Velora user a provider customer belongs to (checkout linking). */
   findUserByCustomer(provider: string, customerId: string): Promise<string | null>;
   /** Link a provider customer to a user at checkout completion. */
@@ -176,6 +187,15 @@ export class PgSubscriptionStore implements SubscriptionStore {
     await this.q("UPDATE users SET plan = $2, updated_at = now() WHERE id = $1", [userId, plan]);
   }
 
+  async effectivePlan(userId: string): Promise<string> {
+    const rows = await this.q("SELECT plan FROM users WHERE id = $1", [userId]);
+    const row = rows[0];
+    // Fail-closed: an unknown user or an empty plan is FREE, never a paid plan.
+    if (row === undefined) return PLAN_FREE;
+    const plan = typeof row["plan"] === "string" ? row["plan"].toLowerCase().trim() : "";
+    return plan === "" ? PLAN_FREE : plan;
+  }
+
   async findUserByCustomer(provider: string, customerId: string): Promise<string | null> {
     const rows = await this.q(
       "SELECT user_id FROM subscriptions WHERE provider = $1 AND provider_customer_id = $2 LIMIT 1",
@@ -254,6 +274,10 @@ export class MemorySubscriptionStore implements SubscriptionStore {
     this.#plans.set(userId, plan);
   }
 
+  async effectivePlan(userId: string): Promise<string> {
+    return this.#plans.get(userId) ?? PLAN_FREE;
+  }
+
   async findUserByCustomer(provider: string, customerId: string): Promise<string | null> {
     return this.#customers.get(`${provider}:${customerId}`) ?? null;
   }
@@ -322,11 +346,20 @@ export class SubscriptionService {
     private readonly env: Readonly<Record<string, string | undefined>>,
   ) {}
 
-  async current(userId: string): Promise<{ plan: string; subscription: SubscriptionRecord | null }> {
+  async current(
+    userId: string,
+  ): Promise<{
+    /** EFFECTIVE plan — what the account may actually do right now. */
+    plan: string;
+    /** True when the stored subscription status currently entitles a paid plan. */
+    entitled: boolean;
+    /** The stored purchase record (`plan` here is the PURCHASED plan), or null. */
+    subscription: SubscriptionRecord | null;
+  }> {
     const subscription = await this.store.findForUser(userId);
-    // The user row's plan is the entitlement input; when no subscription row
-    // exists the plan is whatever the user record says (the store reports null).
-    return { plan: subscription?.plan ?? PLAN_FREE, subscription };
+    const effective = await this.store.effectivePlan(userId);
+    const entitled = effective !== PLAN_FREE;
+    return { plan: effective, entitled, subscription };
   }
 
   /**

@@ -24,7 +24,7 @@
 // PARTIALLY_IMPLEMENTED + OWNER_DECISION_REQUIRED in the migration report.
 import { fail, ok } from "@velora/contracts";
 import { checkFreshness, hmacHex, signaturesMatch } from "../webhooks/signature.js";
-import { SubscriptionService, type SubscriptionStore } from "./subscriptionService.js";
+import { PLAN_FREE, SubscriptionService, type SubscriptionStore } from "./subscriptionService.js";
 import { capabilityAbsent, unauthenticated, validation } from "../routes/responses.js";
 import type { ExtendedRouteContext, RouteResult } from "../routes/types.js";
 
@@ -131,8 +131,19 @@ export async function handleBillingRoutes(ctx: ExtendedRouteContext): Promise<Ro
 
   if (ctx.path === ME) {
     if (ctx.method !== "GET") return { status: 405, body: fail("METHOD_NOT_ALLOWED", "Method not allowed.", ctx.requestId) };
+    // The response distinguishes the EFFECTIVE plan (`plan`, read from
+    // users.plan — the entitlement input) from the PURCHASED plan recorded on
+    // the subscription row. A cancelled user must not be shown an active plan.
     const current = await svc.current(claims.sub);
-    return { status: 200, body: ok(current) };
+    return {
+      status: 200,
+      body: ok({
+        plan: current.plan,
+        entitled: current.entitled,
+        purchasedPlan: current.subscription?.plan ?? PLAN_FREE,
+        subscription: current.subscription,
+      }),
+    };
   }
 
   if (ctx.method !== "POST") return { status: 405, body: fail("METHOD_NOT_ALLOWED", "Method not allowed.", ctx.requestId) };
