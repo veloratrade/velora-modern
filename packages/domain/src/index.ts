@@ -7,3 +7,4 @@ export * from "./passwords.js";
 export * from "./idempotency.js";
 export * from "./rateLimit.js";
 export * from "./clientIp.js";
+export * from "./metrics.js";
