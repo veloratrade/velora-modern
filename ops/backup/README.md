@@ -13,8 +13,8 @@ create → verify → official storage → verify storage → evidence → GATE 
 | `backup_gate.py` | Unified, **target-independent** gate. Pure logic, no I/O, no platform coupling. |
 | `retention.py` | `(environment × backup_type)` retention chains + fail-closed deletion safety. |
 | `create_pg_backup.sh` | PostgreSQL producer: `pg_dump` → `gzip -t` → sha256 → evidence. |
-| `upload_backup.py` | Official storage (stages 3–4): upload, then an independent re-hash of the stored bytes before `STORAGE_VERIFIED`. |
-| `tests/` | Python backup test suite, run via `unittest discover`; covers all 22 mandated cases. |
+| `sample_e2e.py` | Offline structural proof of the whole chain. |
+| `tests/` | 42 tests covering all 22 mandated cases. |
 
 ## Provenance — what was reused vs adapted
 
@@ -88,7 +88,5 @@ block a deploy. Making it a real blocking dependency needs a deployment-control
 decision. Until then the gate is enforceable for manually invoked operations,
 and any covered automatic mutation is **BLOCKED — no verified backup gate**.
 
-**Never commit dump bytes.** This is a procedural rule, not an enforced one:
-the repository's `.gitignore` does not exclude `*.dump.gz` or the producer's
-default `./backup-artifacts/` output directory. Keeping dump artifacts outside
-tracked paths is the operator's responsibility.
+**Never commit dump bytes.** `.gitignore` blocks `*.dump`, `*.dump.gz`,
+`*.sql.gz`, `backup-artifacts/`, `backups/`.

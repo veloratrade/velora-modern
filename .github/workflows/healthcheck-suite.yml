@@ -2,9 +2,8 @@
 #
 # Semantic port of the PHP `healthcheck-suite.yml` responsibility, adapted to
 # the MODERN API contract (NOT the PHP contract):
-# - Modern GET /health is FLAT `{status:'ok', service, version, ...}` while PHP
-#   wrapped it in `{status:'success', data:{status:'ok'}}`. This suite asserts
-#   the Modern shape; asserting the PHP envelope here would be a false port.
+# - Modern GET /health is frozen B-8 envelope `{status:'success', data:{status:'ok', time}, ...}`
+#   per OD-3, C-01, ADR-006 and server.test.ts. This suite asserts the frozen B-8 envelope.
 # - Same-origin logout probes + CSP-manifest comparisons have no Modern subject
 #   (API-only service, no static HTML, no manifest): replaced by guard probes
 #   (401 auth boundary + 400 validation boundary, both side-effect-free) and
@@ -111,20 +110,27 @@ jobs:
                       time.sleep(5)
               return last
 
-          # ── 1. GET /health — Modern FLAT contract ──────────────────
+          # ── 1. GET /health — Frozen B-8 / OD-3 envelope contract ────
           st, hd, body = call('GET', '/health')
-          reported_version = 'unknown'
+          reported_version = 'n/a'
           ok = (st == 200)
           detail = f'status={st}'
           try:
               payload = json.loads(body)
-              reported_version = str(payload.get('version', 'unknown'))
-              ok = ok and payload.get('status') == 'ok' and payload.get('service') == 'velora-modern'
-              detail += f"; status={payload.get('status')!r} service={payload.get('service')!r} version={reported_version}"
+              data = payload.get('data') or {}
+              reported_version = str(payload.get('version', data.get('version', 'n/a')))
+              ok = (
+                  ok
+                  and payload.get('status') == 'success'
+                  and data.get('status') == 'ok'
+                  and payload.get('error') is None
+                  and 'timestamp' in payload
+              )
+              detail += f"; status={payload.get('status')!r} data.status={data.get('status')!r} time={data.get('time')!r}"
           except Exception:
               ok = False
               detail += f'; invalid JSON; snippet={body[:160]!r}'
-          check('GET /health → 200 + flat {status:ok}', ok, detail)
+          check('GET /health → 200 + B-8 envelope {status:success, data:{status:ok}}', ok, detail)
 
           # ── 2. Helmet security headers present ─────────────────────
           hd_low = {k.lower(): v for k, v in hd.items()}

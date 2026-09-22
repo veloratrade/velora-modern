@@ -26,18 +26,8 @@ name: Backup Retention
 
 on:
   schedule:
-    # 03:30 UTC every Sunday — reporting only; the schedule can never delete.
-    #
-    # WEEKLY IS A CHECK INTERVAL, NOT A RETENTION PERIOD.
-    # The retention law is unchanged and remains 14 days (336 hours,
-    # 1,209,600 seconds) measured from the successor's `stored_at`. This cron
-    # only decides how OFTEN the reaper looks for backups that have ALREADY
-    # become eligible. A backup that becomes eligible on 2026-10-01T12:44:48Z
-    # may be observed on 2026-10-04 or 2026-10-11, but can never be deleted
-    # before 2026-10-01T12:44:48Z: eligibility is computed in
-    # `retention.evaluate_deletion`, which never reads this schedule.
-    # Weekly instead of daily is ~52 instead of ~365 runs/year.
-    - cron: '30 3 * * 0'
+    # 03:30 UTC daily — reporting only; the schedule can never delete.
+    - cron: '30 3 * * *'
   workflow_dispatch:
     inputs:
       environment:

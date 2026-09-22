@@ -1,0 +1,20 @@
+# Multi-stage build, non-root runtime — ADR-010/D-15.
+# NOTE: digest pinning intentionally deferred until registry evidence exists
+# (Gate 3B rows 11-12); pin the base image digests before any production use.
+FROM node:22-bookworm-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY packages/ packages/
+COPY apps/ apps/
+RUN npm ci
+
+FROM node:22-bookworm-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app /app
+USER node
+EXPOSE 8080
+# health endpoint = frozen contract C-01
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))"
+CMD ["npx", "tsx", "apps/api/src/server-main.ts"]

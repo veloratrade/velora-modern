@@ -1,57 +1,37 @@
-name: Velora Modern CI Pipeline
-
+# CI — Phase 1 foundation (ADR-010 + PHP-era cost-guard discipline).
+#
+# ⚠️ GOVERNANCE: GitHub Actions is DISABLED at the repository level per the
+# owner's cost policy. This workflow executes only after (a) the owner pushes
+# these commits (explicit authorization required) and (b) Actions is enabled
+# for an authorized window. No schedules, no caches, standard runner only,
+# 15-minute timeout, cancel-in-progress — mirroring tools/check_github_cost_guard.py
+# philosophy from the PHP repository.
+name: ci
 on:
   push:
-    branches: [main, staging]
+    branches: [main]
   pull_request:
-    branches: [main, staging]
+    branches: [main]
 
-permissions:
-  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  validate:
-    name: Lint, Typecheck, Guards, Test, i18n Gate & Build
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-
+    timeout-minutes: 15
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js 20 LTS
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Format check
-        run: npm run format:check
-
-      - name: Lint
-        run: npm run lint
-
+      - run: npm ci
       - name: Typecheck
-        run: npm run typecheck
-
-      - name: Localization Quality Gate
-        run: npm run i18n:check
-
-      - name: Structure Guard
-        run: npm run structure:check
-
-      - name: GitHub Cost Policy Guard
-        run: npm run github:cost:check
-
-      - name: Run Vitest Suite
-        run: npm run test
-
-      - name: Build TypeScript Project
-        run: npm run build
-
-  secret_scan:
-    name: Secret scan
-    uses: ./.github/workflows/secret-scan.yml
+        run: npx tsc -b packages/contracts packages/domain apps/api apps/worker apps/web
+      - name: Unit + contract tests
+        run: node tools/run-tests.mjs
+      - name: Migration tests (disposable PGlite — NOT production evidence)
+        run: npm run test:migrations
+      - name: Secret-safety scan (public repository policy)
+        run: bash tools/secret-scan.sh

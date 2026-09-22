@@ -1,0 +1,229 @@
+# Phase D real-PostgreSQL evidence — TEST-ONLY workflow (D1 authorization, 2026-09-13).
+#
+# What this is:
+#   A manually-dispatched job that boots a throwaway postgres:16-alpine service
+#   container (the same major the repo's infra/docker-compose.yml targets) and
+#   runs, against that real PostgreSQL:
+#     1. tools/pg-smoke.ts — migrations 0001–0005, NUMERIC-as-string driver
+#        shapes, transaction rollback, row locking (FOR UPDATE + statement
+#        timeout), unique-violation error codes, ON CONFLICT atomic upsert,
+#        and the velora_apply_exit trigger (D1, checks S1–S9);
+#     2. the Phase D D2/D3 store batteries (db/tests/*.pg.test.ts) — the
+#        real-pg UserStore / AccountStore / TradeStore / RateLimitStore
+#        adapters (CAS conflicts, tombstones, allocation atomicity, ownership
+#        isolation, concurrent-mutation serialization) plus the D3
+#        transactional account quota (users-row FOR UPDATE, atomic
+#        count+create, concurrent-creation correctness).
+#     3. the Phase D D4 trade-concurrency battery — service-level mixed-
+#        operation races (exit vs edit, exit vs tombstone, record vs cancel),
+#        allocation races, rollback/lock-release, duplicate event_uid
+#        honesty, tombstone finality, NUMERIC exactness, and the bounded
+#        projection==replay invariant, through TWO TradeService instances
+#        over one pool (explicit statement/lock timeouts; anti-SKIP count
+#        asserted in-step).
+#
+# What this is NOT:
+#   - NOT a deployment pipeline (no deploy steps, no artifacts published,
+#     nothing written outside the job).
+#   - NOT production or staging (disposable container; credentials below are
+#     test-only and destroyed with the job; no real user data or secrets).
+#   - NOT triggered automatically: workflow_dispatch only — no push, PR, or
+#     schedule triggers, so it costs nothing until the owner runs it.
+#
+# Execution is BLOCKED until the owner (a) pushes this branch (push NOT
+# authorized in Phase D) and (b) enables GitHub Actions for a window
+# (repository-level disable per owner cost policy). When executed, results land
+# in the Actions log only.
+#
+# Secret-scan policy: this file contains no literal credential-shaped connection
+# URL; DATABASE_URL is assembled from ${...} placeholders (the same pattern
+# infra/docker-compose.yml uses), which are not credentials by design.
+name: postgres-evidence
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pg-evidence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pg-evidence:
+    name: PG evidence (D1 smoke + D2/D3 stores + D4 concurrency + D5 roles + migrated capabilities on real PostgreSQL 16)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          # Disposable test-only credentials (never production/staging; the
+          # container and its data are destroyed with the job).
+          POSTGRES_USER: velora_test
+          POSTGRES_PASSWORD: velora-test-only
+          POSTGRES_DB: velora_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U velora_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGTEST_USER: velora_test
+      PGTEST_PASSWORD: velora-test-only
+      PGTEST_DB: velora_test
+      PGTEST_HOST: localhost
+      PGTEST_PORT: "5432"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies (no cache — ci.yml discipline)
+        run: npm ci
+      - name: D1 real-PostgreSQL smoke (S1–S9)
+        run: npx tsx tools/pg-smoke.ts
+        env:
+          # Assembled from parts so no literal credential URL exists in the
+          # repository (tools/secret-scan.sh URL-credential policy).
+          DATABASE_URL: postgres://${{ env.PGTEST_USER }}:${{ env.PGTEST_PASSWORD }}@${{ env.PGTEST_HOST }}:${{ env.PGTEST_PORT }}/${{ env.PGTEST_DB }}
+      # ── real-PostgreSQL evidence batteries ────────────────────────────────
+      #
+      # Anti-SKIP / anti-drift assertions. Each battery is run, then three
+      # properties are asserted on its TAP tail:
+      #
+      #   # tests <N>   N is RECOUNTED from the file (`grep -cE '^test\('`), so a
+      #                battery that silently stops executing (bad import, early
+      #                skip, connection failure) cannot pass. Hard-coded pass
+      #                counts previously drifted: this workflow asserted
+      #                "# pass 18" for the D5 battery, which had grown to 22
+      #                tests — the step would have failed on a healthy battery.
+      #   # skipped 0  a skipped battery is NOT evidence (DATABASE_URL is always
+      #                exported here, so a skip means a plumbing defect).
+      #   # fail 0
+      #
+      # Prior to pass 2 three batteries (auditCredentialContract, auditLog,
+      # credentialAudit) read the legacy `PG_TEST_URL` only and therefore SKIPPED
+      # SILENTLY in this workflow; three others were not listed at all. They are
+      # all wired in below (see the pass-2 report).
+      - name: D2/D3 + migrated capability batteries (real PostgreSQL)
+        run: |
+          set -uo pipefail
+          run_battery() {
+            local name="$1"
+            local file="db/tests/${name}.pg.test.ts"
+            local expected
+            expected=$(grep -cE '^test\(' "$file")
+            echo "── ${name} (expects ${expected} top-level tests)"
+            npx tsx --test "$file" > "/tmp/${name}.log" 2>&1 || true
+            tail -n 8 "/tmp/${name}.log"
+            # `# tests` counts subtests as well, so the source count is a FLOOR:
+            # fewer executed tests than the file declares means the battery did
+            # not run (bad import, silent skip, connection failure).
+            awk -v n="$expected" '/^# tests /{ if (($3+0) < n) exit 1 }' "/tmp/${name}.log" || { echo "::error::${name}: executed tests < ${expected} declared (battery did not run)"; return 1; }
+            grep -q "^# skipped 0$" "/tmp/${name}.log" || { echo "::error::${name}: skipped tests present — a skipped battery is NOT evidence"; return 1; }
+            grep -q "^# fail 0$" "/tmp/${name}.log" || { echo "::error::${name}: failing tests"; return 1; }
+          }
+          run_battery pgUserStore
+          run_battery pgAccountStore
+          run_battery pgTradeStore
+          run_battery pgRateLimitStore
+          run_battery pgQuota
+          run_battery extendedCapabilities
+          run_battery fxRatesIngestion
+        env:
+          DATABASE_URL: postgres://${{ env.PGTEST_USER }}:${{ env.PGTEST_PASSWORD }}@${{ env.PGTEST_HOST }}:${{ env.PGTEST_PORT }}/${{ env.PGTEST_DB }}
+      - name: D4 real-PostgreSQL trade-concurrency battery (service-level races)
+        # D4 (owner authorization 2026-09-13): mixed-operation races through
+        # the real TradeService over the real PgTradeStore — two independent
+        # service instances, one shared pool; explicit statement/lock timeouts.
+        # Pass-2: the replay invariant (projection == fold(trade_events)) is now
+        # asserted per test, for every trade the test created — the previous
+        # module-level id list collided once the shared reset was in place and
+        # covered 3 of 16 races.
+        run: |
+          set -uo pipefail
+          file=db/tests/pgTradeConcurrency.pg.test.ts
+          expected=$(grep -cE '^test\(' "$file")
+          npx tsx --test "$file" > /tmp/d4-battery.log 2>&1 || true
+          tail -n 8 /tmp/d4-battery.log
+          awk -v n="$expected" '/^# tests /{ if (($3+0) < n) exit 1 }' /tmp/d4-battery.log
+          grep -q "^# skipped 0$" /tmp/d4-battery.log
+          grep -q "^# fail 0$" /tmp/d4-battery.log
+        env:
+          DATABASE_URL: postgres://${{ env.PGTEST_USER }}:${{ env.PGTEST_PASSWORD }}@${{ env.PGTEST_HOST }}:${{ env.PGTEST_PORT }}/${{ env.PGTEST_DB }}
+      - name: D5 real-PostgreSQL roles & privilege battery (least privilege / append-only)
+        # D5 (owner authorization 2026-09-13): applies db/roles-bootstrap.sql +
+        # db/roles.sql to the disposable database and asserts the least-privilege
+        # grid via SET ROLE — append-only enforcement on trade_events /
+        # webhook_events (negative tests assert SQLSTATE 42501, never message
+        # text), readonly restriction, migrator schema-DDL capability, future-table
+        # default privileges, and that the privilege layer does not break the
+        # trigger-driven exit path.
+        #
+        # SCOPE LIMIT recorded in the evidence: this proves PRIVILEGE
+        # AUTHORIZATION, not LOGIN AUTHENTICATION. No test passwords are created,
+        # so pg_hba/scram authentication for these roles is NOT exercised.
+        #
+        # Pass-2 note: the battery now creates its documented `velora_owner`
+        # prerequisite (mirroring db/provision.ts). Without it the outcome
+        # depended on ambient cluster state — it passed on a virgin database
+        # (pgboss branch skipped) and failed with 42704 on a used one.
+        run: |
+          set -uo pipefail
+          file=db/tests/pgRoles.pg.test.ts
+          expected=$(grep -cE '^test\(' "$file")
+          npx tsx --test "$file" > /tmp/d5-battery.log 2>&1 || true
+          tail -n 8 /tmp/d5-battery.log
+          awk -v n="$expected" '/^# tests /{ if (($3+0) < n) exit 1 }' /tmp/d5-battery.log
+          grep -q "^# skipped 0$" /tmp/d5-battery.log
+          grep -q "^# fail 0$" /tmp/d5-battery.log
+        env:
+          DATABASE_URL: postgres://${{ env.PGTEST_USER }}:${{ env.PGTEST_PASSWORD }}@${{ env.PGTEST_HOST }}:${{ env.PGTEST_PORT }}/${{ env.PGTEST_DB }}
+      - name: Audit, credential, ownership, MetaAPI and substrate batteries (real PostgreSQL)
+        # These six had NO automated evidence before pass 2: pgBossAdapter,
+        # pgOwnershipStore, credentialStore, metaapiProvisioning, metaapiSync,
+        # syncSubstrate, readinessSchema, migrateCli — each had passed locally but
+        # nothing re-ran them, and three audit/credential batteries skipped
+        # silently under the legacy PG_TEST_URL variable.
+        run: |
+          set -uo pipefail
+          run_battery() {
+            local name="$1"
+            local file="db/tests/${name}.pg.test.ts"
+            local expected
+            expected=$(grep -cE '^test\(' "$file")
+            echo "── ${name} (expects ${expected} top-level tests)"
+            npx tsx --test "$file" > "/tmp/${name}.log" 2>&1 || true
+            tail -n 8 "/tmp/${name}.log"
+            # `# tests` counts subtests as well, so the source count is a FLOOR:
+            # fewer executed tests than the file declares means the battery did
+            # not run (bad import, silent skip, connection failure).
+            awk -v n="$expected" '/^# tests /{ if (($3+0) < n) exit 1 }' "/tmp/${name}.log" || { echo "::error::${name}: executed tests < ${expected} declared (battery did not run)"; return 1; }
+            grep -q "^# skipped 0$" "/tmp/${name}.log" || { echo "::error::${name}: skipped tests present — a skipped battery is NOT evidence"; return 1; }
+            grep -q "^# fail 0$" "/tmp/${name}.log" || { echo "::error::${name}: failing tests"; return 1; }
+          }
+          run_battery auditCredentialContract
+          run_battery auditLog
+          run_battery credentialAudit
+          run_battery credentialStore
+          run_battery pgBossAdapter
+          run_battery pgOwnershipStore
+          run_battery metaapiProvisioning
+          run_battery metaapiSync
+          run_battery syncSubstrate
+          run_battery readinessSchema
+          run_battery migrateCli
+          # Pass 3 — the completion pass. Each of these is a capability that
+          # existed only as a boundary before this pass: copy-signal dispatch
+          # (v2.5), the async analytics writer (roadmap §3) and developer-key
+          # authentication (v3.0).
+          run_battery copyDispatch
+          run_battery analyticsRecompute
+          run_battery developerKeyAuth
+        env:
+          DATABASE_URL: postgres://${{ env.PGTEST_USER }}:${{ env.PGTEST_PASSWORD }}@${{ env.PGTEST_HOST }}:${{ env.PGTEST_PORT }}/${{ env.PGTEST_DB }}
+      - name: Scope note
+        run: echo "D1 smoke + D2/D3 store batteries + D4 trade-concurrency + D5 roles/privilege battery + the pass-2 migrated-capability and audit/credential/MetaAPI batteries + the pass-3 copy-dispatch/analytics-recompute/developer-key batteries. The PGlite dev battery runs via ci.yml. D5 proves privilege authorization via SET ROLE, NOT login authentication; full-battery real-PG coverage remains D6. Every battery is asserted on # tests (recounted from source), # skipped 0 and # fail 0."

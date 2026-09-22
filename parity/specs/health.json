@@ -1,0 +1,11 @@
+{
+  "name": "health-envelope",
+  "contract": "C-01",
+  "request": { "method": "GET", "path": "/health" },
+  "expect": {
+    "status": 200,
+    "json": { "status": "success", "data": { "status": "ok" }, "error": null },
+    "jsonContains": ["data.time", "timestamp"],
+    "tolerances": ["timestamps", "request ids"]
+  }
+}
