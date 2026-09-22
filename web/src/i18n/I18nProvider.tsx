@@ -97,7 +97,7 @@ export function I18nProvider({
 }) {
   const [locale, setLocaleState] = useState<LocaleCode>(LOCALE_REGISTRY.defaultLocale);
   const [ready, setReady] = useState(false);
-  const [, bump] = useState(0);
+  const [catalogVersion, bump] = useState(0);
   const [extra, setExtra] = useState<Feature[]>([]);
   const featureKey = features.join(',');
   const featuresRef = useRef(features);
@@ -200,7 +200,9 @@ export function I18nProvider({
       tradeDate: (u, w, o) => F.fmtTradeDate(locale, u, w, o),
       relative: (v, b) => F.fmtRelative(locale, v, b),
     };
-  }, [locale, ready, setLocale, ensure]);
+  // catalogVersion: re-create `t` when extra chunks land (per-page features).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locale, ready, setLocale, ensure, catalogVersion]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
