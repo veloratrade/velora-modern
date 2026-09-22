@@ -30,6 +30,8 @@ import { PgAccountStore } from "./accounts/pgAccountStore.js";
 import { TradeService } from "./trades/tradeService.js";
 import { MemoryTradeStore } from "./trades/memoryTradeStore.js";
 import { PgTradeStore } from "./trades/pgTradeStore.js";
+import { emitCopySignal, tradeExitSignal, tradeOpenedSignal } from "./tenancy/copySignalEmitter.js";
+import { DeveloperKeyAuth, PgDeveloperKeyLookup } from "./developer/developerAuth.js";
 import { FixedWindowRateLimiter } from "./ratelimits/rateLimiter.js";
 import { MemoryRateLimitStore } from "./ratelimits/memoryRateLimitStore.js";
 import { PgRateLimitStore } from "./ratelimits/pgRateLimitStore.js";
@@ -135,7 +137,27 @@ async function main(): Promise<void> {
   }
   const userStore = pool !== undefined ? new PgUserStore(pool) : new MemoryUserStore();
   const accountStore = pool !== undefined ? new PgAccountStore(pool) : new MemoryAccountStore();
-  const tradeStore = pool !== undefined ? new PgTradeStore(pool) : new MemoryTradeStore();
+  // v2.5 COPY TRADING — the producer half of the dispatch pipeline.
+  //
+  // The hooks are the transactional-outbox seam: they receive the trade
+  // transaction's own executor, so a leader's signal is written atomically with
+  // the leader's trade. They are wired ONLY on the PostgreSQL posture, because
+  // the copy-relationship capability itself is only composed there — with
+  // PERSISTENCE=memory no relationship can exist, so there is nothing to emit
+  // and no reason to fake a queue row.
+  const tradeStore =
+    pool !== undefined
+      ? new PgTradeStore(pool, {
+          onTradeCreated: async (q, trade) => {
+            const signal = tradeOpenedSignal(trade);
+            if (signal !== null) await emitCopySignal(q, signal);
+          },
+          onExitRecorded: async (q, trade, exit) => {
+            const signal = tradeExitSignal(trade, exit);
+            if (signal !== null) await emitCopySignal(q, signal);
+          },
+        })
+      : new MemoryTradeStore();
   const rateLimitStore = pool !== undefined ? new PgRateLimitStore(pool) : new MemoryRateLimitStore();
 
   // C-41 — outbound transactional email.
@@ -184,6 +206,7 @@ async function main(): Promise<void> {
     deviceTokens?: import("./ea/eaRoutes.js").DeviceTokenEncryptor;
     tenancy?: import("./tenancy/tenancyRoutes.js").TenancyStore;
     developer?: import("./developer/developerRoutes.js").DeveloperStore;
+    developerKeys?: import("./developer/developerAuth.js").DeveloperKeyAuth;
   } = {};
   if (boot.jwtSecret !== undefined) {
     capabilities.auth = new AuthService({
@@ -393,6 +416,14 @@ async function main(): Promise<void> {
     capabilities.ea = new PgEaStore(q);
     capabilities.tenancy = new PgTenancyStore(q);
     capabilities.developer = new PgDeveloperStore(q);
+    // v3.0 developer-key AUTHENTICATION. Its own lookup (hash → live key) and
+    // the SAME durable limiter store the auth routes use, so the per-key
+    // requests/minute limit holds across processes instead of per instance.
+    capabilities.developerKeys = new DeveloperKeyAuth({
+      lookup: new PgDeveloperKeyLookup(q),
+      limiter: rateLimitStore,
+      log: (event) => console.log(JSON.stringify(event)),
+    });
 
     // v0.2 webhook ingress. The SECRET decides whether the capability exists at
     // all: with no secret the route answers 503 WEBHOOK_SECRET_MISSING (the

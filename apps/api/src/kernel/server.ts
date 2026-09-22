@@ -114,6 +114,14 @@ export interface ApiConfig {
   readonly tenancy?: import("../tenancy/tenancyRoutes.js").TenancyStore;
   /** v3.0 developer API keys + ML prediction reads. */
   readonly developer?: import("../developer/developerRoutes.js").DeveloperStore;
+  /**
+   * v3.0 developer-key AUTHENTICATION (the secondary credential class).
+   *
+   * Absent ⇒ keys can still be created, listed and revoked, but nothing accepts
+   * one: the lifecycle is intact and the surface simply does not exist, which is
+   * the fail-closed reading of "no authentication configured".
+   */
+  readonly developerKeys?: import("../developer/developerAuth.js").DeveloperKeyAuth;
 }
 
 /** Throttled routes (inc 7): the implemented Local auth routes with
@@ -349,6 +357,37 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
     }
   }
 
+  // ---- v3.0 developer-key authentication (secondary credential class) -------
+  // Runs BEFORE every authenticated branch, and before any body is read.
+  //
+  // A request carrying a developer key is either accepted for its scoped
+  // surface (and then continues as that key's OWNER, at the least privileged
+  // role) or terminated here — it never falls through to session verification,
+  // so a revoked key cannot be reinterpreted as anything else. A request whose
+  // bearer is not key-shaped is untouched, so the Phase C session path is
+  // byte-for-byte what it was.
+  let developerPrincipal: { sub: string; role: AppRole } | null = null;
+  if (config.developerKeys !== undefined) {
+    const decision = await config.developerKeys.guard({
+      req,
+      method,
+      path,
+      requestId: sec.requestId,
+    });
+    if (decision.blocked !== null) return decision.blocked;
+    developerPrincipal = decision.principal;
+  }
+  /**
+   * The single identity resolver for every protected branch below.
+   *
+   * `developerPrincipal` can only be non-null for a route the guard verified to
+   * be inside the developer surface WITH the matching scope, so no branch needs
+   * a second check — the guard is the authorization point, this function is only
+   * how the result reaches the route.
+   */
+  const principalFor = (): { sub: string; role: AppRole } | null =>
+    developerPrincipal ?? (config.auth === undefined ? null : authenticateRequest(req, config.auth));
+
   // ---- Phase C identity routes (Remote/PHP-verified contracts) ----
   if (method === "POST" && path === "/api/v1/auth/register") {
     return authRouteResult(async (auth) => {
@@ -566,7 +605,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
         body: fail("SERVICE_UNAVAILABLE", "accounts not configured", sec.requestId),
       });
     }
-    const claims = authenticateRequest(req, config.auth);
+    const claims = principalFor();
     if (claims === null) {
       return Promise.resolve({
         status: 401,
@@ -648,7 +687,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
         body: fail("SERVICE_UNAVAILABLE", "provisioning not configured", sec.requestId),
       });
     }
-    const claims = authenticateRequest(req, config.auth);
+    const claims = principalFor();
     if (claims === null) {
       return Promise.resolve({
         status: 401,
@@ -706,7 +745,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
         body: fail("SERVICE_UNAVAILABLE", "credentials not configured", sec.requestId),
       });
     }
-    const claims = authenticateRequest(req, config.auth);
+    const claims = principalFor();
     if (claims === null) {
       return Promise.resolve({
         status: 401,
@@ -758,7 +797,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
         body: fail("SERVICE_UNAVAILABLE", "trades not configured", sec.requestId),
       });
     }
-    const claims = authenticateRequest(req, config.auth);
+    const claims = principalFor();
     if (claims === null) {
       return Promise.resolve({
         status: 401,
@@ -873,7 +912,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
     if (config.auth === undefined) {
       return { status: 503, body: fail("SERVICE_UNAVAILABLE", "auth not configured", sec.requestId) };
     }
-    const claims = authenticateRequest(req, config.auth);
+    const claims = principalFor();
     const authority = await resolveAuthority(claims, config.ownership);
     const denied = requireAuthority(authority, "rbac.self.view", sec.requestId);
     if (denied !== null) return denied;
@@ -893,7 +932,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
     if (config.auth === undefined) {
       return { status: 503, body: fail("SERVICE_UNAVAILABLE", "auth not configured", sec.requestId) };
     }
-    const claims = authenticateRequest(req, config.auth);
+    const claims = principalFor();
     const authority = await resolveAuthority(claims, config.ownership);
     const denied = requireAuthority(authority, "rbac.matrix.view", sec.requestId);
     if (denied !== null) return denied;
@@ -923,7 +962,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
         body: fail("SERVICE_UNAVAILABLE", "admin user management not configured", sec.requestId),
       });
     }
-    const claims = authenticateRequest(req, config.auth);
+    const claims = principalFor();
     // Ownership is resolved from storage; the System Owner passes every
     // permission check even though their stored RBAC role may be `admin`.
     return resolveAuthority(claims, config.ownership)
@@ -1011,7 +1050,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
         body: fail("SERVICE_UNAVAILABLE", "ownership not configured", sec.requestId),
       };
     }
-    const claims = authenticateRequest(req, config.auth);
+    const claims = principalFor();
     if (claims === null) {
       return { status: 401, body: fail("UNAUTHENTICATED", "Authentication required.", sec.requestId) };
     }
@@ -1028,7 +1067,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
         body: fail("SERVICE_UNAVAILABLE", "ownership not configured", sec.requestId),
       };
     }
-    const claims = authenticateRequest(req, config.auth);
+    const claims = principalFor();
     if (claims === null) {
       return { status: 401, body: fail("UNAUTHENTICATED", "Authentication required.", sec.requestId) };
     }
@@ -1082,7 +1121,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
     url,
     config,
     requestId: sec.requestId,
-    authenticate: (r) => (config.auth === undefined ? null : authenticateRequest(r, config.auth)),
+    authenticate: () => principalFor(),
     readBody: parseJsonBody,
     readRawBody,
     isSystemOwner: async (userId: string) => {
