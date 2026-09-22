@@ -13,8 +13,7 @@
 // is SKIPPED, never silently passed.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { join } from "node:path";
-import { createEngine, migrate } from "../migrate.ts";
+import { prepareDatabase } from "./support/pgTestDb.ts";
 import { PgWebhookEventStore } from "../../apps/api/src/webhooks/pgWebhookStore.ts";
 import { PgSyncStatusStore } from "../../apps/api/src/accounts/syncStatusService.ts";
 import { PgAnalyticsStore } from "../../apps/api/src/analytics/analyticsStore.ts";
@@ -30,7 +29,6 @@ import { PgDeveloperStore } from "../../apps/api/src/developer/developerRoutes.t
 import { poolQuery } from "../../apps/api/src/persistence/pg.ts";
 import type { Pool } from "pg";
 
-const MIGRATIONS = join(import.meta.dirname, "..", "migrations");
 const PG_URL = process.env.DATABASE_URL;
 const SKIP =
   PG_URL === undefined ? "DATABASE_URL not set — real-PG battery (postgres-evidence workflow only)" : false;
@@ -45,57 +43,17 @@ interface Ctx {
 }
 
 async function harness(label: string): Promise<Ctx> {
-  const { Pool } = await import("pg");
-  const engine = await createEngine(PG_URL as string);
-  await migrate(engine, MIGRATIONS);
-  await engine.close();
-  const pool = new Pool({ connectionString: PG_URL });
+  // ISOLATION IS THE HARNESS'S JOB. `prepareDatabase` applies the frozen
+  // migrations and truncates every application table, so this battery is
+  // repeatable against a database that previous runs (or other batteries) have
+  // already used — the failure mode observed in pass 1 was a battery that only
+  // passed on a virgin cluster.
+  const db = await prepareDatabase(PG_URL as string);
+  const pool = db.pool;
   const q = poolQuery(pool);
 
   const email = `${label}-owner@velora.test`;
   const otherEmail = `${label}-other@velora.test`;
-  // CLEAN SLATE PER TEST. The battery may be re-run against the same cluster
-  // (the evidence workflow never recreates it), and several assertions are
-  // exact counts. Deleting the two test users cascades to every row they own —
-  // accounts, trades, tags, subscriptions, keys — so each run starts from the
-  // same state instead of accumulating.
-  const existing = await pool.query("SELECT id FROM users WHERE email IN ($1,$2)", [email, otherEmail]);
-  const existingIds = existing.rows.map((r: { id: string | number }) => String(r.id));
-  if (existingIds.length > 0) {
-    // Explicit child-first cleanup: several of these FKs are NOT cascading, so a
-    // bare `DELETE FROM users` is refused (verified). Order matters, and every
-    // statement is bounded to the two test users.
-    const cleanups: readonly (readonly [string, string])[] = [
-      ["trade_tags", "user_id"],
-      ["trade_attachments", "user_id"],
-      // trade_exits has no user_id (it is scoped through its parent trade), so
-      // it is cleaned via a subquery over the trades being removed.
-      ["trades", "user_id"],
-      ["tags", "user_id"],
-      ["subscriptions", "user_id"],
-      ["ai_coaching_logs", "user_id"],
-      ["public_profiles", "user_id"],
-      ["copy_relationships", "follower_user_id"],
-      ["copy_relationships", "leader_user_id"],
-      ["signal_queue", "leader_user_id"],
-      ["developer_api_keys", "user_id"],
-      ["ml_model_predictions", "user_id"],
-      ["device_tokens", "user_id"],
-      ["voice_session_logs", "user_id"],
-      ["prop_firm_rules", "user_id"],
-      ["account_group_members", "user_id"],
-      ["trading_accounts", "user_id"],
-      ["account_groups", "user_id"],
-    ];
-    for (const [table, column] of cleanups) {
-      await pool.query(`DELETE FROM ${table} WHERE ${column} = ANY($1::bigint[])`, [existingIds]);
-    }
-    await pool.query(
-      "DELETE FROM trade_exits WHERE trade_id IN (SELECT id FROM trades WHERE user_id = ANY($1::bigint[]))",
-      [existingIds],
-    );
-    await pool.query("DELETE FROM users WHERE id = ANY($1::bigint[])", [existingIds]);
-  }
   await pool.query("INSERT INTO users (email, password_hash) VALUES ($1,$2), ($3,$4) ON CONFLICT (email) DO NOTHING", [
     email,
     "x",
@@ -107,18 +65,15 @@ async function harness(label: string): Promise<Ctx> {
   const userId = byEmail.get(email) as string;
   const otherUserId = byEmail.get(otherEmail) as string;
 
-  // IDEMPOTENT: the battery may be re-run against the same database (the
-  // evidence workflow migrates idempotently but does not recreate the cluster),
-  // and `trading_accounts_metaapi_unique` would reject a second insert for the
-  // same provider account.
-  const metaapiId = `metaapi-${label}`;
-  await pool.query(
+  // `provider` and `platform` must stay inside 0004's CHECK vocabulary
+  // (MT4|MT5|MANUAL) — an out-of-vocabulary value here would fail for the wrong
+  // reason and hide the behaviour under test.
+  const account = await pool.query(
     `INSERT INTO trading_accounts (user_id, provider, platform, label, currency, metaapi_account_id, timezone, timezone_source)
-     SELECT $1, 'MT5', 'MT5', $2, 'USD', $3, 'UTC', 'account'
-      WHERE NOT EXISTS (SELECT 1 FROM trading_accounts WHERE metaapi_account_id = $3)`,
-    [userId, `${label} account`, metaapiId],
+     VALUES ($1, 'MT5', 'MT5', $2, 'USD', $3, 'UTC', 'account')
+     RETURNING id`,
+    [userId, `${label} account`, `metaapi-${label}`],
   );
-  const account = await pool.query("SELECT id FROM trading_accounts WHERE metaapi_account_id = $1", [metaapiId]);
 
   return {
     pool,
@@ -551,39 +506,89 @@ test("public profiles and copy relationships obey 0020's constraints", { skip: S
       [ctx.otherUserId],
     );
     const leaderAccountId = String(leaderAccount[0]?.["id"]);
-    const created = await store.createRelationship({
-      leaderUserId: ctx.otherUserId,
-      followerUserId: ctx.userId,
-      leaderAccountId,
-      followerAccountId: ctx.accountId,
-      allocationMode: "proportional",
-      allocationValue: "1.00000000",
-    });
-    assert.equal(created?.status, "pending");
 
-    // 0020's partial UNIQUE index rejects a second live pair.
-    const duplicate = await store.createRelationship({
-      leaderUserId: ctx.otherUserId,
+    // ---- the LEADER is derived from the ACCOUNT row, never from the client ---
+    // A forged leader user id cannot be supplied at all: it is not a parameter.
+    const created = await store.createRelationship({
       followerUserId: ctx.userId,
       leaderAccountId,
       followerAccountId: ctx.accountId,
       allocationMode: "proportional",
       allocationValue: "1.00000000",
     });
-    assert.equal(duplicate, null);
+    assert.equal(created.ok, true);
+    if (!created.ok) throw new Error("expected the relationship to be created");
+    assert.equal(created.relationship.status, "pending");
+    assert.equal(
+      created.relationship.leaderUserId,
+      ctx.otherUserId,
+      "leader_user_id must come from trading_accounts.user_id, not from the caller",
+    );
+
+    // 0020's partial UNIQUE index rejects a second live pair, reported as a
+    // distinct outcome so the route can answer 409 rather than 500.
+    const duplicate = await store.createRelationship({
+      followerUserId: ctx.userId,
+      leaderAccountId,
+      followerAccountId: ctx.accountId,
+      allocationMode: "proportional",
+      allocationValue: "1.00000000",
+    });
+    assert.deepEqual(duplicate, { ok: false, reason: "duplicate" });
+
+    // An unknown leader account is reported as such (not as a conflict).
+    const missingLeader = await store.createRelationship({
+      followerUserId: ctx.userId,
+      leaderAccountId: "999999999",
+      followerAccountId: ctx.accountId,
+      allocationMode: "proportional",
+      allocationValue: "1.00000000",
+    });
+    assert.deepEqual(missingLeader, { ok: false, reason: "leader-account-not-found" });
+
+    // ---- status transitions are authorized in the PREDICATE ------------------
+    // The FOLLOWER cannot activate a relationship (only the leader can).
+    assert.equal(await store.setRelationshipStatus(ctx.userId, created.relationship.id, "active"), null);
+    // The LEADER can.
+    const activated = await store.setRelationshipStatus(ctx.otherUserId, created.relationship.id, "active");
+    assert.equal(activated?.status, "active");
+    // Both sides can pause.
+    const paused = await store.setRelationshipStatus(ctx.userId, created.relationship.id, "paused");
+    assert.equal(paused?.status, "paused");
+    // A third party touches nothing.
+    const thirdUser = await ctx.pool.query(
+      "INSERT INTO users (email, password_hash) VALUES ($1,'x') ON CONFLICT (email) DO UPDATE SET password_hash = 'x' RETURNING id",
+      [`${"tn"}-third@velora.test`],
+    );
+    const thirdId = String(thirdUser.rows[0].id);
+    assert.equal(await store.setRelationshipStatus(thirdId, created.relationship.id, "paused"), null);
 
     assert.equal((await store.listRelationships(ctx.userId)).length, 1);
-    assert.equal(await store.revokeRelationship(ctx.userId, created?.id as string), true);
+    assert.equal(await store.revokeRelationship(ctx.userId, created.relationship.id), true);
     assert.equal((await store.listRelationships(ctx.userId)).length, 0);
+    // A revoked relationship can never be resumed.
+    assert.equal(await store.setRelationshipStatus(ctx.otherUserId, created.relationship.id, "active"), null);
+    // ... and the pair is free to link again, which proves the partial index is
+    // scoped to LIVE statuses rather than blocking the pair permanently.
+    const relinked = await store.createRelationship({
+      followerUserId: ctx.userId,
+      leaderAccountId,
+      followerAccountId: ctx.accountId,
+      allocationMode: "fixed_lot",
+      allocationValue: "0.10000000",
+    });
+    assert.equal(relinked.ok, true);
 
-    // Self-copy is refused by the engine.
-    await assert.rejects(() =>
-      ctx.q(
-        `INSERT INTO copy_relationships (leader_user_id, follower_user_id, leader_account_id, follower_account_id)
-         VALUES ($1, $1, $2, $2)`,
-        [ctx.userId, ctx.accountId],
-      ),
-    );
+    // Self-copy is refused by 0020's `leader_user_id <> follower_user_id` CHECK,
+    // surfaced as its own reason rather than as a unique violation.
+    const selfCopy = await store.createRelationship({
+      followerUserId: ctx.otherUserId,
+      leaderAccountId,
+      followerAccountId: ctx.accountId,
+      allocationMode: "proportional",
+      allocationValue: "1.00000000",
+    });
+    assert.deepEqual(selfCopy, { ok: false, reason: "self-copy" });
 
     // A malformed handle is refused by the engine's pattern CHECK.
     await assert.rejects(() =>

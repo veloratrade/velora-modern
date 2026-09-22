@@ -20,6 +20,7 @@ import { acquireReservation, releaseReservation, listSyncableAccounts } from "..
 import { runSyncTick } from "../../apps/worker/src/scheduler/syncScheduler.ts";
 import { MemoryQueue, type TestClock } from "../../apps/worker/src/queue/memoryQueue.ts";
 import { normalizeDeal } from "../../apps/worker/src/metaapi/normalizeDeal.ts";
+import { resetSchema } from "./support/pgTestDb.ts";
 
 const MIGRATIONS = join(import.meta.dirname, "..", "migrations");
 const URL = process.env["DATABASE_URL"];
@@ -73,6 +74,11 @@ test("MetaAPI sync", { skip: URL ? false : "DATABASE_URL not set" }, async (t) =
 
   const pool = new Pool({ connectionString: URL });
   t.after(async () => { await pool.end(); });
+  // ISOLATION (pass 2): truncate every application table so the battery is
+  // repeatable in any order and against a cluster other batteries have used.
+  // Its outcome previously depended on leftover rows (observed order-dependent
+  // failures when run after other batteries). See db/tests/support/pgTestDb.ts.
+  await resetSchema(pool);
 
   // --- 1. Account mapping -------------------------------------------------
   await t.test("E3: metaapi_account_id persists and is globally unique", async () => {

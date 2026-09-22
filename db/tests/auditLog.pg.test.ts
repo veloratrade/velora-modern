@@ -10,8 +10,14 @@ import { Pool } from "pg";
 import { PgUserStore } from "../../apps/api/src/auth/pgUserStore.js";
 import { PgAuditStore } from "../../apps/api/src/auth/pgAuditStore.js";
 import { PgOwnershipStore } from "../../apps/api/src/auth/pgOwnershipStore.js";
+import { resetSchema } from "./support/pgTestDb.ts";
 
-const URL = process.env.PG_TEST_URL;
+// CONNECTION CONVENTION (pass 2): the evidence workflow exports DATABASE_URL.
+// This battery originally read only PG_TEST_URL, so in CI it SKIPPED SILENTLY
+// while reporting success — three real-PG batteries were dormant. DATABASE_URL
+// is now the primary source; PG_TEST_URL is still honoured as an explicit
+// override (some environments point it at a pre-provisioned database).
+const URL = process.env.DATABASE_URL ?? process.env.PG_TEST_URL;
 const NOW = new Date("2026-03-01T12:00:00.000Z");
 
 test("C-34 real PostgreSQL: transactional audit + append-only", { skip: URL === undefined }, async (t) => {
@@ -23,9 +29,13 @@ test("C-34 real PostgreSQL: transactional audit + append-only", { skip: URL === 
     await pool.end();
   });
 
-  await pool.query("DELETE FROM audit_log");
-  await pool.query("DELETE FROM installation_ownership");
-  await pool.query("DELETE FROM users");
+  // ISOLATION AND DETERMINISM (pass 2). The hand-written DELETE order assumed a
+  // database where nothing else referenced `users`; as soon as any other battery
+  // had run, `DELETE FROM users` failed with 23503 (trades_user_id_fkey) and the
+  // whole file failed. The shared reset truncates every application table (also
+  // resetting identity, which this battery's fixed fixture rows depend on), so
+  // the battery is repeatable in any order and against a used cluster.
+  await resetSchema(pool);
   const actor = await users.createUser({
     email: "actor@velora.ir", passwordHash: "x", fullName: "Actor",
     locale: "en", timezone: "UTC", now: NOW,

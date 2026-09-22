@@ -43,7 +43,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { createEngine, migrate } from "../migrate.ts";
+import { prepareDatabase } from "./support/pgTestDb.ts";
 import { PgTradeStore } from "../../apps/api/src/trades/pgTradeStore.ts";
 import { TradeService, TradeError } from "../../apps/api/src/trades/tradeService.ts";
 import type { TradeStore } from "../../apps/api/src/trades/tradeStore.ts";
@@ -51,7 +51,6 @@ import { applyEvent } from "../../packages/domain/src/tradeLedger.ts";
 import type { TradeState, LedgerEvent } from "../../packages/domain/src/tradeLedger.ts";
 import type { Pool } from "pg";
 
-const MIGRATIONS = join(import.meta.dirname, "..", "migrations");
 const PG_URL = process.env.DATABASE_URL;
 const SKIP = PG_URL === undefined
   ? "DATABASE_URL not set — real-PG battery (postgres-evidence workflow only)"
@@ -73,9 +72,9 @@ async function harness(): Promise<{
   close: () => Promise<void>;
 }> {
   const { Pool } = await import("pg");
-  const engine = await createEngine(PG_URL);
-  await migrate(engine, MIGRATIONS);
-  await engine.close();
+  // Migrate (idempotent) and reset every application table, so the battery is
+  // repeatable against a cluster previous runs have already used.
+  await (await prepareDatabase(PG_URL as string)).close();
   const pool = new Pool({
     connectionString: PG_URL,
     statement_timeout: STATEMENT_TIMEOUT_MS,
@@ -225,8 +224,61 @@ function scale8(s: string): string {
   return `${sign}${intPart}.${frac.padEnd(8, "0")}`;
 }
 
-/** Every trade raced in this battery, for the final replay invariant (L/M). */
-const racedTradeIds: string[] = [];
+/**
+ * Replay invariant (ADR-002): folding a trade's stored events must reproduce the
+ * projected row exactly.
+ *
+ * WHY IT IS A HELPER: the original battery ran this comparison ONCE, on a
+ * module-level array of ids collected across tests. That array assumed database
+ * ids keep increasing for the whole run — they do not: every harness applies the
+ * shared reset (`TRUNCATE … RESTART IDENTITY`), so ids restart at 1 in each test
+ * and the list collapsed to a handful of colliding values. The check therefore
+ * covered 3 trades out of 16 raced ones, and its `ids.length >= 10` assertion
+ * only ever passed BECAUSE earlier runs left rows behind. Both are evidence
+ * defects: a battery must not need a dirty database to look correct. The
+ * invariant is now asserted per test, against every trade the test created.
+ */
+async function assertReplayEqualsProjection(pool: Pool, tradeId: string): Promise<void> {
+  const evRows = (await pool.query(
+    "SELECT payload FROM trade_events WHERE trade_id = $1 ORDER BY id",
+    [tradeId],
+  )).rows as { payload: { event?: LedgerEvent } }[];
+  assert.ok(evRows.length >= 1, `trade ${tradeId}: has its TRADE_CREATED event (no lost events)`);
+  let state: TradeState | null = null;
+  for (const r of evRows) {
+    const e = r.payload.event;
+    assert.ok(e !== undefined && typeof e.type === "string", "stored payload embeds the foldable domain event");
+    state = applyEvent(state, e as LedgerEvent); // throws on ANY inconsistency
+  }
+  const row = (await pool.query(
+    "SELECT version, allocated_volume, deleted_at, notes, strategy FROM trades WHERE id = $1",
+    [tradeId],
+  )).rows[0] as { version: string; allocated_volume: string; deleted_at: Date | null; notes: string | null; strategy: string | null } | undefined;
+  assert.ok(row !== undefined, `trade ${tradeId}: still projected`);
+  assert.ok(state !== null, `trade ${tradeId}: folded to a state`);
+  assert.equal(String(state.version), String(row.version), `trade ${tradeId}: replay version == projection version`);
+  assert.equal(
+    scale8(state.allocatedVolume),
+    scale8(String(row.allocated_volume)),
+    `trade ${tradeId}: replay allocation == projection (scale-8 normalized; domain zero "0" ≡ PG "0.00000000")`,
+  );
+  assert.equal(state.deletedAt !== null, row.deleted_at !== null, `trade ${tradeId}: replay tombstone state == projection`);
+  assert.equal(state.journaling.notes ?? null, row.notes, `trade ${tradeId}: replay notes == projection`);
+  assert.equal(state.journaling.strategy ?? null, row.strategy, `trade ${tradeId}: replay strategy == projection`);
+}
+
+/** Applies the replay invariant to EVERY trade that has events in this database. */
+async function assertEveryTradeReplays(pool: Pool): Promise<void> {
+  const ids = (await pool.query("SELECT DISTINCT trade_id FROM trade_events ORDER BY trade_id")).rows as { trade_id: string | number }[];
+  for (const r of ids) await assertReplayEqualsProjection(pool, String(r.trade_id));
+}
+
+/**
+ * Number of races this battery performed. A COUNTER, not a list of ids: ids are
+ * only unique within one harness, so collecting them across tests silently
+ * deduplicated distinct races into one.
+ */
+const racedTradeCount = { value: 0 };
 
 // ---- tests -----------------------------------------------------------------
 
@@ -234,7 +286,7 @@ test("PG D4 A1: MIXED RACE — createExit vs updateTrade (two service instances)
   const h = await harness();
   try {
     const id = await newTrade(h.svcA, h.owner);
-    racedTradeIds.push(id);
+    racedTradeCount.value += 1;
 
     const [exitRes, editRes] = await Promise.all([
       attempt(h.svcA.createExit(id, h.owner, exitBody("0.2"))),
@@ -261,6 +313,7 @@ test("PG D4 A1: MIXED RACE — createExit vs updateTrade (two service instances)
       assert.equal(exits.length, 0, "exit lost ⇒ zero exit rows");
     }
     assert.equal(p.notes, editRes.ok ? "raced-edit" : "d4 probe", "journaling reflects exactly whether the edit committed");
+    await assertEveryTradeReplays(h.pool);
   } finally {
     await h.close();
   }
@@ -270,7 +323,7 @@ test("PG D4 A2: MIXED RACE — createExit vs deleteTrade (tombstone) → winner-
   const h = await harness();
   try {
     const id = await newTrade(h.svcA, h.owner);
-    racedTradeIds.push(id);
+    racedTradeCount.value += 1;
 
     const [exitRes, tombRes] = await Promise.all([
       attempt(h.svcA.createExit(id, h.owner, exitBody("0.2"))),
@@ -308,6 +361,7 @@ test("PG D4 A2: MIXED RACE — createExit vs deleteTrade (tombstone) → winner-
       assert.equal(p.deletedAt, null, "exit won ⇒ trade still active");
       assert.equal(p.allocated, "0.20000000", "exit won ⇒ allocation applied");
     }
+    await assertEveryTradeReplays(h.pool);
   } finally {
     await h.close();
   }
@@ -317,7 +371,7 @@ test("PG D4 A3: MIXED RACE — updateTrade vs deleteTrade → winner-set invaria
   const h = await harness();
   try {
     const id = await newTrade(h.svcA, h.owner);
-    racedTradeIds.push(id);
+    racedTradeCount.value += 1;
 
     const [editRes, tombRes] = await Promise.all([
       attempt(h.svcA.updateTrade(id, h.owner, { notes: "edit-race" })),
@@ -344,6 +398,7 @@ test("PG D4 A3: MIXED RACE — updateTrade vs deleteTrade → winner-set invaria
       assert.equal(p.notes, "edit-race", "edit won ⇒ notes applied");
       assert.equal(p.deletedAt, null, "edit won ⇒ still active");
     }
+    await assertEveryTradeReplays(h.pool);
   } finally {
     await h.close();
   }
@@ -355,7 +410,7 @@ test("PG D4 B: different-trade concurrency — simultaneous edit/exit/tombstone 
     const t1 = await newTrade(h.svcA, h.owner);
     const t2 = await newTrade(h.svcA, h.owner);
     const t3 = await newTrade(h.svcA, h.owner);
-    racedTradeIds.push(t1, t2, t3);
+    racedTradeCount.value += 3;
 
     const [r1, r2, r3] = await Promise.all([
       attempt(h.svcA.updateTrade(t1, h.owner, { notes: "iso-edit" })),
@@ -375,6 +430,7 @@ test("PG D4 B: different-trade concurrency — simultaneous edit/exit/tombstone 
     const foreign = await attempt(h.svcB.updateTrade(t1, h.other, { notes: "theft" }));
     assert.ok(isExactTrade404(foreign), `foreign edit → exact non-disclosing 404, got ${JSON.stringify(foreign)}`);
     assert.equal((await projection(h.pool, t1)).notes, "iso-edit", "foreign attempt changed nothing");
+    await assertEveryTradeReplays(h.pool);
   } finally {
     await h.close();
   }
@@ -384,7 +440,7 @@ test("PG D4 C: service-level stale CAS → exact 409 CONFLICT, no event written,
   const h = await harness();
   try {
     const id = await newTrade(h.svcA, h.owner);
-    racedTradeIds.push(id);
+    racedTradeCount.value += 1;
     const first = await attempt(h.svcA.updateTrade(id, h.owner, { notes: "first", version: 0 }));
     assert.ok(first.ok, "fresh CAS wins");
     // stale explicit version (0) against the now-current version 1
@@ -394,6 +450,7 @@ test("PG D4 C: service-level stale CAS → exact 409 CONFLICT, no event written,
     assert.equal(p.version, "1", "loser did not bump version");
     assert.equal(p.notes, "first", "loser's patch not applied");
     assert.equal(await countEvents(h.pool, id), 2, "TRADE_CREATED + 1 edit — the stale loser wrote NO event");
+    await assertEveryTradeReplays(h.pool);
   } finally {
     await h.close();
   }
@@ -403,7 +460,7 @@ test("PG D4 D1: concurrent FULL-volume exits (8 racers, two services) → exactl
   const h = await harness();
   try {
     const id = await newTrade(h.svcA, h.owner);
-    racedTradeIds.push(id);
+    racedTradeCount.value += 1;
 
     const racers = Array.from({ length: 8 }, (_, i) =>
       attempt((i % 2 === 0 ? h.svcA : h.svcB).createExit(id, h.owner, exitBody("1"))));
@@ -420,6 +477,7 @@ test("PG D4 D1: concurrent FULL-volume exits (8 racers, two services) → exactl
     assert.equal((await activeExits(h.pool, id)).length, 1, "exactly one exit row — no partial loser rows");
     assert.equal(p.version, "1", "one committed mutation");
     assert.equal(await countEvents(h.pool, id), 2, "one EXIT_RECORDED event — no lost, no duplicate");
+    await assertEveryTradeReplays(h.pool);
   } finally {
     await h.close();
   }
@@ -429,7 +487,7 @@ test("PG D4 D2: concurrent PARTIAL exits (8 × 0.2, two services) → every fail
   const h = await harness();
   try {
     const id = await newTrade(h.svcA, h.owner);
-    racedTradeIds.push(id);
+    racedTradeCount.value += 1;
 
     const racers = Array.from({ length: 8 }, (_, i) =>
       attempt((i % 2 === 0 ? h.svcA : h.svcB).createExit(id, h.owner, exitBody("0.2"))));
@@ -449,6 +507,7 @@ test("PG D4 D2: concurrent PARTIAL exits (8 × 0.2, two services) → every fail
     assert.equal(await countEvents(h.pool, id), k + 1, "TRADE_CREATED + one event per success — zero lost events");
     // financial bound: allocation can never exceed the trade volume
     assert.ok(Number(p.allocated) <= 1, "never over-allocated");
+    await assertEveryTradeReplays(h.pool);
   } finally {
     await h.close();
   }
@@ -458,7 +517,7 @@ test("PG D4 E: createExit vs deleteExit race → winner-set invariants; allocati
   const h = await harness();
   try {
     const id = await newTrade(h.svcA, h.owner);
-    racedTradeIds.push(id);
+    racedTradeCount.value += 1;
     const pre = await h.svcA.createExit(id, h.owner, exitBody("0.3")); // allocated 0.3, version 1
     const preExitId = String((pre as { id: unknown }).id);
 
@@ -490,6 +549,7 @@ test("PG D4 E: createExit vs deleteExit race → winner-set invariants; allocati
       assert.equal(exits.length, 0, "cancelled exit tombstoned, none active");
     }
     assert.equal(await countEvents(h.pool, id), 2 + k, "created + first exit + one event per committed race mutation");
+    await assertEveryTradeReplays(h.pool);
   } finally {
     await h.close();
   }
@@ -502,7 +562,7 @@ test("PG D4 F/N: tombstone finality — every mutation path non-disclosing 404; 
     const created = await h.svcA.createExit(id, h.owner, exitBody("0.25"));
     const exitId = String((created as { id: unknown }).id);
     await h.svcA.deleteTrade(id, h.owner);
-    racedTradeIds.push(id);
+    racedTradeCount.value += 1;
     const before = await projection(h.pool, id);
     const eventsBefore = await countEvents(h.pool, id);
 
@@ -531,6 +591,7 @@ test("PG D4 F/N: tombstone finality — every mutation path non-disclosing 404; 
     // physical row preserved (tombstone, never a physical delete)
     const phys = await h.pool.query("SELECT deleted_at FROM trades WHERE id = $1", [id]);
     assert.equal(phys.rows.length, 1, "physical row still present (immutable ledger)");
+    await assertEveryTradeReplays(h.pool);
   } finally {
     await h.close();
   }
@@ -541,7 +602,7 @@ test("PG D4 G: over-allocation → 422 with FULL rollback — no partial exit ro
   try {
     // serial: a second exit that cannot fit fails honestly and leaves nothing
     const id1 = await newTrade(h.svcA, h.owner);
-    racedTradeIds.push(id1);
+    racedTradeCount.value += 1;
     const first = await attempt(h.svcA.createExit(id1, h.owner, exitBody("1")));
     assert.ok(first.ok, "first full-volume exit succeeds");
     const second = await attempt(h.svcB.createExit(id1, h.owner, exitBody("0.5")));
@@ -553,7 +614,7 @@ test("PG D4 G: over-allocation → 422 with FULL rollback — no partial exit ro
 
     // concurrent: two 0.6 exits cannot both fit (0.6 + 0.6 > 1.0)
     const id2 = await newTrade(h.svcA, h.owner);
-    racedTradeIds.push(id2);
+    racedTradeCount.value += 1;
     const [a, b] = await Promise.all([
       attempt(h.svcA.createExit(id2, h.owner, exitBody("0.6"))),
       attempt(h.svcB.createExit(id2, h.owner, exitBody("0.6"))),
@@ -566,6 +627,7 @@ test("PG D4 G: over-allocation → 422 with FULL rollback — no partial exit ro
     assert.equal(p.allocated, "0.60000000", "exactly the winner's volume committed");
     assert.equal((await activeExits(h.pool, id2)).length, 1, "loser's exit fully rolled back");
     assert.equal(await countEvents(h.pool, id2), 2, "one event for the winner only");
+    await assertEveryTradeReplays(h.pool);
   } finally {
     await h.close();
   }
@@ -575,7 +637,7 @@ test("PG D4 H: lock release after failure — failed transactions release row lo
   const h = await harness();
   try {
     const id = await newTrade(h.svcA, h.owner);
-    racedTradeIds.push(id);
+    racedTradeCount.value += 1;
     const created = await h.svcA.createExit(id, h.owner, exitBody("0.4"));
     const exitId = String((created as { id: unknown }).id);
 
@@ -596,6 +658,7 @@ test("PG D4 H: lock release after failure — failed transactions release row lo
     assert.equal(p.allocated, "0.00000000", "cancel decremented after the failure burst");
     assert.equal(p.version, "3", "exit(1) + edit(1) + cancel(1) committed — failures bumped nothing");
     assert.equal(await countEvents(h.pool, id), 4, "zero events from failures, three from successes");
+    await assertEveryTradeReplays(h.pool);
   } finally {
     await h.close();
   }
@@ -644,6 +707,13 @@ test("PG D4 I/J: duplicate event_uid → honest constraint failure with FULL rol
     assert.equal(afterTrades.n, beforeTrades.n, "FULL rollback: the duplicate's projection row did not survive");
     const uidCount = (await h.pool.query("SELECT count(*)::int AS n FROM trade_events WHERE event_uid = $1", ["d4-fixed-uid-001"])).rows[0] as { n: number };
     assert.equal(uidCount.n, 1, "exactly one event with the shared uid — no partial duplicate event");
+    // The replay invariant is deliberately NOT asserted here: this test drives the
+    // STORE boundary with a synthetic `{probe:"d4"}` payload to force the unique
+    // violation, so its event is not a foldable domain event by construction (the
+    // battery's own scope note: replay convergence is Phase H). Asserting it would
+    // fail for a reason that has nothing to do with the idempotency boundary
+    // under test — the invariant stays asserted on every trade that the SERVICE
+    // path created, in the racing tests and in L/M.
   } finally {
     await h.close();
   }
@@ -653,7 +723,7 @@ test("PG D4 K: NUMERIC exactness after races — ADR-001 scales as exact strings
   const h = await harness();
   try {
     const id = await newTrade(h.svcA, h.owner);
-    racedTradeIds.push(id);
+    racedTradeCount.value += 1;
     await h.svcA.createExit(id, h.owner, exitBody("0.25"));
     await h.svcA.createExit(id, h.owner, exitBody("0.75"));
 
@@ -682,6 +752,7 @@ test("PG D4 K: NUMERIC exactness after races — ADR-001 scales as exact strings
     // no float conversion anywhere in the pipeline: values round-trip byte-stable
     const again = await projection(h.pool, id);
     assert.equal(again.allocated, row.alloc, "stable on re-read");
+    await assertEveryTradeReplays(h.pool);
   } finally {
     await h.close();
   }
@@ -698,40 +769,21 @@ test("PG D4 L/M: no lost events + bounded replay — projection == fold(trade_ev
     await h.svcA.deleteExit(String((e1 as { id: unknown }).id), h.owner);
     await h.svcB.updateTrade(id, h.owner, { notes: "seq-2", strategyTag: "fade" });
     await h.svcA.deleteTrade(id, h.owner);
-    racedTradeIds.push(id);
+    racedTradeCount.value += 1;
 
-    // fold EVERY raced trade in this battery (incl. all races above)
-    const ids = [...new Set(racedTradeIds)];
-    assert.ok(ids.length >= 10, `replaying every raced trade (got ${ids.length})`);
-    for (const tid of ids) {
-      const evRows = (await h.pool.query(
-        "SELECT payload FROM trade_events WHERE trade_id = $1 ORDER BY id",
-        [tid],
-      )).rows as { payload: { event?: LedgerEvent } }[];
-      assert.ok(evRows.length >= 1, "every raced trade has its TRADE_CREATED event (no lost events)");
-      let state: TradeState | null = null;
-      for (const r of evRows) {
-        const e = r.payload.event;
-        assert.ok(e !== undefined && typeof e.type === "string", "stored payload embeds the foldable domain event");
-        state = applyEvent(state, e as LedgerEvent); // throws on ANY inconsistency
-      }
-      const row = (await h.pool.query(
-        "SELECT version, allocated_volume, deleted_at, notes, strategy FROM trades WHERE id = $1",
-        [tid],
-      )).rows[0] as { version: string; allocated_volume: string; deleted_at: Date | null; notes: string | null; strategy: string | null };
-      assert.ok(state !== null, `trade ${tid} folded to a state`);
-      assert.equal(String(state.version), String(row.version), `trade ${tid}: replay version == projection version`);
-      assert.equal(scale8(state.allocatedVolume), scale8(String(row.allocated_volume)), `trade ${tid}: replay allocation == projection (scale-8 normalized; domain zero "0" ≡ PG "0.00000000")`);
-      assert.equal(state.deletedAt !== null, row.deleted_at !== null, `trade ${tid}: replay tombstone state == projection`);
-      assert.equal(state.journaling.notes ?? null, row.notes, `trade ${tid}: replay notes == projection`);
-      assert.equal(state.journaling.strategy ?? null, row.strategy, `trade ${tid}: replay strategy == projection`);
-    }
+    // Replay EVERY trade present in this database (the battery resets per test,
+    // so this is exactly the races this test performed) — the shared helper is
+    // also applied at the end of each racing test above.
+    assert.ok(racedTradeCount.value >= 10, `this battery performed ≥10 races (got ${racedTradeCount.value})`);
+    await assertEveryTradeReplays(h.pool);
+
     // the deterministic sequence's final state, explicitly
     const seq = await projection(h.pool, id);
     assert.equal(seq.version, "6", "7 events (create..tombstone) ⇒ version 6");
     assert.notEqual(seq.deletedAt, null, "sequence ended tombstoned");
     assert.equal(seq.allocated, "0.20000000", "0.3 + 0.2 − 0.3 = 0.2 exactly");
     assert.equal(await countEvents(h.pool, id), 7, "no lost events across the full sequence");
+    await assertEveryTradeReplays(h.pool);
   } finally {
     await h.close();
   }

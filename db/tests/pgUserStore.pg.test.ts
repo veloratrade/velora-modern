@@ -9,12 +9,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { createEngine, migrate } from "../migrate.ts";
+import { prepareDatabase } from "./support/pgTestDb.ts";
 import { PgUserStore } from "../../apps/api/src/auth/pgUserStore.ts";
 import { UserEmailExistsError } from "../../apps/api/src/auth/userStore.ts";
 import type { Pool } from "pg";
 
-const MIGRATIONS = join(import.meta.dirname, "..", "migrations");
 const PG_URL = process.env.DATABASE_URL;
 const SKIP = PG_URL === undefined
   ? "DATABASE_URL not set — real-PG battery (postgres-evidence workflow only)"
@@ -26,9 +25,9 @@ const T2 = new Date("2026-09-13T11:00:00.000Z");
 
 async function harness(): Promise<{ pool: Pool; store: PgUserStore; close: () => Promise<void> }> {
   const { Pool } = await import("pg");
-  const engine = await createEngine(PG_URL); // migration runner's real-pg branch
-  await migrate(engine, MIGRATIONS);
-  await engine.close();
+  // Migrate (idempotent) and reset every application table, so the battery is
+  // repeatable against a cluster previous runs have already used.
+  await (await prepareDatabase(PG_URL as string)).close();
   const pool = new Pool({ connectionString: PG_URL });
   return { pool, store: new PgUserStore(pool), close: () => pool.end() };
 }

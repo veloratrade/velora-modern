@@ -36,10 +36,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
-import { createEngine, migrate } from "../migrate.ts";
+import { prepareDatabase } from "./support/pgTestDb.ts";
 import type { Pool, PoolClient } from "pg";
 
-const MIGRATIONS = join(import.meta.dirname, "..", "migrations");
 const DB_DIR = join(import.meta.dirname, "..");
 const PG_URL = process.env.DATABASE_URL;
 const SKIP = PG_URL === undefined
@@ -52,9 +51,9 @@ const INSUFFICIENT_PRIVILEGE = "42501";
 /** Applies migrations + the D5 privilege layer, then returns a pool. */
 async function harness(): Promise<{ pool: Pool; close: () => Promise<void> }> {
   const { Pool } = await import("pg");
-  const engine = await createEngine(PG_URL);
-  await migrate(engine, MIGRATIONS);
-  await engine.close();
+  // Migrate (idempotent) and reset every application table, so the battery is
+  // repeatable against a cluster previous runs have already used.
+  await (await prepareDatabase(PG_URL as string)).close();
 
   const pool = new Pool({ connectionString: PG_URL });
   pool.on("error", () => { /* idle-client socket errors must not crash the battery */ });
@@ -62,6 +61,32 @@ async function harness(): Promise<{ pool: Pool; close: () => Promise<void> }> {
   // Bootstrap roles, then the post-migration privilege grid — the documented
   // execution order (db/roles-bootstrap.sql → migrate → db/roles.sql).
   await pool.query(readFileSync(join(DB_DIR, "roles-bootstrap.sql"), "utf8"));
+
+  // PREREQUISITE THE FILES THEMSELVES DECLARE. Both db/roles.sql (its pgboss
+  // section) and db/provision.ts document that `velora_owner` exists BEFORE the
+  // privilege grid is applied: it owns every application object, and the pgboss
+  // branch issues `ALTER DEFAULT PRIVILEGES FOR ROLE velora_owner`.
+  //
+  // WHY IT IS DONE HERE. Without it this battery's OUTCOME DEPENDED ON AMBIENT
+  // CLUSTER STATE: on a virgin database the pgboss branch was skipped and the
+  // battery passed, while on a cluster where the pgboss schema already existed
+  // (e.g. after the pg-boss battery ran) `roles.sql` failed with 42704 and every
+  // test in the file failed. Both outcomes are wrong as evidence — one under-
+  // tests, the other fabricates a failure. Creating the role reproduces the
+  // documented execution environment, so the privilege grid is exercised
+  // deterministically, pgboss branch included.
+  //
+  // Mirrors db/provision.ts exactly: NOLOGIN owner + NOINHERIT membership for
+  // the migrator (which is what makes the separated-owner model testable).
+  await pool.query(`DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'velora_owner') THEN
+    CREATE ROLE velora_owner NOLOGIN;
+  END IF;
+END $$;`);
+  await pool.query("GRANT USAGE, CREATE ON SCHEMA public TO velora_owner");
+  await pool.query("GRANT velora_owner TO velora_migrator WITH INHERIT FALSE, SET TRUE");
+
   await pool.query(readFileSync(join(DB_DIR, "roles.sql"), "utf8"));
 
   return { pool, close: async () => { await pool.end(); } };

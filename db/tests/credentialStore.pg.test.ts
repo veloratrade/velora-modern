@@ -10,6 +10,7 @@ import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { Pool } from "pg";
 import { createEngine, migrate } from "../migrate.ts";
+import { resetSchema } from "./support/pgTestDb.ts";
 import { PgCredentialStore } from "../../apps/api/src/credentials/pgCredentialStore.js";
 import { PgUserStore } from "../../apps/api/src/auth/pgUserStore.js";
 import {
@@ -39,8 +40,13 @@ test("C-22 real PostgreSQL: encrypted credential storage", { skip: URL === undef
     await pool.end();
   });
 
-  await pool.query("DELETE FROM user_credentials");
-  await pool.query("DELETE FROM users");
+  // ISOLATION (pass 2): the shared reset truncates every application table, so this
+  // battery is repeatable in ANY order / against a used cluster. Its outcome
+  // previously depended on what earlier batteries had left behind (observed:
+  // FK violation on `DELETE FROM users`, and order-dependent failures in
+  // metaapiProvisioning when run after another battery).
+  // See db/tests/support/pgTestDb.ts.
+  await resetSchema(pool);
   const a = await users.createUser({
     email: "a@velora.ir", passwordHash: "x", fullName: "A", locale: "en", timezone: "UTC", now: NOW,
   });

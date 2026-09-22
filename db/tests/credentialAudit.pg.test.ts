@@ -19,8 +19,14 @@ import { PgCredentialStore } from "../../apps/api/src/credentials/pgCredentialSt
 import { CredentialService } from "../../apps/api/src/credentials/credentialService.js";
 import { MasterKey, MASTER_KEY_BYTES } from "../../apps/api/src/credentials/credentialCrypto.js";
 import type { AuditEntry, AuditStore, AuditTx } from "../../apps/api/src/auth/auditStore.js";
+import { resetSchema } from "./support/pgTestDb.ts";
 
-const URL = process.env.PG_TEST_URL;
+// CONNECTION CONVENTION (pass 2): the evidence workflow exports DATABASE_URL.
+// This battery originally read only PG_TEST_URL, so in CI it SKIPPED SILENTLY
+// while reporting success — three real-PG batteries were dormant. DATABASE_URL
+// is now the primary source; PG_TEST_URL is still honoured as an explicit
+// override (some environments point it at a pre-provisioned database).
+const URL = process.env.DATABASE_URL ?? process.env.PG_TEST_URL;
 const NOW = new Date("2026-07-01T11:00:00.000Z");
 const SECRET = "metaapi-token-b3-91c4ff02-DO-NOT-LEAK";
 
@@ -36,10 +42,13 @@ test("B-3 real PostgreSQL: credential lifecycle audit is transactional", { skip:
     await pool.end();
   });
 
-  await pool.query("DELETE FROM audit_log");
-  await pool.query("DELETE FROM user_credentials");
-  await pool.query("DELETE FROM installation_ownership");
-  await pool.query("DELETE FROM users");
+  // ISOLATION AND DETERMINISM (pass 2). The hand-written DELETE order assumed a
+  // database where nothing else referenced `users`; as soon as any other battery
+  // had run, `DELETE FROM users` failed with 23503 (trades_user_id_fkey) and the
+  // whole file failed. The shared reset truncates every application table (also
+  // resetting identity, which this battery's fixed fixture rows depend on), so
+  // the battery is repeatable in any order and against a used cluster.
+  await resetSchema(pool);
   const owner = await users.createUser({
     email: "b3-owner@velora.ir", passwordHash: "x", fullName: "Owner",
     locale: "en", timezone: "UTC", now: NOW,

@@ -16,6 +16,7 @@ import { PgProvisioningStore } from "../../apps/api/src/metaapi/pgProvisioningSt
 import { PgAuditStore } from "../../apps/api/src/auth/pgAuditStore.ts";
 import { MetaApiProvisioningService } from "../../apps/api/src/metaapi/provisioningService.ts";
 import { withTransaction } from "../../apps/api/src/persistence/pg.ts";
+import { resetSchema } from "./support/pgTestDb.ts";
 
 const MIGRATIONS = join(import.meta.dirname, "..", "migrations");
 const URL = process.env["DATABASE_URL"];
@@ -49,6 +50,11 @@ test("MetaAPI provisioning — real PostgreSQL", { skip: URL === undefined ? "DA
 
   const pool = new Pool({ connectionString: URL });
   try {
+  // ISOLATION (pass 2): truncate every application table so the battery is
+  // repeatable in any order and against a cluster other batteries have used.
+  // Its outcome previously depended on leftover rows (observed order-dependent
+  // failures when run after other batteries). See db/tests/support/pgTestDb.ts.
+  await resetSchema(pool);
     const accounts = new PgAccountStore(pool);
     const operations = new PgProvisioningStore(pool);
     const audit = new PgAuditStore(pool);

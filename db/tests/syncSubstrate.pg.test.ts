@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { Pool } from "pg";
 import { createEngine, migrate } from "../migrate.ts";
+import { resetSchema } from "./support/pgTestDb.ts";
 
 const MIGRATIONS = join(import.meta.dirname, "..", "migrations");
 const URL = process.env["DATABASE_URL"];
@@ -40,6 +41,11 @@ test("D-6 sync substrate", { skip: URL ? false : "DATABASE_URL not set" }, async
 
   const pool = new Pool({ connectionString: URL });
   t.after(async () => { await pool.end(); });
+  // ISOLATION (pass 2): truncate every application table so the battery is
+  // repeatable in any order and against a cluster other batteries have used.
+  // Its outcome previously depended on leftover rows (observed order-dependent
+  // failures when run after other batteries). See db/tests/support/pgTestDb.ts.
+  await resetSchema(pool);
 
   await t.test("migration is idempotent (re-running changes nothing)", async () => {
     const e2 = await createEngine(URL!);
