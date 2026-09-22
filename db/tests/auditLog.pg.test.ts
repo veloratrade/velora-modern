@@ -10,7 +10,7 @@ import { Pool } from "pg";
 import { PgUserStore } from "../../apps/api/src/auth/pgUserStore.js";
 import { PgAuditStore } from "../../apps/api/src/auth/pgAuditStore.js";
 import { PgOwnershipStore } from "../../apps/api/src/auth/pgOwnershipStore.js";
-import { resetSchema } from "./support/pgTestDb.ts";
+import { prepareDatabase, resetSchema } from "./support/pgTestDb.ts";
 
 // CONNECTION CONVENTION (pass 2): the evidence workflow exports DATABASE_URL.
 // This battery originally read only PG_TEST_URL, so in CI it SKIPPED SILENTLY
@@ -32,9 +32,15 @@ test("C-34 real PostgreSQL: transactional audit + append-only", { skip: URL === 
   // ISOLATION AND DETERMINISM (pass 2). The hand-written DELETE order assumed a
   // database where nothing else referenced `users`; as soon as any other battery
   // had run, `DELETE FROM users` failed with 23503 (trades_user_id_fkey) and the
-  // whole file failed. The shared reset truncates every application table (also
-  // resetting identity, which this battery's fixed fixture rows depend on), so
-  // the battery is repeatable in any order and against a used cluster.
+  // whole file failed.
+  //
+  // prepareDatabase() APPLIES THE MIGRATIONS and then truncates every application
+  // table (resetting identity, which this battery's fixed fixtures depend on). The
+  // migration half is not optional here: an earlier revision of this fix called
+  // resetSchema() alone, which on a FRESH database finds no tables, resets
+  // nothing, and then fails with 42P01 `relation "users" does not exist` — a
+  // battery that only worked because some other battery had migrated first.
+  await (await prepareDatabase(URL as string)).close();
   await resetSchema(pool);
   const actor = await users.createUser({
     email: "actor@velora.ir", passwordHash: "x", fullName: "Actor",
