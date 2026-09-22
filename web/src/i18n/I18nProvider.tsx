@@ -25,11 +25,15 @@ export interface I18n {
   t: (key: string, params?: Record<string, unknown> | null, fallback?: string) => string;
   /** Legacy `VeloraLocale.errorMessage(error, fallbackKey)` */
   errorMessage: (error: unknown, fallbackKey?: string) => string;
+  /** Legacy `VeloraLocale.status(code)` → t('status.<code>', null, code) */
+  status: (code: unknown) => string;
   setLocale: (locale: LocaleCode) => Promise<void>;
   number: (v: unknown, o?: Intl.NumberFormatOptions) => string;
   currency: (v: unknown, c?: string, o?: Intl.NumberFormatOptions) => string;
   percent: (v: unknown, o?: Intl.NumberFormatOptions) => string;
   date: (v: unknown, o?: Intl.DateTimeFormatOptions) => string;
+  /** Legacy `VeloraLocale.dateWall` (naive wall-clock, no tz shift) */
+  dateWall: (v: unknown, o?: Intl.DateTimeFormatOptions) => string;
   dateTime: (v: unknown, o?: Intl.DateTimeFormatOptions) => string;
   tradeDate: (utc: unknown, wall: unknown, o?: Intl.DateTimeFormatOptions) => string;
   relative: (v: unknown, base?: unknown) => string;
@@ -168,6 +172,7 @@ export function I18nProvider({
       locale,
       direction: localeMeta(locale).direction,
       errorMessage,
+      status: (code) => t('status.' + String(code || 'unknown').toLowerCase(), null, String(code || '—')),
       ready: ready && hasFeatures(locale, ['common', 'errors']),
       t,
       setLocale: (l) => setLocale(l),
@@ -175,6 +180,7 @@ export function I18nProvider({
       currency: (v, c, o) => F.fmtCurrency(locale, v, c, o),
       percent: (v, o) => F.fmtPercent(locale, v, o),
       date: (v, o) => F.fmtDate(locale, v, o),
+      dateWall: (v, o) => F.dateWall(locale, v, o),
       dateTime: (v, o) => F.fmtDateTime(locale, v, o),
       tradeDate: (u, w, o) => F.fmtTradeDate(locale, u, w, o),
       relative: (v, b) => F.fmtRelative(locale, v, b),

@@ -579,3 +579,22 @@ input[type="tel"],
   unicode-bidi: isolate;
   direction: ltr;
 }
+
+/* legacy inline style of the top-bar new-trade action (identical values) */
+.velora-btn-back.velora-btn-newtrade{border-color:#4cd39a;color:#4cd39a;background:rgba(76,211,154,0.12);box-shadow:0 0 15px rgba(76,211,154,0.25)}
+
+/* Showcase list rows (legacy inline styles, identical values) */
+.sc-row{display:flex;justify-content:space-between;padding:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;align-items:center}
+.sc-row.lg{padding:14px;border-color:rgba(255,255,255,0.09)}
+.sc-row .sub{color:#8fa0c0}
+.sc-row .end{text-align:left}
+[dir='ltr'] .sc-row .end{text-align:right}
+.sc-up{color:#4CD39A;font-weight:bold}
+.sc-item{padding:14px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px}
+.sc-item-head{display:flex;justify-content:space-between;margin-bottom:6px}
+.sc-item-head b{font-size:14px;color:#fce38a}
+.sc-item-head span{color:#8fa0c0;font-size:11px}
+.sc-item p{font-size:12.5px;color:#cbd5e1;margin:0;line-height:1.7}
+.sc-month{padding:14px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px;text-align:center}
+.sc-month small{color:#8fa0c0}
+.sc-month b{color:#4CD39A;font-size:16px;margin-top:6px;display:inline-block}
