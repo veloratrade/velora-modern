@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import './legacy.css';
 import * as api from '@/lib/api/client';
 import { useI18n } from '@/i18n/I18nProvider';
+import { PasswordField } from '@/components/ui/PasswordField';
 import { AuthPageFrame } from '@/components/auth/AuthPageFrame';
 import { AuthBrandPanel } from '@/components/auth/AuthBrandPanel';
 import { BrandLogo } from '@/components/brand/LogoMark';
@@ -18,7 +19,6 @@ const DASHBOARD_URL = '/dashboard/';
 
 export default function LoginPage() {
   const { t, locale } = useI18n();
-  const [showPass, setShowPass] = useState(false);
   const error = useTimedMessage<string>(700);
   const [btnState, setBtnState] = useState<'idle' | 'busy' | 'done'>('idle');
   const emailRef = useRef<HTMLInputElement>(null);
@@ -75,14 +75,10 @@ export default function LoginPage() {
                 <label htmlFor="password">{t('common.password.656eabeb', null, 'رمز عبور')}</label>
                 <a className="forgot" href="/forgot-password">{t('pages.login.forgot.password.60e66930', null, 'فراموشی رمز؟')}</a>
               </div>
-              <div className="input-wrap">
+              <PasswordField ref={passRef} autoComplete="current-password" id="password" name="password" placeholder="••••••••" required
+                toggleLabel={t('common.show.password.9daec630', null, 'نمایش رمز')} icon={<><EyeOpen /><span style={{ display: 'none' }}><EyeShut /></span></>}>
                 <span className="icon" aria-hidden="true"><LockIcon /></span>
-                <input ref={passRef} autoComplete="current-password" id="password" name="password" placeholder="••••••••" required type={showPass ? 'text' : 'password'} />
-                <button aria-label={t('common.show.password.9daec630', null, 'نمایش رمز')} className="toggle" id="togglePass" type="button" onClick={() => setShowPass((v) => !v)}>
-                  <EyeOpen />
-                  <span style={{ display: 'none' }}><EyeShut /></span>
-                </button>
-              </div>
+              </PasswordField>
             </div>
             <button className="btn-gold" id="submitBtn" type="submit" disabled={btnState === 'busy'}>
               {btnState === 'busy' ? (<><span className="btn-spinner" /> {t('auth.signingIn')}</>)

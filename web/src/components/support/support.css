@@ -1,0 +1,33 @@
+/* Legacy support inline styles → classes (identical values) */
+.sp-form{margin-top:12px;display:grid;gap:10px}
+.sp-form label{font-size:12px;color:#cbd5e1;display:grid;gap:6px}
+.sp-input{padding:11px 12px;border-radius:10px;border:1px solid rgba(212,175,55,.35);background:rgba(255,255,255,.05);color:#f8f7f3;font-size:13px;font-family:inherit}
+textarea.sp-input{resize:vertical}
+.sp-actions{display:flex;gap:10px;flex-wrap:wrap}
+.sp-btn-gold{padding:11px 16px;border-radius:10px;border:1px solid rgba(252,227,138,.55);background:rgba(212,175,55,.18);color:#fce38a;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit}
+.sp-btn-gold.sm{padding:8px 12px;border-radius:9px;border-color:rgba(252,227,138,.5);background:rgba(212,175,55,.15);font-size:12px;font-weight:400}
+.sp-btn-gold.reply{justify-self:start;padding:10px 16px}
+.sp-btn-ghost{padding:8px 12px;border-radius:9px;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.06);color:#cbd5e1;font-size:12px;cursor:pointer;font-family:inherit}
+.sp-err{color:#ff8e98;font-size:12px}
+.sp-err.list{margin-top:10px}
+.sp-list{margin-top:12px;display:grid;gap:8px}
+.sp-section-title{font-size:16px;color:#fce38a}
+.sp-section-title.closed{margin-top:18px;display:block}
+.sp-empty{color:#8fa0c0;font-size:12px}
+.sp-row{padding:12px;border:1px solid rgba(255,255,255,.1);border-radius:12px;background:rgba(255,255,255,.04);cursor:pointer}
+.sp-row.unread{border-color:rgba(252,227,138,.5)}
+.sp-row-head,.sp-thread-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.sp-row-head b{color:#fce38a;font-size:13px}
+.sp-row-time{color:#8fa0c0;font-size:11px;margin-inline-start:auto}
+.sp-badge{padding:3px 9px;border-radius:999px;border:1px solid;font-size:11px;font-weight:700}
+.sp-badge.unread{border:none;background:rgba(255,142,152,.15);color:#ff8e98}
+.sp-thread-subject{font-size:15px;color:#fce38a}
+.sp-msgs{margin-top:14px;display:grid;gap:10px}
+.sp-msg{padding:12px;border:1px solid rgba(76,211,154,.3);border-radius:12px;background:rgba(255,255,255,.04)}
+.sp-msg.mine{border-color:rgba(252,227,138,.3)}
+.sp-msg-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.sp-msg-head b{color:#4CD39A;font-size:12px}
+.sp-msg.mine .sp-msg-head b{color:#fce38a}
+.sp-msg-head span{color:#8fa0c0;font-size:11px}
+.sp-msg-body{margin-top:8px;font-size:13px;line-height:1.8;color:#e8eef7;white-space:pre-line}
+.sp-reply{margin-top:14px;display:grid;gap:10px}

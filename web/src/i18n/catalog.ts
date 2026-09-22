@@ -16,7 +16,8 @@ export type Feature =
   | 'news'
   | 'performance'
   | 'wallet'
-  | 'intelligence';
+  | 'intelligence'
+  | 'support';
 
 export type Messages = Record<string, string>;
 
@@ -40,6 +41,7 @@ const loaders: Record<LocaleCode, Record<Feature, () => Promise<{ default: Chunk
     performance: () => import('../../messages/fa/performance.json'),
     wallet: () => import('../../messages/fa/wallet.json'),
     intelligence: () => import('../../messages/fa/intelligence.json'),
+    support: () => import('../../messages/fa/support.json'),
   },
   en: {
     common: () => import('../../messages/en/common.json'),
@@ -53,6 +55,7 @@ const loaders: Record<LocaleCode, Record<Feature, () => Promise<{ default: Chunk
     performance: () => import('../../messages/en/performance.json'),
     wallet: () => import('../../messages/en/wallet.json'),
     intelligence: () => import('../../messages/en/intelligence.json'),
+    support: () => import('../../messages/en/support.json'),
   },
 };
 

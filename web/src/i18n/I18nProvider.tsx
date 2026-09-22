@@ -28,6 +28,8 @@ export interface I18n {
   /** Legacy `VeloraLocale.status(code)` → t('status.<code>', null, code) */
   status: (code: unknown) => string;
   setLocale: (locale: LocaleCode) => Promise<void>;
+  /** Load extra message chunks for the current page (legacy `data-i18n-features`). */
+  ensureFeatures: (features: Feature[]) => Promise<void>;
   number: (v: unknown, o?: Intl.NumberFormatOptions) => string;
   currency: (v: unknown, c?: string, o?: Intl.NumberFormatOptions) => string;
   percent: (v: unknown, o?: Intl.NumberFormatOptions) => string;
@@ -96,12 +98,15 @@ export function I18nProvider({
   const [locale, setLocaleState] = useState<LocaleCode>(LOCALE_REGISTRY.defaultLocale);
   const [ready, setReady] = useState(false);
   const [, bump] = useState(0);
+  const [extra, setExtra] = useState<Feature[]>([]);
   const featureKey = features.join(',');
   const featuresRef = useRef(features);
   featuresRef.current = features;
 
+  const extraRef = useRef(extra);
+  extraRef.current = extra;
   const load = useCallback(async (next: LocaleCode) => {
-    const wanted = Array.from(new Set<Feature>(['common', 'errors', ...featuresRef.current]));
+    const wanted = Array.from(new Set<Feature>(['common', 'errors', ...featuresRef.current, ...extraRef.current]));
     await loadFeatures(next, wanted);
     if (next !== LOCALE_REGISTRY.fallbackLocale) await loadFeatures(LOCALE_REGISTRY.fallbackLocale, wanted);
   }, []);
@@ -152,6 +157,15 @@ export function I18nProvider({
     [load],
   );
 
+  const ensure = useCallback(async (more: Feature[]) => {
+    const missing = more.filter((f) => !hasFeatures(locale, [f]) || !hasFeatures(LOCALE_REGISTRY.fallbackLocale, [f]));
+    setExtra((prev) => (more.every((f) => prev.includes(f)) ? prev : Array.from(new Set([...prev, ...more]))));
+    if (!missing.length) return;
+    await loadFeatures(locale, missing);
+    if (locale !== LOCALE_REGISTRY.fallbackLocale) await loadFeatures(LOCALE_REGISTRY.fallbackLocale, missing);
+    bump((n) => n + 1);
+  }, [locale]);
+
   const value = useMemo<I18n>(() => {
     const t: I18n['t'] = (key, params, fallback) => {
       let msg = lookup(locale, key);
@@ -176,6 +190,7 @@ export function I18nProvider({
       ready: ready && hasFeatures(locale, ['common', 'errors']),
       t,
       setLocale: (l) => setLocale(l),
+      ensureFeatures: ensure,
       number: (v, o) => F.fmtNumber(locale, v, o),
       currency: (v, c, o) => F.fmtCurrency(locale, v, c, o),
       percent: (v, o) => F.fmtPercent(locale, v, o),
@@ -185,7 +200,7 @@ export function I18nProvider({
       tradeDate: (u, w, o) => F.fmtTradeDate(locale, u, w, o),
       relative: (v, b) => F.fmtRelative(locale, v, b),
     };
-  }, [locale, ready, setLocale]);
+  }, [locale, ready, setLocale, ensure]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -210,3 +225,12 @@ if(!r){try{r=n(localStorage.getItem(S))}catch(e){}}
 if(!r){var ls=navigator.languages&&navigator.languages.length?navigator.languages:[navigator.language||''];r=n(ls[0])}
 if(!r)r='fa';var d=document.documentElement;d.lang=L[r][0];d.dir=L[r][1];d.setAttribute('data-locale',r);d.setAttribute('data-direction',L[r][1]);d.setAttribute('data-numbering','latn');d.classList.add('velora-locale-booting');
 setTimeout(function(){d.classList.remove('velora-locale-booting')},4000);}catch(e){}})();`;
+
+/** Per-page chunk loading — mirrors legacy `<html data-i18n-features="...">`. */
+export function useLocaleFeatures(features: Feature[]): void {
+  const { ensureFeatures, locale } = useI18n();
+  const key = features.join(',');
+  useEffect(() => {
+    void ensureFeatures(key.split(',').filter(Boolean) as Feature[]);
+  }, [ensureFeatures, key, locale]);
+}

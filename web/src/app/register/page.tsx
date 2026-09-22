@@ -4,6 +4,7 @@ import React, { useRef, useState } from 'react';
 import './legacy.css';
 import * as api from '@/lib/api/client';
 import { useI18n } from '@/i18n/I18nProvider';
+import { PasswordField } from '@/components/ui/PasswordField';
 import { AuthPageFrame } from '@/components/auth/AuthPageFrame';
 import { BrandLogo } from '@/components/brand/LogoMark';
 import { useCooldown, useTimedMessage } from '@/lib/hooks/useTimedFlag';
@@ -19,7 +20,6 @@ function pad(n: number) { return String(n).padStart(2, '0'); }
 
 export default function RegisterPage() {
   const { t, locale, errorMessage, number } = useI18n();
-  const [showPass, setShowPass] = useState(false);
   const [passValue, setPassValue] = useState('');
   const error = useTimedMessage<string>(900);
   const [busy, setBusy] = useState(false);
@@ -165,18 +165,13 @@ export default function RegisterPage() {
               </div>
               <div className="field">
                 <label htmlFor="password">{t('common.password.656eabeb', null, 'رمز عبور')}</label>
-                <div className="input-wrap">
+                <PasswordField
+                  ref={passRef} autoComplete="new-password" id="password" name="password" required
+                  placeholder={t('common.minimum.8.characters.0a76ac5c', null, 'حداقل 8 کاراکتر')}
+                  onInput={(e) => { setPassValue((e.target as HTMLInputElement).value); setHintTouched(true); }}
+                  toggleLabel={t('common.show.password.9daec630', null, 'نمایش رمز')} icon={<RegEyeIcon />}>
                   <span className="icon"><RegLockIcon /></span>
-                  <input
-                    ref={passRef} autoComplete="new-password" id="password" name="password" required
-                    placeholder={t('common.minimum.8.characters.0a76ac5c', null, 'حداقل 8 کاراکتر')}
-                    type={showPass ? 'text' : 'password'}
-                    onInput={(e) => { setPassValue((e.target as HTMLInputElement).value); setHintTouched(true); }}
-                  />
-                  <button aria-label={t('common.show.password.9daec630', null, 'نمایش رمز')} className="toggle" id="togglePass" type="button" onClick={() => setShowPass((v) => !v)}>
-                    <RegEyeIcon />
-                  </button>
-                </div>
+                </PasswordField>
                 <div className="meter"><div className={meterClass} id="meterFill" /></div>
                 <div className={hintClass} id="passHint">{hintText}</div>
               </div>
