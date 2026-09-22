@@ -6,7 +6,7 @@
 // across processes. A "SELECT then INSERT if absent" in application code
 // cannot make that guarantee.
 import type { Pool } from "pg";
-import { poolQuery, iso, type QueryFn } from "../persistence/pg.js";
+import { isUniqueViolation, poolQuery, iso, type QueryFn } from "../persistence/pg.js";
 import type {
   ProvisioningOperation,
   ProvisioningReserveInput,
@@ -95,22 +95,48 @@ export class PgProvisioningStore implements ProvisioningStore {
     // ON CONFLICT DO NOTHING returns zero rows when the operation already
     // exists — that is the signal that this caller is a duplicate, and it is
     // produced by the UNIQUE index rather than by a racy pre-check.
-    const inserted = await this.q(
-      `INSERT INTO provisioning_operations
-         (user_id, account_id, operation_key, provider_marker, transaction_id,
-          status, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,'PENDING',$6,$6)
-       ON CONFLICT (user_id, operation_key) DO NOTHING
-       RETURNING *`,
-      [
-        input.userId,
-        input.accountId,
-        input.operationKey,
-        input.providerMarker,
-        input.transactionId,
-        input.now,
-      ],
-    );
+    //
+    // WHY THE try/catch IS REQUIRED (defect found by the pass-2 evidence sweep).
+    // `provisioning_operations` carries TWO unique indexes: (user_id,
+    // operation_key) — the arbiter named below — and `provider_marker`. An
+    // `ON CONFLICT` clause only absorbs a violation of the index it names; a
+    // violation of any OTHER unique index aborts the statement with 23505. Two
+    // concurrent reserves that carry the same operation AND the same marker (the
+    // normal case: a retried request) can therefore race into a 23505 on
+    // `provider_marker` instead of converging — and whether that happens depends
+    // on which index the insertion path reports first, i.e. it is TIMING
+    // DEPENDENT. It surfaced as an intermittent failure of the D-"concurrency:
+    // two simultaneous reserves converge on ONE operation" battery: green on
+    // three consecutive isolated runs, red in two full-suite sweeps.
+    //
+    // The recovery is the SAME one the zero-row case already uses (read the row
+    // back and report created=false) — never an invented value. A 23505 that is
+    // NOT accompanied by a readable existing row is rethrown, so a genuine
+    // duplicate cannot be silently swallowed here.
+    let inserted;
+    try {
+      inserted = await this.q(
+        `INSERT INTO provisioning_operations
+           (user_id, account_id, operation_key, provider_marker, transaction_id,
+            status, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,'PENDING',$6,$6)
+         ON CONFLICT (user_id, operation_key) DO NOTHING
+         RETURNING *`,
+        [
+          input.userId,
+          input.accountId,
+          input.operationKey,
+          input.providerMarker,
+          input.transactionId,
+          input.now,
+        ],
+      );
+    } catch (err) {
+      if (!isUniqueViolation(err, "provisioning_operations")) throw err;
+      const raced = await this.findByKey(input.userId, input.operationKey);
+      if (raced === null) throw err;
+      return { operation: raced, created: false };
+    }
     const row = inserted[0];
     if (row !== undefined) {
       return { operation: mapOperation(row), created: true };

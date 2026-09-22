@@ -395,6 +395,11 @@ test("AUD-03 atomicity — real PostgreSQL", { skip: URL === undefined ? "DATABA
 
   const pool = new Pool({ connectionString: URL });
   try {
+    // ISOLATION (pass 2): this harness ALSO resets. It previously relied on the
+    // previous test having left a clean database, which made the file's outcome
+    // depend on its own internal ordering rather than on its fixtures.
+    await resetSchema(pool);
+
     const PROVIDER_ID = "AUD03-provider-account";
 
     /**
