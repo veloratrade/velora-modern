@@ -6,10 +6,17 @@ const nextConfig = {
   poweredByHeader: false,
   // Legacy pages are served at /<route>/ (trailing slash). Preserve URL shape.
   trailingSlash: true,
+  // Do NOT let the trailing-slash rule 308-redirect API calls (a redirected POST
+  // loses its body/method). Page URLs still get the slash via the rewrite below.
+  skipTrailingSlashRedirect: true,
   async rewrites() {
     // Development/same-origin proxy only. The Fastify backend keeps its own
     // security headers and authentication contract; nothing is re-implemented here.
-    return [{ source: '/api/:path*', destination: `${API_ORIGIN}/api/:path*` }];
+    return {
+      beforeFiles: [{ source: '/api/:path*', destination: `${API_ORIGIN}/api/:path*` }],
+      afterFiles: [],
+      fallback: [],
+    };
   },
 };
 

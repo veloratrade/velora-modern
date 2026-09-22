@@ -95,8 +95,10 @@
 /* Approved avatar 08 — Precision Ring */
 .pg-profile .p-av, .pg-profile .sb-user .av, .pg-profile .mobile-top .av{position:relative;background:#111217!important;border:1px dashed #f2d27c!important;box-shadow:0 0 0 6px rgba(211,170,80,.10),0 0 28px rgba(211,170,80,.25)!important;color:#fff0bd!important}.pg-profile .p-av:before, .pg-profile .sb-user .av:before, .pg-profile .mobile-top .av:before{content:'';position:absolute;inset:8px;border:1px solid rgba(211,170,80,.35);border-radius:50%;pointer-events:none}.pg-profile .sb-user .av:before, .pg-profile .mobile-top .av:before{inset:5px}
 
-/* ---- legacy <style> block 3 (dfd2a3f3) ---- */
-.pg-profile .shared-side-brand, .pg-profile .shared-side-nav{display:none}@media(min-width:981px){.pg-profile .sb-logo, .pg-profile .sb-nav, .pg-profile .sb-user{display:none!important}.pg-profile .sidebar{width:270px!important;padding:25px 17px!important;background:linear-gradient(180deg,#0e1a33,#060a14)!important;border-left:1px solid rgba(212,175,55,.35)!important}.pg-profile .shared-side-brand{display:block;font:bold 23px Arial;letter-spacing:5px;color:#fff0bd;padding:3px 8px 34px}.pg-profile .shared-side-brand b{color:#ffd36c;font-size:30px}.pg-profile .shared-side-nav{display:flex;flex-direction:column;gap:5px;flex:1}.pg-profile .shared-side-nav a{display:flex;align-items:center;gap:12px;padding:13px;color:#f4df9f;text-decoration:none;border-radius:10px;font-size:13px;font-weight:bold}.pg-profile .shared-side-nav a.active{color:#fff;border:1px solid #e9c75e88;background:#d3aa5025}.pg-profile .shared-side-nav .ico{width:19px;color:#ffd36c;font:19px Arial;text-shadow:0 0 7px #ffd36c88}.pg-profile .shared-side-user{margin-top:auto;border:1px solid #fff2;border-radius:12px;padding:12px;background:#08101d77;font-size:12px}.pg-profile .shared-side-user small{display:block;color:#adb6c5;margin-top:5px;font-size:10px}}
+/* DEVIATION (owner decision D1): legacy block `shared-sidebar-profile` is intentionally NOT ported.
+   In legacy it hides .sb-logo/.sb-nav/.sb-user on desktop in favour of `.shared-side-*` markup that
+   no longer exists in profile/index.html, leaving an empty sidebar (legacy bug). Dropping it restores
+   the shared sidebar identical to every other app page. */
 /* [block 4 55466e76] shared shell CSS — see src/styles/shell.css */
 
 /* [block 5 ee3c44d9] shared shell CSS — see src/styles/shell.css */
