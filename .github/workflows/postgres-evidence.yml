@@ -132,6 +132,7 @@ jobs:
           run_battery pgRateLimitStore
           run_battery pgQuota
           run_battery extendedCapabilities
+          run_battery fxRatesIngestion
         env:
           DATABASE_URL: postgres://${{ env.PGTEST_USER }}:${{ env.PGTEST_PASSWORD }}@${{ env.PGTEST_HOST }}:${{ env.PGTEST_PORT }}/${{ env.PGTEST_DB }}
       - name: D4 real-PostgreSQL trade-concurrency battery (service-level races)
