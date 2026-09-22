@@ -216,7 +216,14 @@ jobs:
           run_battery syncSubstrate
           run_battery readinessSchema
           run_battery migrateCli
+          # Pass 3 — the completion pass. Each of these is a capability that
+          # existed only as a boundary before this pass: copy-signal dispatch
+          # (v2.5), the async analytics writer (roadmap §3) and developer-key
+          # authentication (v3.0).
+          run_battery copyDispatch
+          run_battery analyticsRecompute
+          run_battery developerKeyAuth
         env:
           DATABASE_URL: postgres://${{ env.PGTEST_USER }}:${{ env.PGTEST_PASSWORD }}@${{ env.PGTEST_HOST }}:${{ env.PGTEST_PORT }}/${{ env.PGTEST_DB }}
       - name: Scope note
-        run: echo "D1 smoke + D2/D3 store batteries + D4 trade-concurrency + D5 roles/privilege battery + the pass-2 migrated-capability and audit/credential/MetaAPI batteries. The PGlite dev battery runs via ci.yml. D5 proves privilege authorization via SET ROLE, NOT login authentication; full-battery real-PG coverage remains D6. Every battery is asserted on # tests (recounted from source), # skipped 0 and # fail 0."
+        run: echo "D1 smoke + D2/D3 store batteries + D4 trade-concurrency + D5 roles/privilege battery + the pass-2 migrated-capability and audit/credential/MetaAPI batteries + the pass-3 copy-dispatch/analytics-recompute/developer-key batteries. The PGlite dev battery runs via ci.yml. D5 proves privilege authorization via SET ROLE, NOT login authentication; full-battery real-PG coverage remains D6. Every battery is asserted on # tests (recounted from source), # skipped 0 and # fail 0."

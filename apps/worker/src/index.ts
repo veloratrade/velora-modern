@@ -22,11 +22,18 @@ import { createPgBossQueue } from "./queue/pgBossAdapter.js";
 import { safeLogFields } from "./observability/safeLog.js";
 import { createHandlerRegistry } from "./handlers/registry.js";
 import { createMetaApiSyncHandler } from "./handlers/metaApiSyncHandler.js";
-import { METAAPI_SYNC_JOB_CLASS } from "@velora/contracts";
+import { DEFAULT_JOB_POLICIES, METAAPI_SYNC_JOB_CLASS } from "@velora/contracts";
 import type { MetaApiSyncPayload } from "@velora/contracts";
 import { runSyncTick, SYNC_TICK_JOB_CLASS, DEFAULT_SYNC_CRON } from "./scheduler/syncScheduler.js";
 import { runFxTick, FX_TICK_JOB_CLASS, FX_RATES_JOB_CLASS, DEFAULT_FX_CRON } from "./scheduler/fxScheduler.js";
 import { fetchText, makeFxRatesHandler, poolRateQuery } from "./handlers/fxRatesHandler.js";
+import { PgSignalQueue, poolQueryFn } from "./copytrading/signalQueue.js";
+import { COPY_SIGNAL_JOB_CLASS, createCopyDispatchHandler } from "./copytrading/copyDispatchHandler.js";
+import { resolveCopyTransport } from "./copytrading/transports.js";
+import { COPY_TICK_JOB_CLASS, DEFAULT_COPY_CRON, runCopyTick } from "./scheduler/copyScheduler.js";
+import { poolAggregateQuery, recomputeUserAnalytics } from "./analytics/dailyRecompute.js";
+import { ANALYTICS_RECOMPUTE_JOB_CLASS, createAnalyticsRecomputeHandler } from "./handlers/analyticsRecomputeHandler.js";
+import { ANALYTICS_TICK_JOB_CLASS, DEFAULT_ANALYTICS_CRON, runAnalyticsTick } from "./scheduler/analyticsScheduler.js";
 
 // Explicit registration (B10-c). MetaAPI historical sync is the first — and
 // currently only — authorized production job class.
@@ -68,6 +75,52 @@ if (databaseUrl) {
   // not scheduled below).
   registry.register(FX_RATES_JOB_CLASS, makeFxRatesHandler({ q: poolRateQuery(pool), fetchText }));
 
+  // ASYNC ANALYTICS PRE-AGGREGATION (roadmap §3 "Decoupled Analytics Engine").
+  // Registered UNCONDITIONALLY: it needs no provider credential — only the
+  // database it already has — and the roadmap's pivot ("never compute Sharpe /
+  // expectancy / drawdown during request execution") is only real if something
+  // actually writes the pre-aggregates.
+  const aggregateQuery = poolAggregateQuery(pool);
+  registry.register(
+    ANALYTICS_RECOMPUTE_JOB_CLASS,
+    createAnalyticsRecomputeHandler({ q: aggregateQuery, log }),
+  );
+
+  // COPY-TRADING DISPATCH (v2.5). Registered ONLY when a transport exists.
+  //
+  // There is no transport in this build (see copytrading/transports.ts): the
+  // live step needs the installation's MetaAPI platform token or an EA command
+  // channel, and a transport that reported success without delivering would make
+  // `signal_queue.status='acked'` a lie. With no transport the handler is NOT
+  // registered, so the worker never claims a signal it cannot deliver — the same
+  // fail-closed rule the MetaAPI handler applies to a missing token.
+  const copyResolution = resolveCopyTransport();
+  if (copyResolution.requested !== null) {
+    log({
+      level: "warn",
+      event: "copy.transport_unavailable",
+      code: "TRANSPORT_NOT_IMPLEMENTED",
+      count: 0,
+    });
+  }
+  const copyTransport = copyResolution.transport;
+  if (copyTransport !== null) {
+    const signals = new PgSignalQueue(poolQueryFn(pool));
+    registry.register(
+      COPY_SIGNAL_JOB_CLASS,
+      createCopyDispatchHandler({
+        queue: signals,
+        transport: copyTransport,
+        log,
+        leaseSeconds: DEFAULT_JOB_POLICIES.sync.leaseMs / 1000,
+      }),
+    );
+    registry.register(COPY_TICK_JOB_CLASS, async () => {
+      const enqueued = await runCopyTick(signals, queue);
+      log({ level: "info", event: "scheduler.copy_tick", count: enqueued });
+    });
+  }
+
   if (registry.size === 0) {
     // Fail loudly rather than idling forever looking healthy. pg-boss v10 needs
     // concrete queue names to poll, so a worker with no registered class has
@@ -85,7 +138,7 @@ if (databaseUrl) {
   // by the owner bootstrap path (db/provision.ts); naming them here only
   // tells the adapter which queues to poll.
   const queue = await createPgBossQueue(databaseUrl, {
-    jobClasses: [...registry.jobClasses(), SYNC_TICK_JOB_CLASS, FX_TICK_JOB_CLASS],
+    jobClasses: [...registry.jobClasses(), SYNC_TICK_JOB_CLASS, FX_TICK_JOB_CLASS, ANALYTICS_TICK_JOB_CLASS, COPY_TICK_JOB_CLASS],
   });
 
   // --- Scheduled producer (pg-boss NATIVE cron) ---------------------------
@@ -128,6 +181,31 @@ if (databaseUrl) {
   } catch (err) {
     log({ level: "warn", event: "scheduler.unavailable", errorCode: "UNKNOWN" });
     void err;
+  }
+
+  // Hourly analytics recompute tick.
+  registry.register(ANALYTICS_TICK_JOB_CLASS, async () => {
+    const enqueued = await runAnalyticsTick(aggregateQuery, queue);
+    log({ level: "info", event: "scheduler.analytics_tick", count: enqueued });
+  });
+  try {
+    await queue.schedule(ANALYTICS_TICK_JOB_CLASS, DEFAULT_ANALYTICS_CRON);
+    log({ level: "info", event: "scheduler.registered", jobClass: ANALYTICS_TICK_JOB_CLASS });
+  } catch (err) {
+    log({ level: "warn", event: "scheduler.unavailable", errorCode: "UNKNOWN" });
+    void err;
+  }
+
+  // The copy tick is scheduled only with its handler (a tick that enqueues jobs
+  // nobody can execute manufactures work to abandon).
+  if (registry.has(COPY_SIGNAL_JOB_CLASS)) {
+    try {
+      await queue.schedule(COPY_TICK_JOB_CLASS, DEFAULT_COPY_CRON);
+      log({ level: "info", event: "scheduler.registered", jobClass: COPY_TICK_JOB_CLASS });
+    } catch (err) {
+      log({ level: "warn", event: "scheduler.unavailable", errorCode: "UNKNOWN" });
+      void err;
+    }
   }
 
   // G-3: the sink emits only allow-listed fields. The runner already restricts

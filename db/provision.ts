@@ -203,8 +203,22 @@ export interface ProvisionOptions {
  * reason — omitting it is a silent-failure trap, not a harmless detail.
  */
 export const PGBOSS_QUEUES = [
+  // MetaAPI sync (v0.2/v2.0)
   "metaapi.sync-account",
   "metaapi.sync-tick",
+  // FX reference rates (v1.5) — scheduled since pass 2, but never pre-created:
+  // the worker role holds no CREATE privilege, so a scheduled job whose queue
+  // does not exist cannot run. (Pass-3 finding: the omission was silent.)
+  "fx.ecb-rates",
+  "fx.ecb-tick",
+  // Async analytics pre-aggregation (roadmap §3)
+  "analytics.recompute-daily",
+  "analytics.recompute-tick",
+  // Copy-trading dispatch (v2.5). The tick and the handler are only SCHEDULED
+  // when a transport is configured, but the queues are created here for the same
+  // reason as the FX pair above.
+  "copy.signal-dispatch",
+  "copy.signals-tick",
   "velora.dlq",
   "__pgboss__send-it",
 ] as const;
