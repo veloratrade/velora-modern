@@ -745,7 +745,9 @@ test("prop-status reports the 80% alert separately from a breach", async () => {
     new Map(),
     new Map([
       [
-        "9",
+        // Keyed by `${userId}:${accountId}` — the store's single lookup rule,
+        // shared by the evaluator (prop-status) and the CRUD surface.
+        "1:9",
         {
           ruleSetName: "FTMO 100k",
           maxDailyDrawdown: "5000.00",
@@ -1136,6 +1138,210 @@ test("copy-trading: the LEADER is derived server-side, and status changes are au
       assert.equal(listed.data.relationships.length, 1);
     },
     { tenancy: store },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// v1.5 — account groups and prop rules (roadmap-named routes)
+// ---------------------------------------------------------------------------
+
+const accountRow = (accountId: string) => ({
+  accountId,
+  label: `Account ${accountId}`,
+  currency: "USD",
+  provider: "MT5",
+  syncState: "CONNECTED",
+  balance: "10000.00",
+  equity: "10000.00",
+  startingBalance: "10000.00",
+  peakEquity: "10000.00",
+});
+
+test("account groups: create, list, update membership, delete — ownership scoped", async () => {
+  const store = new MemoryPortfolioStore([accountRow("9"), accountRow("10")], []);
+  store.addAccounts("1", [accountRow("9"), accountRow("10")]);
+  store.addAccounts("2", [accountRow("77")]);
+  await withServer(
+    async ({ base }) => {
+      const created = await fetch(`${base}/api/v1/account-groups`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        body: JSON.stringify({ name: "  Eval accounts  ", description: "prop evaluations", account_ids: ["9", "10"] }),
+      });
+      assert.equal(created.status, 201);
+      const createdBody = await json(created);
+      assert.equal(createdBody.data["name"], "Eval accounts", "the name is trimmed, not stored raw");
+      assert.deepEqual(createdBody.data["accountIds"], ["9", "10"]);
+      const groupId = String(createdBody.data["groupId"]);
+
+      const duplicate = await fetch(`${base}/api/v1/account-groups`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        body: JSON.stringify({ name: "Eval accounts" }),
+      });
+      assert.equal(duplicate.status, 409);
+      assert.equal((await json(duplicate)).error?.code, "GROUP_NAME_EXISTS");
+
+      // Grouping an account the caller does not own is non-disclosing 404 — the
+      // roadmap's own v1.5 security clause ("users can only group accounts they
+      // explicitly own").
+      const foreign = await fetch(`${base}/api/v1/account-groups`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        body: JSON.stringify({ name: "Stolen", account_ids: ["77"] }),
+      });
+      assert.equal(foreign.status, 404);
+
+      const badName = await fetch(`${base}/api/v1/account-groups`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        body: JSON.stringify({ name: "   " }),
+      });
+      assert.equal(badName.status, 400);
+
+      const duplicatedIds = await fetch(`${base}/api/v1/account-groups`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        body: JSON.stringify({ name: "Dup", account_ids: ["9", "9"] }),
+      });
+      assert.equal(duplicatedIds.status, 400);
+
+      const listed = await json<{ groups: Record<string, unknown>[] }>(
+        await fetch(`${base}/api/v1/account-groups`, H(tokenFor("1"))),
+      );
+      assert.equal(listed.data.groups.length, 1);
+
+      // An empty membership is legitimate — a group can exist before accounts are
+      // assigned to it.
+      const emptied = await fetch(`${base}/api/v1/account-groups/${groupId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        body: JSON.stringify({ name: "Eval accounts", account_ids: [] }),
+      });
+      assert.equal(emptied.status, 200);
+      assert.deepEqual((await json(emptied)).data["accountIds"], []);
+
+      // Another user sees nothing of it and cannot touch it.
+      const foreignList = await json<{ groups: Record<string, unknown>[] }>(
+        await fetch(`${base}/api/v1/account-groups`, H(tokenFor("2"))),
+      );
+      assert.equal(foreignList.data.groups.length, 0);
+      const foreignDelete = await fetch(`${base}/api/v1/account-groups/${groupId}`, {
+        method: "DELETE",
+        headers: AUTH(tokenFor("2")),
+      });
+      assert.equal(foreignDelete.status, 404, "non-disclosing: not yours == not found");
+      const foreignUpdate = await fetch(`${base}/api/v1/account-groups/${groupId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("2")) },
+        body: JSON.stringify({ name: "Hijacked" }),
+      });
+      assert.equal(foreignUpdate.status, 404);
+
+      const unauthenticated = await fetch(`${base}/api/v1/account-groups`);
+      assert.equal(unauthenticated.status, 401);
+
+      const deleted = await fetch(`${base}/api/v1/account-groups/${groupId}`, {
+        method: "DELETE",
+        headers: AUTH(tokenFor("1")),
+      });
+      assert.equal(deleted.status, 204);
+      const gone = await fetch(`${base}/api/v1/account-groups/${groupId}`, {
+        method: "DELETE",
+        headers: AUTH(tokenFor("1")),
+      });
+      assert.equal(gone.status, 404);
+    },
+    { portfolio: store },
+  );
+});
+
+test("prop rules: PUT upserts, GET reads back, and every constraint is validated at the edge", async () => {
+  const store = new MemoryPortfolioStore([accountRow("9")], []);
+  store.addAccounts("1", [accountRow("9")]);
+  await withServer(
+    async ({ base }) => {
+      const missing = await fetch(`${base}/api/v1/prop-rules/9`, H(tokenFor("1")));
+      assert.equal(missing.status, 404, "no rule set yet");
+
+      const bad = await fetch(`${base}/api/v1/prop-rules/9`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        body: JSON.stringify({ rule_set_name: "FTMO", max_total_drawdown: "1000.00", drawdown_basis: "weekly" }),
+      });
+      assert.equal(bad.status, 400);
+      assert.equal((await json(bad)).error?.code, "VALIDATION_FAILED");
+
+      const noLimits = await fetch(`${base}/api/v1/prop-rules/9`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        body: JSON.stringify({ rule_set_name: "FTMO" }),
+      });
+      assert.equal(noLimits.status, 400, "a rule set with no limit is not a rule set");
+
+      const negative = await fetch(`${base}/api/v1/prop-rules/9`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        body: JSON.stringify({ rule_set_name: "FTMO", max_total_drawdown: "0.00" }),
+      });
+      assert.equal(negative.status, 400, "0018 requires > 0 when present");
+
+      const badThreshold = await fetch(`${base}/api/v1/prop-rules/9`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        body: JSON.stringify({ rule_set_name: "FTMO", max_total_drawdown: "1000.00", alert_threshold_pct: "150.00" }),
+      });
+      assert.equal(badThreshold.status, 400);
+
+      const good = await fetch(`${base}/api/v1/prop-rules/9`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        body: JSON.stringify({
+          rule_set_name: "FTMO 100k",
+          max_daily_drawdown: "500.00",
+          max_total_drawdown: "1000.00",
+          profit_target: "8000.00",
+          drawdown_basis: "equity",
+          alert_threshold_pct: "80.00",
+          daily_reset_time: "22:00",
+          daily_reset_tz: "Asia/Tehran",
+        }),
+      });
+      assert.equal(good.status, 200);
+      const goodBody = await json(good);
+      assert.equal(goodBody.data["ruleSetName"], "FTMO 100k");
+      assert.equal(goodBody.data["maxDailyDrawdown"], "500.00");
+      assert.equal(goodBody.data["drawdownBasis"], "equity");
+      assert.equal(goodBody.data["dailyResetTime"], "22:00:00", "a bare HH:MM is normalized to the column's TIME shape");
+      assert.equal(goodBody.data["dailyResetTz"], "Asia/Tehran");
+
+      // Idempotent: the same PUT twice does not create a second rule set.
+      const again = await fetch(`${base}/api/v1/prop-rules/9`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        body: JSON.stringify({ rule_set_name: "FTMO 100k", max_total_drawdown: "1200.00" }),
+      });
+      assert.equal(again.status, 200);
+      const readBack = await json(await fetch(`${base}/api/v1/prop-rules/9`, H(tokenFor("1"))));
+      assert.equal(readBack.data["maxTotalDrawdown"], "1200.00");
+      assert.equal(readBack.data["maxDailyDrawdown"], null, "an omitted limit is reset, not silently kept");
+
+      // Ownership: another user's account is a non-disclosing 404, for both verbs.
+      const foreignGet = await fetch(`${base}/api/v1/prop-rules/9`, H(tokenFor("2")));
+      assert.equal(foreignGet.status, 404);
+      const foreignPut = await fetch(`${base}/api/v1/prop-rules/9`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("2")) },
+        body: JSON.stringify({ rule_set_name: "Hijack", max_total_drawdown: "1.00" }),
+      });
+      assert.equal(foreignPut.status, 404);
+
+      const unauthenticated = await fetch(`${base}/api/v1/prop-rules/9`);
+      assert.equal(unauthenticated.status, 401);
+      const nonNumeric = await fetch(`${base}/api/v1/prop-rules/abc`, H(tokenFor("1")));
+      assert.equal(nonNumeric.status, 400);
+    },
+    { portfolio: store },
   );
 });
 

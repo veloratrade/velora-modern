@@ -669,3 +669,172 @@ test("developer keys: unique hash, scope whitelist, revocation", { skip: SKIP },
     await ctx.close();
   }
 });
+// ---------------------------------------------------------------------------
+// v1.5 — account groups and prop rules (the routes pass 2 added)
+// ---------------------------------------------------------------------------
+
+/** A second account owned by ANOTHER user, for the ownership assertions. */
+async function insertAccount(pool: Pool, userId: string, label: string): Promise<string> {
+  const rows = await pool.query(
+    `INSERT INTO trading_accounts (user_id, provider, platform, label, currency, timezone, timezone_source)
+     VALUES ($1, 'MT5', 'MT5', $2, 'USD', 'UTC', 'account') RETURNING id`,
+    [userId, label],
+  );
+  return String(rows.rows[0].id);
+}
+
+test("PG v1.5: account groups write atomically and 0018 enforces ownership itself", { skip: SKIP }, async () => {
+  const ctx = await harness("groups");
+  try {
+    const store = new PgPortfolioStore(ctx.q);
+    const mine = await insertAccount(ctx.pool, ctx.userId, "groups-mine");
+    const alsoMine = await insertAccount(ctx.pool, ctx.userId, "groups-also-mine");
+    const theirs = await insertAccount(ctx.pool, ctx.otherUserId, "groups-theirs");
+
+    const created = await store.createGroup({
+      userId: ctx.userId,
+      name: "Eval accounts",
+      description: "prop evaluations",
+      accountIds: [mine, alsoMine],
+    });
+    assert.equal(created.ok, true);
+    if (!created.ok) throw new Error("expected the group to be created");
+    assert.deepEqual([...created.group.accountIds].sort(), [mine, alsoMine].sort());
+
+    // 0018's UNIQUE(user_id, name) is the real guard: a duplicate is reported as a
+    // distinguishable reason (the route answers 409), not as a 500.
+    const duplicate = await store.createGroup({ userId: ctx.userId, name: "Eval accounts", description: null, accountIds: [] });
+    assert.deepEqual(duplicate, { ok: false, reason: "duplicate-name" });
+
+    // The composite FK account_group_members(account_id, user_id) →
+    // trading_accounts(id, user_id) refuses a foreign account, which is why the
+    // ownership rule cannot be bypassed by a caller that skips the route's check.
+    const foreign = await store.createGroup({ userId: ctx.userId, name: "Stolen", description: null, accountIds: [theirs] });
+    assert.deepEqual(foreign, { ok: false, reason: "account-not-owned" }, "the DATABASE refuses a foreign account, not just the route");
+    const leaked = await ctx.pool.query("SELECT count(*)::int AS n FROM account_groups WHERE user_id = $1 AND name = 'Stolen'", [ctx.userId]);
+    assert.equal(leaked.rows[0].n, 0, "the failed group left no partial row");
+
+    // A same-named group by ANOTHER user is allowed (the unique key is per user).
+    const otherGroup = await store.createGroup({ userId: ctx.otherUserId, name: "Eval accounts", description: null, accountIds: [theirs] });
+    assert.equal(otherGroup.ok, true);
+
+    // Update replaces membership, and an empty list empties the group.
+    const replaced = await store.updateGroup({ userId: ctx.userId, groupId: created.group.groupId, name: "Renamed", description: null, accountIds: [] });
+    assert.equal(replaced.ok, true);
+    if (!replaced.ok) throw new Error("expected the update to succeed");
+    assert.equal(replaced.group.name, "Renamed");
+    assert.deepEqual([...replaced.group.accountIds], []);
+
+    // The other user's group is invisible to this user, and the predicate keeps it
+    // untouchable (a non-disclosing false).
+    assert.equal(await store.deleteGroup(ctx.userId, String((otherGroup as { group: { groupId: string } }).group.groupId)), false);
+    const stillThere = await store.listGroups(ctx.otherUserId);
+    assert.equal(stillThere.length, 1, "another user's group was not deleted");
+
+    // Deleting cascades to membership (0018 ON DELETE CASCADE) and removes only
+    // the targeted group.
+    assert.equal(await store.deleteGroup(ctx.userId, created.group.groupId), true);
+    assert.equal((await store.listGroups(ctx.userId)).length, 0);
+    const orphans = await ctx.pool.query(
+      "SELECT count(*)::int AS n FROM account_group_members WHERE group_id = $1",
+      [created.group.groupId],
+    );
+    assert.equal(orphans.rows[0].n, 0, "membership rows cascade with the group");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("PG v1.5: prop rules upsert is idempotent and round-trips exact values", { skip: SKIP }, async () => {
+  const ctx = await harness("proprules");
+  try {
+    const store = new PgPortfolioStore(ctx.q);
+    const account = await insertAccount(ctx.pool, ctx.userId, "rules-account");
+    const otherAccount = await insertAccount(ctx.pool, ctx.otherUserId, "rules-theirs");
+
+    const created = await store.upsertRules({
+      userId: ctx.userId,
+      accountId: account,
+      ruleSetName: "FTMO 100k",
+      maxDailyDrawdown: "500.00",
+      maxTotalDrawdown: "1000.00",
+      profitTarget: "8000.00",
+      drawdownBasis: "equity",
+      alertThresholdPct: "80.00",
+      dailyResetTime: "22:00:00",
+      dailyResetTz: "Asia/Tehran",
+    });
+    assert.equal(created.ok, true);
+
+    const read = await store.readRules(account, ctx.userId);
+    assert.equal(read?.ruleSetName, "FTMO 100k");
+    assert.equal(read?.maxDailyDrawdown, "500.00", "NUMERIC(20,2) round-trips at its own scale");
+    assert.equal(read?.drawdownBasis, "equity");
+    assert.equal(read?.alertThresholdPct, "80.00");
+    assert.equal(read?.dailyResetTime, "22:00:00");
+    assert.equal(read?.dailyResetTz, "Asia/Tehran");
+
+    // A second call for the same (account, rule set) UPDATES in place: 0018 has no
+    // unique index over that pair, so "one rule set per account" is upheld by the
+    // store's lookup — and the row count proves it stays one.
+    const again = await store.upsertRules({
+      userId: ctx.userId,
+      accountId: account,
+      ruleSetName: "FTMO 100k",
+      maxDailyDrawdown: null,
+      maxTotalDrawdown: "1200.00",
+      profitTarget: null,
+      drawdownBasis: "balance",
+      alertThresholdPct: "75.00",
+      dailyResetTime: null,
+      dailyResetTz: null,
+    });
+    assert.equal(again.ok, true);
+    const rows = await ctx.pool.query("SELECT count(*)::int AS n FROM prop_firm_rules WHERE account_id = $1", [account]);
+    assert.equal(rows.rows[0].n, 1, "one row, not two");
+    const reread = await store.readRules(account, ctx.userId);
+    assert.equal(reread?.maxTotalDrawdown, "1200.00");
+    assert.equal(reread?.maxDailyDrawdown, null, "cleared values are cleared");
+    assert.equal(reread?.dailyResetTime, null);
+
+    // Ownership: another user's account is refused by the store (the route then
+    // answers non-disclosingly), and no row is written.
+    const foreign = await store.upsertRules({
+      userId: ctx.userId,
+      accountId: otherAccount,
+      ruleSetName: "Hijack",
+      maxDailyDrawdown: null,
+      maxTotalDrawdown: "1.00",
+      profitTarget: null,
+      drawdownBasis: "balance",
+      alertThresholdPct: "80.00",
+      dailyResetTime: null,
+      dailyResetTz: null,
+    });
+    assert.deepEqual(foreign, { ok: false, reason: "account-not-owned" });
+    assert.equal(await store.readRules(otherAccount, ctx.otherUserId), null, "nothing was written for the other account");
+
+    // The evaluator's view and the CRUD view are the same read.
+    assert.deepEqual(await store.propRules(account, ctx.userId), await store.readRules(account, ctx.userId));
+
+    // A value the schema forbids is refused by the DATABASE, not silently stored:
+    // alert_threshold_pct must be > 0 and <= 100.
+    await assert.rejects(
+      () => store.upsertRules({
+        userId: ctx.userId,
+        accountId: account,
+        ruleSetName: "bad-threshold",
+        maxDailyDrawdown: null,
+        maxTotalDrawdown: "10.00",
+        profitTarget: null,
+        drawdownBasis: "balance",
+        alertThresholdPct: "150.00",
+        dailyResetTime: null,
+        dailyResetTz: null,
+      }),
+      (err: { code?: string }) => err.code === "23514",
+    );
+  } finally {
+    await ctx.close();
+  }
+});
