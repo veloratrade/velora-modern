@@ -237,9 +237,9 @@ test("GET /accounts/{id}/sync-status is ownership scoped and non-disclosing", as
 // ---------------------------------------------------------------------------
 
 const analyticsRows: AnalyticsTradeRow[] = [
-  { tradeId: "1", accountId: "7", symbol: "EURUSD", netPnl: "100.00", rMultiple: "2.00000000", day: "2026-01-01", weekday: 2, hour: 9, strategy: "breakout" },
-  { tradeId: "2", accountId: "7", symbol: "EURUSD", netPnl: "-40.00", rMultiple: "-1.00000000", day: "2026-01-02", weekday: 3, hour: 10, strategy: "breakout" },
-  { tradeId: "3", accountId: "7", symbol: "XAUUSD", netPnl: "10.00", rMultiple: null, day: "2026-01-02", weekday: 3, hour: 11, strategy: null },
+  { tradeId: "1", accountId: "7", symbol: "EURUSD", occurredAt: "2026-01-01T09:00:00.000Z", netPnl: "100.00", rMultiple: "2.00000000", day: "2026-01-01", weekday: 2, hour: 9, strategy: "breakout" },
+  { tradeId: "2", accountId: "7", symbol: "EURUSD", occurredAt: "2026-01-02T10:00:00.000Z", netPnl: "-40.00", rMultiple: "-1.00000000", day: "2026-01-02", weekday: 3, hour: 10, strategy: "breakout" },
+  { tradeId: "3", accountId: "7", symbol: "XAUUSD", occurredAt: "2026-01-02T11:00:00.000Z", netPnl: "10.00", rMultiple: null, day: "2026-01-02", weekday: 3, hour: 11, strategy: null },
 ];
 
 test("GET /analytics/summary returns the metric contract, scoped to the caller", async () => {
@@ -295,6 +295,48 @@ test("GET /analytics/heatmap groups by weekday and hour", async () => {
       );
     },
     { analytics: new MemoryAnalyticsStore(analyticsRows) },
+  );
+});
+
+test("analytics windows are instant-bounded: `from` inclusive, `to` exclusive", async () => {
+  const rows = [
+    {
+      tradeId: "1", accountId: "7", symbol: "EURUSD",
+      occurredAt: "2026-01-01T23:59:59.999Z",
+      netPnl: "10.00", rMultiple: "1.00000000", day: "2026-01-01", weekday: 4, hour: 23, strategy: null,
+    },
+    {
+      tradeId: "2", accountId: "7", symbol: "EURUSD",
+      occurredAt: "2026-01-02T00:00:00.000Z",
+      netPnl: "20.00", rMultiple: "1.00000000", day: "2026-01-02", weekday: 5, hour: 0, strategy: null,
+    },
+    {
+      tradeId: "3", accountId: "7", symbol: "EURUSD",
+      occurredAt: "2026-01-02T12:00:00.000Z",
+      netPnl: "30.00", rMultiple: "1.00000000", day: "2026-01-02", weekday: 5, hour: 12, strategy: null,
+    },
+  ];
+  await withServer(
+    async ({ base }) => {
+      // A window starting EXACTLY at a trade's instant includes it ...
+      const fromInclusive = await json(
+        await fetch(`${base}/api/v1/analytics/summary?from=2026-01-02T00:00:00.000Z`, H(tokenFor("1"))),
+      );
+      assert.equal(fromInclusive.data.tradeCount, 2);
+
+      // ... and a window ending exactly at a trade's instant EXCLUDES it.
+      const toExclusive = await json(
+        await fetch(`${base}/api/v1/analytics/summary?to=2026-01-02T12:00:00.000Z`, H(tokenFor("1"))),
+      );
+      assert.equal(toExclusive.data.tradeCount, 2);
+
+      const full = await json(
+        await fetch(`${base}/api/v1/analytics/summary?from=2026-01-01T00:00:00.000Z&to=2026-01-03T00:00:00.000Z`, H(tokenFor("1"))),
+      );
+      assert.equal(full.data.tradeCount, 3);
+      assert.equal(full.data.totalPnl, "60.00", "money stays exact at scale 2");
+    },
+    { analytics: new MemoryAnalyticsStore(rows) },
   );
 });
 
@@ -466,6 +508,67 @@ test("a Stripe webhook with an invalid signature is 400 and changes nothing", as
       assert.equal(linked.status, 200);
       if (previous === undefined) delete process.env["STRIPE_WEBHOOK_SECRET"];
       else process.env["STRIPE_WEBHOOK_SECRET"] = previous;
+    },
+    { subscriptions: subs },
+  );
+});
+
+test("GET /subscriptions/me reports the EFFECTIVE plan and keeps entitlement separate from billing state", async () => {
+  const subs = new MemorySubscriptionStore();
+  await withServer(
+    async ({ base }) => {
+      // A user with no subscription and no plan: the entitlement is FREE and the
+      // billing record is absent — two different facts, reported separately.
+      const free = await json(
+        await fetch(`${base}/api/v1/subscriptions/me`, H(tokenFor("1"))),
+      );
+      assert.equal(free.data["plan"], "free", "the effective plan is free by default");
+      assert.equal(free.data["entitled"], false);
+      assert.equal(free.data["subscription"], null);
+
+      // A purchased but INACTIVE subscription: `subscriptions.plan` says what was
+      // bought, while entitlement follows `users.plan`. Pass 1 returned the
+      // subscription row only, so a downgraded user still looked subscribed and
+      // the two facts were indistinguishable.
+      await subs.upsert({
+        userId: "1",
+        plan: "pro",
+        status: "past_due",
+        provider: "stripe",
+        providerCustomerId: "cus_1",
+        providerSubscriptionId: "sub_1",
+        currentPeriodEnd: null,
+        cancelAtPeriodEnd: false,
+      });
+      const pastDue = await json(
+        await fetch(`${base}/api/v1/subscriptions/me`, H(tokenFor("1"))),
+      );
+      assert.equal(pastDue.data["purchasedPlan"], "pro");
+      assert.equal(pastDue.data["plan"], "free", "entitlement does not follow a past_due purchase");
+      assert.equal(pastDue.data["entitled"], false);
+      assert.equal((pastDue.data["subscription"] as Record<string, unknown>)["status"], "past_due");
+
+      // An ACTIVE subscription with the entitlement granted by the webhook path.
+      await subs.setUserPlan("1", "pro");
+      const active = await json(
+        await fetch(`${base}/api/v1/subscriptions/me`, H(tokenFor("1"))),
+      );
+      assert.equal(active.data["plan"], "pro");
+      assert.equal(active.data["entitled"], true);
+      assert.equal(active.data["purchasedPlan"], "pro");
+
+      // A DOWNGRADE is observable: the entitlement drops even though the billing
+      // record still shows the purchase.
+      await subs.setUserPlan("1", "free");
+      const downgraded = await json(
+        await fetch(`${base}/api/v1/subscriptions/me`, H(tokenFor("1"))),
+      );
+      assert.equal(downgraded.data["plan"], "free");
+      assert.equal(downgraded.data["entitled"], false);
+      assert.equal(downgraded.data["purchasedPlan"], "pro", "the purchase history is not rewritten");
+
+      const unauthenticated = await fetch(`${base}/api/v1/subscriptions/me`);
+      assert.equal(unauthenticated.status, 401);
     },
     { subscriptions: subs },
   );
@@ -710,6 +813,11 @@ test("EA handshake rejects an unknown key and accepts a known one", async () => 
       assert.equal(body.data["account_id"], "11");
       assert.equal("key" in body.data, false, "the handshake never echoes the key");
       assert.equal("ea_api_key_hash" in body.data, false);
+      // The handshake states the scheme that is ACTUALLY enforced. Pass 1
+      // advertised `hmac_required: true` while nothing verified a signature —
+      // a contract claim with no implementation behind it.
+      assert.equal(body.data["auth_scheme"], "bearer-ea-key");
+      assert.equal("hmac_required" in body.data, false, "no phantom signature requirement");
     },
     { ea: eaStore(), eaSync: { requestSync: async () => true } },
   );
@@ -731,6 +839,82 @@ test("EA trade-event is accepted and asks for a sync; a bad body is refused", as
         body: JSON.stringify({ symbol: "" }),
       });
       assert.equal(bad.status, 400);
+    },
+    { ea: eaStore(), eaSync: { requestSync: async () => true } },
+  );
+});
+
+test("EA keys are issued once, rotate on re-issue, and revocation is ownership scoped", async () => {
+  await withServer(
+    async ({ base }) => {
+      // Issuing a key is a HUMAN action (bearer auth), scoped to an account the
+      // caller owns — an EA itself can never mint credentials.
+      const issued = await fetch(`${base}/api/v1/accounts/11/ea-key`, {
+        method: "POST",
+        headers: AUTH(tokenFor("1")),
+      });
+      assert.equal(issued.status, 201);
+      const issuedBody = await json(issued);
+      const key = String(issuedBody.data["ea_key"]);
+      assert.match(key, /^[A-Za-z0-9_-]{20,}$/);
+      assert.equal(issuedBody.data["key_shown_once"], true);
+      assert.equal("ea_api_key_hash" in issuedBody.data, false, "only the hash is stored");
+
+      // The newly issued key authenticates the EA immediately ...
+      const handshake = await fetch(`${base}/api/v1/ea/handshake`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}` },
+      });
+      assert.equal(handshake.status, 200);
+
+      // ... and re-issuing ROTATES: the plaintext is never recoverable, so the
+      // previous key stops working (a lost key is replaced, not revealed).
+      const rotated = await fetch(`${base}/api/v1/accounts/11/ea-key`, {
+        method: "POST",
+        headers: AUTH(tokenFor("1")),
+      });
+      assert.equal(rotated.status, 201);
+      const rotatedKey = String((await json(rotated)).data["ea_key"]);
+      assert.notEqual(rotatedKey, key);
+      const oldKey = await fetch(`${base}/api/v1/ea/handshake`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}` },
+      });
+      assert.equal(oldKey.status, 401, "the rotated-out key no longer authenticates");
+
+      // Another user cannot issue or revoke a key for this account.
+      const foreign = await fetch(`${base}/api/v1/accounts/11/ea-key`, {
+        method: "POST",
+        headers: AUTH(tokenFor("2")),
+      });
+      assert.equal(foreign.status, 404, "non-disclosing: not yours == not found");
+
+      const unauthenticated = await fetch(`${base}/api/v1/accounts/11/ea-key`, { method: "POST" });
+      assert.equal(unauthenticated.status, 401);
+
+      const methodNotAllowed = await fetch(`${base}/api/v1/accounts/11/ea-key`, {
+        method: "PUT",
+        headers: AUTH(tokenFor("1")),
+      });
+      assert.equal(methodNotAllowed.status, 405);
+
+      // Revocation deletes the usable hash, so the key stops authenticating ...
+      const revoked = await fetch(`${base}/api/v1/accounts/11/ea-key`, {
+        method: "DELETE",
+        headers: AUTH(tokenFor("1")),
+      });
+      assert.equal(revoked.status, 204);
+      const afterRevoke = await fetch(`${base}/api/v1/ea/handshake`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${rotatedKey}` },
+      });
+      assert.equal(afterRevoke.status, 401);
+      // ... and revoking twice is a non-disclosing 404, not a silent success.
+      const twice = await fetch(`${base}/api/v1/accounts/11/ea-key`, {
+        method: "DELETE",
+        headers: AUTH(tokenFor("1")),
+      });
+      assert.equal(twice.status, 404);
     },
     { ea: eaStore(), eaSync: { requestSync: async () => true } },
   );
@@ -834,39 +1018,117 @@ test("the public profile endpoint is readable without a token and hides amounts 
   );
 });
 
-test("copy-trading relationships require ownership of the follower account", async () => {
+test("copy-trading: the LEADER is derived server-side, and status changes are authorized", async () => {
   const store = new MemoryTenancyStore();
-  store.addAccount("1", "77");
+  store.addAccount("1", "77"); // follower account, owned by the caller
+  store.addAccount("2", "88"); // leader account, owned by ANOTHER user
   await withServer(
     async ({ base }) => {
+      // A follower account the caller does not own is non-disclosing 404 ...
       const foreign = await fetch(`${base}/api/v1/copy-trading/relationships`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
-        body: JSON.stringify({ leader_user_id: "2", leader_account_id: "88", follower_account_id: "99" }),
+        body: JSON.stringify({ leader_account_id: "88", follower_account_id: "99" }),
       });
       assert.equal(foreign.status, 404);
 
+      // ... and an unknown leader account is reported as such (404), not as a
+      // conflict: the two conditions are distinguishably different failures.
+      const unknownLeader = await fetch(`${base}/api/v1/copy-trading/relationships`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        body: JSON.stringify({ leader_account_id: "1234", follower_account_id: "77" }),
+      });
+      assert.equal(unknownLeader.status, 404);
+
+      // The request carries a FORGED leader_user_id: it must be ignored, because
+      // the leader identity is derived from the leader ACCOUNT row. (Pass-1 took
+      // this field straight from the body and wrote it into the row, which let a
+      // caller name anyone as their leader.)
       const created = await fetch(`${base}/api/v1/copy-trading/relationships`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
-        body: JSON.stringify({ leader_user_id: "2", leader_account_id: "88", follower_account_id: "77" }),
+        body: JSON.stringify({
+          leader_user_id: "1",
+          leader_account_id: "88",
+          follower_account_id: "77",
+          allocation_mode: "proportional",
+          allocation_value: "1.00000000",
+        }),
       });
       assert.equal(created.status, 201);
-      assert.equal((await json(created)).data["status"], "pending");
+      const createdBody = await json(created);
+      assert.equal(createdBody.data["status"], "pending");
+      assert.equal(
+        createdBody.data["leaderUserId"],
+        "2",
+        "the leader identity comes from the ACCOUNT row, never from the request body",
+      );
+      assert.equal(
+        "leader_user_id" in createdBody.data,
+        false,
+        "the response follows this module's camelCase contract",
+      );
+      const relationshipId = String(createdBody.data["id"]);
 
       const duplicate = await fetch(`${base}/api/v1/copy-trading/relationships`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
-        body: JSON.stringify({ leader_user_id: "2", leader_account_id: "88", follower_account_id: "77" }),
+        body: JSON.stringify({ leader_account_id: "88", follower_account_id: "77" }),
       });
       assert.equal(duplicate.status, 409);
 
-      const selfCopy = await fetch(`${base}/api/v1/copy-trading/relationships`, {
-        method: "POST",
+      // A follower cannot activate its own relationship (it would broadcast the
+      // leader's signals on the leader's behalf) ...
+      const followerActivate = await fetch(`${base}/api/v1/copy-trading/relationships/${relationshipId}`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
-        body: JSON.stringify({ leader_user_id: "1", leader_account_id: "88", follower_account_id: "77" }),
+        body: JSON.stringify({ status: "active" }),
       });
-      assert.equal(selfCopy.status, 400);
+      assert.equal(followerActivate.status, 404, "a row the caller may not change is non-disclosing");
+
+      // ... the leader can.
+      const leaderActivate = await fetch(`${base}/api/v1/copy-trading/relationships/${relationshipId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("2")) },
+        body: JSON.stringify({ status: "active" }),
+      });
+      assert.equal(leaderActivate.status, 200);
+      assert.equal((await json(leaderActivate)).data["status"], "active");
+
+      // Either side may pause.
+      const followerPause = await fetch(`${base}/api/v1/copy-trading/relationships/${relationshipId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        body: JSON.stringify({ status: "paused" }),
+      });
+      assert.equal(followerPause.status, 200);
+      assert.equal((await json(followerPause)).data["status"], "paused");
+
+      // A third party can neither see nor touch it.
+      const thirdParty = await fetch(`${base}/api/v1/copy-trading/relationships/${relationshipId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("3")) },
+        body: JSON.stringify({ status: "paused" }),
+      });
+      assert.equal(thirdParty.status, 404);
+
+      // An unknown status is a validation error, not a silent no-op. (400
+      // VALIDATION_FAILED is this surface's convention — see routes/responses.ts.)
+      const badStatus = await fetch(`${base}/api/v1/copy-trading/relationships/${relationshipId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("2")) },
+        body: JSON.stringify({ status: "cancelled" }),
+      });
+      assert.equal(badStatus.status, 400);
+      assert.equal((await json(badStatus)).error?.code, "VALIDATION_FAILED");
+
+      const unauthenticated = await fetch(`${base}/api/v1/copy-trading/relationships/${relationshipId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "active" }),
+      });
+      assert.equal(unauthenticated.status, 401);
 
       const listed = await json<{ relationships: unknown[] }>(
         await fetch(`${base}/api/v1/copy-trading/relationships`, H(tokenFor("1"))),

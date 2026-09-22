@@ -457,7 +457,14 @@ async function main(): Promise<void> {
     // adapter is for staging/dev, and the production object store is an Owner
     // decision recorded in the migration report.
     const attachmentDir = (process.env["ATTACHMENT_STORAGE_DIR"] ?? "").trim();
-    if (attachmentDir !== "") {
+    if (attachmentDir !== "" && boot.environment === "production") {
+      // FAIL CLOSED IN PRODUCTION. A container filesystem is ephemeral: enabling
+      // a local-disk attachment store in production would accept uploads and
+      // silently lose the bytes at the next deploy — a data-integrity failure,
+      // not a configuration preference. The capability is therefore ABSENT until
+      // a real object store is configured (Owner decision D-3).
+      console.log(JSON.stringify({ level: "error", event: "attachments.local_disk_refused_in_production" }));
+    } else if (attachmentDir !== "") {
       capabilities.attachments = new AttachmentService(
         new PgAttachmentStore(q),
         new LocalAttachmentStorage(attachmentDir),

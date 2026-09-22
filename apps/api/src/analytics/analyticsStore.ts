@@ -23,6 +23,13 @@ export interface AnalyticsTradeRow {
   readonly tradeId: string;
   readonly accountId: string | null;
   readonly symbol: string;
+  /**
+   * The trade's UTC instant (ISO-8601). Carried alongside the day bucket so a
+   * window bound can be applied identically by every implementation: filtering
+   * on `day` alone would silently widen an instant-bounded request to a whole
+   * calendar day.
+   */
+  readonly occurredAt: string;
   /** Exact decimal string, or null for a still-open trade. */
   readonly netPnl: string | null;
   readonly rMultiple: string | null;
@@ -75,6 +82,7 @@ const TZ = `COALESCE((
 const SELECT_TRADES = `
   SELECT t.id::text                                   AS trade_id,
          t.account_id::text                           AS account_id,
+         to_char(t.occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS occurred_at,
          t.symbol                                     AS symbol,
          t.net_pnl::text                              AS net_pnl,
          t.r_multiple::text                           AS r_multiple,
@@ -104,6 +112,7 @@ export class PgAnalyticsStore implements AnalyticsStore {
     return rows.map((row) => ({
       tradeId: String(row["trade_id"]),
       accountId: row["account_id"] === null ? null : String(row["account_id"]),
+      occurredAt: String(row["occurred_at"]),
       symbol: String(row["symbol"]),
       netPnl: row["net_pnl"] === null ? null : String(row["net_pnl"]),
       rMultiple: row["r_multiple"] === null ? null : String(row["r_multiple"]),
@@ -124,8 +133,19 @@ export class MemoryAnalyticsStore implements AnalyticsStore {
   }
 
   async listTrades(query: AnalyticsQuery): Promise<AnalyticsTradeRow[]> {
+    // INSTANT-BOUNDED, exactly like the SQL: `from` inclusive, `to` exclusive.
+    // (Filtering on the day bucket instead would accept trades outside the
+    // requested window, which the route tests would then not catch.)
     return this.#rows
-      .filter((r) => (query.accountId === null || r.accountId === query.accountId) && (query.from === null || r.day >= query.from.slice(0, 10)))
-      .sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
+      .filter((r) => query.accountId === null || r.accountId === query.accountId)
+      .filter((r) => query.from === null || r.occurredAt >= query.from)
+      .filter((r) => query.to === null || r.occurredAt < query.to)
+      // Same ordering as the SQL (`ORDER BY occurred_at ASC, id ASC`): the id
+      // tie-break is what makes two trades in the same millisecond deterministic
+      // rather than dependent on insertion order.
+      .sort((a, b) => {
+        if (a.occurredAt !== b.occurredAt) return a.occurredAt < b.occurredAt ? -1 : 1;
+        return Number(a.tradeId) - Number(b.tradeId);
+      });
   }
 }

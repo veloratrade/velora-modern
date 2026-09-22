@@ -12,7 +12,17 @@
 //   that side. `period` is sugar for a relative window and is resolved ONCE,
 //   here, so no two endpoints can disagree about what "last 30 days" means.
 //   An unparseable parameter is a 400 — never a silently different window.
-import { computeEquityCurve, computePerStrategy, computeSummary, type MetricTrade } from "@velora/domain";
+import {
+  add as decimalAdd,
+  computeEquityCurve,
+  computePerStrategy,
+  computeSummary,
+  fromString as decimalFromString,
+  rescale as decimalRescale,
+  toString as decimalToString,
+  type MetricTrade,
+} from "@velora/domain";
+import { SCALES } from "@velora/contracts";
 import type { AnalyticsStore, AnalyticsTradeRow } from "./analyticsStore.js";
 
 export interface AnalyticsWindow {
@@ -89,7 +99,17 @@ export class AnalyticsService {
     for (const row of rows) {
       if (row.netPnl === null) continue;
       const current = byDay.get(row.day);
-      byDay.set(row.day, current === undefined ? row.netPnl : addDecimal(current, row.netPnl));
+      // Uses the DOMAIN decimal (the same exact-arithmetic implementation the
+      // metrics use). A second, private addition routine would be free to drift
+      // from it — which is precisely the class of defect this pass is repairing.
+      byDay.set(
+        row.day,
+        current === undefined
+          ? row.netPnl
+          : decimalToString(
+              decimalRescale(decimalAdd(decimalFromString(current), decimalFromString(row.netPnl)), SCALES.currency, "half-even"),
+            ),
+      );
     }
     const points = [...byDay.entries()]
       .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
@@ -141,18 +161,3 @@ export class AnalyticsService {
   }
 }
 
-/** Exact decimal addition without floats (money at scale 2). */
-function addDecimal(a: string, b: string): string {
-  const toMinor = (s: string): bigint => {
-    const neg = s.trim().startsWith("-");
-    const digits = s.trim().replace(/^[+-]/, "");
-    const [intPart = "0", fracPart = ""] = digits.split(".");
-    const frac = (fracPart + "00").slice(0, 2);
-    const value = BigInt(intPart + frac);
-    return neg ? -value : value;
-  };
-  const total = toMinor(a) + toMinor(b);
-  const neg = total < 0n;
-  const abs = (neg ? -total : total).toString().padStart(3, "0");
-  return `${neg ? "-" : ""}${abs.slice(0, -2)}.${abs.slice(-2)}`;
-}
