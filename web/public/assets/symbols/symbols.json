@@ -1,0 +1,377 @@
+{
+  "BTC": {
+    "name": "Bitcoin",
+    "icon": "assets/symbols/crypto/BTC.svg",
+    "type": "crypto"
+  },
+  "ETH": {
+    "name": "Ethereum",
+    "icon": "assets/symbols/crypto/ETH.svg",
+    "type": "crypto"
+  },
+  "USDT": {
+    "name": "Tether",
+    "icon": "assets/symbols/crypto/USDT.svg",
+    "type": "crypto"
+  },
+  "BNB": {
+    "name": "BNB",
+    "icon": "assets/symbols/crypto/BNB.svg",
+    "type": "crypto"
+  },
+  "SOL": {
+    "name": "Solana",
+    "icon": "assets/symbols/crypto/SOL.svg",
+    "type": "crypto"
+  },
+  "XRP": {
+    "name": "XRP",
+    "icon": "assets/symbols/crypto/XRP.svg",
+    "type": "crypto"
+  },
+  "ADA": {
+    "name": "Cardano",
+    "icon": "assets/symbols/crypto/ADA.svg",
+    "type": "crypto"
+  },
+  "DOGE": {
+    "name": "Dogecoin",
+    "icon": "assets/symbols/crypto/DOGE.svg",
+    "type": "crypto"
+  },
+  "TRX": {
+    "name": "TRON",
+    "icon": "assets/symbols/crypto/TRX.svg",
+    "type": "crypto"
+  },
+  "AVAX": {
+    "name": "Avalanche",
+    "icon": "assets/symbols/crypto/AVAX.svg",
+    "type": "crypto"
+  },
+  "DOT": {
+    "name": "Polkadot",
+    "icon": "assets/symbols/crypto/DOT.svg",
+    "type": "crypto"
+  },
+  "MATIC": {
+    "name": "Polygon",
+    "icon": "assets/symbols/crypto/MATIC.svg",
+    "type": "crypto"
+  },
+  "LINK": {
+    "name": "Chainlink",
+    "icon": "assets/symbols/crypto/LINK.svg",
+    "type": "crypto"
+  },
+  "LTC": {
+    "name": "Litecoin",
+    "icon": "assets/symbols/crypto/LTC.svg",
+    "type": "crypto"
+  },
+  "BCH": {
+    "name": "Bitcoin Cash",
+    "icon": "assets/symbols/crypto/BCH.svg",
+    "type": "crypto"
+  },
+  "ATOM": {
+    "name": "Cosmos",
+    "icon": "assets/symbols/crypto/ATOM.svg",
+    "type": "crypto"
+  },
+  "XLM": {
+    "name": "Stellar",
+    "icon": "assets/symbols/crypto/XLM.svg",
+    "type": "crypto"
+  },
+  "UNI": {
+    "name": "Uniswap",
+    "icon": "assets/symbols/crypto/UNI.svg",
+    "type": "crypto"
+  },
+  "AAVE": {
+    "name": "Aave",
+    "icon": "assets/symbols/crypto/AAVE.svg",
+    "type": "crypto"
+  },
+  "NEAR": {
+    "name": "NEAR Protocol",
+    "icon": "assets/symbols/crypto/NEAR.png",
+    "type": "crypto"
+  },
+  "ICP": {
+    "name": "Internet Computer",
+    "icon": "assets/symbols/crypto/ICP.svg",
+    "type": "crypto"
+  },
+  "EURUSD": {
+    "name": "Euro / Dollar",
+    "icon": "assets/symbols/forex/EURUSD.png",
+    "type": "forex"
+  },
+  "GBPUSD": {
+    "name": "Pound / Dollar",
+    "icon": "assets/symbols/forex/GBPUSD.png",
+    "type": "forex"
+  },
+  "USDJPY": {
+    "name": "Dollar / Yen",
+    "icon": "assets/symbols/forex/USDJPY.png",
+    "type": "forex"
+  },
+  "USDCHF": {
+    "name": "Dollar / Franc",
+    "icon": "assets/symbols/forex/USDCHF.png",
+    "type": "forex"
+  },
+  "AUDUSD": {
+    "name": "Aussie / Dollar",
+    "icon": "assets/symbols/forex/AUDUSD.png",
+    "type": "forex"
+  },
+  "USDCAD": {
+    "name": "Dollar / Loonie",
+    "icon": "assets/symbols/forex/USDCAD.png",
+    "type": "forex"
+  },
+  "NZDUSD": {
+    "name": "Kiwi / Dollar",
+    "icon": "assets/symbols/forex/NZDUSD.png",
+    "type": "forex"
+  },
+  "EURGBP": {
+    "name": "Euro / Pound",
+    "icon": "assets/symbols/forex/EURGBP.png",
+    "type": "forex"
+  },
+  "EURJPY": {
+    "name": "Euro / Yen",
+    "icon": "assets/symbols/forex/EURJPY.png",
+    "type": "forex"
+  },
+  "GBPJPY": {
+    "name": "Pound / Yen",
+    "icon": "assets/symbols/forex/GBPJPY.png",
+    "type": "forex"
+  },
+  "EURCHF": {
+    "name": "Euro / Franc",
+    "icon": "assets/symbols/forex/EURCHF.png",
+    "type": "forex"
+  },
+  "AUDJPY": {
+    "name": "Aussie / Yen",
+    "icon": "assets/symbols/forex/AUDJPY.png",
+    "type": "forex"
+  },
+  "EURCAD": {
+    "name": "Euro / Loonie",
+    "icon": "assets/symbols/forex/EURCAD.png",
+    "type": "forex"
+  },
+  "EURNZD": {
+    "name": "Euro / Kiwi",
+    "icon": "assets/symbols/forex/EURNZD.png",
+    "type": "forex"
+  },
+  "GBPCHF": {
+    "name": "Pound / Franc",
+    "icon": "assets/symbols/forex/GBPCHF.png",
+    "type": "forex"
+  },
+  "AUDCAD": {
+    "name": "Aussie / Loonie",
+    "icon": "assets/symbols/forex/AUDCAD.png",
+    "type": "forex"
+  },
+  "AUDNZD": {
+    "name": "Aussie / Kiwi",
+    "icon": "assets/symbols/forex/AUDNZD.png",
+    "type": "forex"
+  },
+  "EURAUD": {
+    "name": "Euro / Aussie",
+    "icon": "assets/symbols/forex/EURAUD.png",
+    "type": "forex"
+  },
+  "NAS100": {
+    "name": "NASDAQ 100",
+    "icon": "assets/asset-icons2/icon-24.png",
+    "type": "index"
+  },
+  "SPX500": {
+    "name": "S&P 500",
+    "icon": "assets/flags/us.png",
+    "type": "index"
+  },
+  "US30": {
+    "name": "Dow Jones 30",
+    "icon": "assets/asset-icons2/icon-25.png",
+    "type": "index"
+  },
+  "GER40": {
+    "name": "DAX 40",
+    "icon": "assets/flags/de.png",
+    "type": "index"
+  },
+  "FTSE100": {
+    "name": "FTSE 100",
+    "icon": "assets/flags/gb.png",
+    "type": "index"
+  },
+  "N225": {
+    "name": "Nikkei 225",
+    "icon": "assets/flags/jp.png",
+    "type": "index"
+  },
+  "HSI": {
+    "name": "Hang Seng",
+    "icon": "assets/flags/hk.png",
+    "type": "index"
+  },
+  "VIX": {
+    "name": "VIX Volatility",
+    "icon": "assets/flags/us.png",
+    "type": "index"
+  },
+  "DAX40": {
+    "name": "DAX 40",
+    "icon": "assets/flags/de.png",
+    "type": "index"
+  },
+  "SP500": {
+    "name": "S&P 500",
+    "icon": "assets/flags/us.png",
+    "type": "index"
+  },
+  "UK100": {
+    "name": "FTSE 100",
+    "icon": "assets/flags/gb.png",
+    "type": "index"
+  },
+  "JP225": {
+    "name": "Nikkei 225",
+    "icon": "assets/flags/jp.png",
+    "type": "index"
+  },
+  "XAUUSD": {
+    "name": "طلا / آمریکا",
+    "icon": "assets/symbols/metal/XAU.png",
+    "type": "commodity"
+  },
+  "XAGUSD": {
+    "name": "نقره / آمریکا",
+    "icon": "assets/symbols/metal/XAG.png",
+    "type": "commodity"
+  },
+  "OIL": {
+    "name": "Crude Oil",
+    "icon": "assets/asset-icons2/icon-23.png",
+    "type": "commodity"
+  },
+  "BRENT": {
+    "name": "Brent Oil",
+    "icon": "assets/asset-icons2/icon-23.png",
+    "type": "commodity"
+  },
+  "COPPER": {
+    "name": "Copper",
+    "icon": "assets/symbols/commodity/COPPER.svg",
+    "type": "commodity"
+  },
+  "NG": {
+    "name": "Natural Gas",
+    "icon": "assets/asset-icons2/icon-22.png",
+    "type": "commodity"
+  },
+  "GAS": {
+    "name": "Natural Gas",
+    "icon": "assets/asset-icons2/icon-22.png",
+    "type": "commodity"
+  },
+  "WTI": {
+    "name": "WTI Crude",
+    "icon": "assets/asset-icons2/icon-23.png",
+    "type": "commodity"
+  },
+  "XPTUSD": {
+    "name": "Platinum / Dollar",
+    "icon": "assets/asset-icons2/icon-20.png",
+    "type": "forex"
+  },
+  "XPDUSD": {
+    "name": "Palladium / Dollar",
+    "icon": "assets/asset-icons2/icon-21.png",
+    "type": "forex"
+  },
+  "CADJPY": {
+    "name": "Loonie / Yen",
+    "icon": "assets/symbols/forex/CADJPY.png",
+    "type": "forex"
+  },
+  "CHFJPY": {
+    "name": "Franc / Yen",
+    "icon": "assets/symbols/forex/CHFJPY.png",
+    "type": "forex"
+  },
+  "NZDJPY": {
+    "name": "Kiwi / Yen",
+    "icon": "assets/symbols/forex/NZDJPY.png",
+    "type": "forex"
+  },
+  "CADCHF": {
+    "name": "Loonie / Franc",
+    "icon": "assets/symbols/forex/CADCHF.png",
+    "type": "forex"
+  },
+  "XAU": {
+    "name": "طلا",
+    "icon": "assets/symbols/metal/XAU.png",
+    "type": "commodity"
+  },
+  "XAG": {
+    "name": "نقره",
+    "icon": "assets/symbols/metal/XAG.png",
+    "type": "commodity"
+  },
+  "XPT": {
+    "name": "Platinum",
+    "icon": "assets/asset-icons2/icon-20.png",
+    "type": "commodity"
+  },
+  "XPD": {
+    "name": "Palladium",
+    "icon": "assets/asset-icons2/icon-21.png",
+    "type": "commodity"
+  },
+  "GBPCAD": {
+    "name": "Pound / Loonie",
+    "icon": "assets/symbols/forex/GBPCAD.png",
+    "type": "forex"
+  },
+  "GBPAUD": {
+    "name": "Pound / Aussie",
+    "icon": "assets/symbols/forex/GBPAUD.png",
+    "type": "forex"
+  },
+  "GBPNZD": {
+    "name": "Pound / Kiwi",
+    "icon": "assets/symbols/forex/GBPNZD.png",
+    "type": "forex"
+  },
+  "AUDCHF": {
+    "name": "Aussie / Franc",
+    "icon": "assets/symbols/forex/AUDCHF.png",
+    "type": "forex"
+  },
+  "NZDCHF": {
+    "name": "Kiwi / Franc",
+    "icon": "assets/symbols/forex/NZDCHF.png",
+    "type": "forex"
+  },
+  "NZDCAD": {
+    "name": "Kiwi / Loonie",
+    "icon": "assets/symbols/forex/NZDCAD.png",
+    "type": "forex"
+  }
+}
