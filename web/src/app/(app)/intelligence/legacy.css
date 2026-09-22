@@ -1,0 +1,364 @@
+/* Ported from legacy intelligence/index.html — page-scoped under .pg-intelligence. Do not hand-edit selectors; regenerate with tools/port-legacy-css.py */
+
+/* ---- legacy <style> block 0 (e90259d4) ---- */
+
+  /* ============================================================
+     VELORA DASHBOARD — طراحی سطح جهانی
+     الهام: Linear · Vercel (سایدبار و تایپوگرافی)
+            TradingView · Bloomberg (کارت‌های KPI و نمودار)
+            Binance (جدول معاملات) · Revolut (کارت حساب)
+            اپ‌های مدرن (حالت موبایل با نوبار پایین)
+     ============================================================ */
+
+  .pg-intelligence{
+    --bg: #060A14;
+    --bg2: #0A1122;
+    --card: #0E1A33;
+    --card2: #12203F;
+    --border: rgba(255,255,255,0.07);
+    --gold: #d4af37;
+    --gold-l: #fce38a;
+    --txt: #EAF0FA;
+    --muted: #8FA0C0;
+    --faint: #5E6F92;
+    --green: #4CD39A;
+    --red: #FF6B6B;
+    --blue: #3B82F6;
+    --violet: #8B5CF6;
+  }
+
+  .pg-intelligence *{ margin:0; padding:0; box-sizing:border-box; }
+  .pg-intelligence, .pg-intelligence{ min-height:100%; }
+  .pg-intelligence{
+    font-family:'Segoe UI', Tahoma, Arial, sans-serif;
+    background:var(--bg);
+    color:var(--txt);
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ---------- پس‌زمینه شفق ---------- */
+  .pg-intelligence .bgfx{
+    position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden;
+    background:
+      radial-gradient(900px 500px at 85% -10%, rgba(212,175,55,0.08), transparent 60%),
+      radial-gradient(800px 600px at -5% 110%, rgba(59,130,246,0.08), transparent 55%);
+  }
+
+  /* ---------- چیدمان اصلی ---------- */
+  .pg-intelligence .shell{ position:relative; z-index:1; display:flex; min-height:100vh; }
+
+  /* ============ سایدبار (دسکتاپ) — مثل Linear ============ */
+  .pg-intelligence .sidebar{
+    width: 240px; flex-shrink:0;
+    background:linear-gradient(180deg, rgba(10,17,34,0.9), rgba(6,10,20,0.95));
+    border-left:1px solid var(--border);
+    display:flex; flex-direction:column;
+    padding:20px 14px;
+    position:sticky; top:0; height:100vh;
+    backdrop-filter:blur(12px);
+  }
+  .pg-intelligence .sb-logo{ display:flex; align-items:center; gap:10px; padding:4px 8px 18px; }
+  .pg-intelligence .sb-logo img{ width:34px; height:34px; }
+  .pg-intelligence .sb-logo span{ font-size:19px; font-weight:800; letter-spacing:5px; background:linear-gradient(120deg,var(--gold-l),var(--gold)); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+
+  .pg-intelligence .sb-nav{ display:flex; flex-direction:column; gap:3px; flex:1; }
+  .pg-intelligence .sb-item{
+    display:flex; align-items:center; gap:11px;
+    padding:11px 13px; border-radius:11px;
+    color:var(--muted); font-size:13.5px; font-weight:600;
+    text-decoration:none; transition:all .18s;
+    border:1px solid transparent;
+  }
+  .pg-intelligence .sb-item svg{ width:18px; height:18px; flex-shrink:0; }
+  .pg-intelligence .sb-item:hover{ color:var(--txt); background:rgba(255,255,255,0.04); }
+  .pg-intelligence .sb-item.active{
+    color:#fff;
+    background:linear-gradient(135deg, rgba(212,175,55,0.16), rgba(212,175,55,0.05));
+    border-color:rgba(212,175,55,0.35);
+    box-shadow:0 4px 14px rgba(212,175,55,0.08);
+  }
+  .pg-intelligence .sb-item .badge{
+    margin-left:auto; font-size:10px; background:rgba(212,175,55,0.2); color:var(--gold-l);
+    padding:2px 8px; border-radius:20px; font-weight:700;
+  }
+
+  .pg-intelligence .sb-user{
+    margin-top:14px; padding:12px 10px;
+    background:rgba(255,255,255,0.03); border:1px solid var(--border);
+    border-radius:14px; display:flex; align-items:center; gap:10px;
+  }
+  .pg-intelligence .sb-user .av{
+    width:36px; height:36px; border-radius:50%; flex-shrink:0;
+    background:linear-gradient(135deg, var(--gold-d), var(--gold));
+    display:flex; align-items:center; justify-content:center;
+    font-weight:800; color:#0b121e; font-size:15px;
+  }
+  .pg-intelligence .sb-user .nm{ flex:1; min-width:0; }
+  .pg-intelligence .sb-user .nm b{ display:block; font-size:12.5px; color:var(--txt); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .pg-intelligence .sb-user .nm small{ font-size:10.5px; color:var(--faint); }
+  .pg-intelligence .sb-user .logout{
+    background:none; border:none; color:var(--faint); cursor:pointer; padding:4px; transition:color .2s;
+  }
+  .pg-intelligence .sb-user .logout:hover{ color:var(--red); }
+
+  /* ============ محتوای اصلی ============ */
+  .pg-intelligence .main{ flex:1; min-width:0; padding:24px 28px 80px; }
+
+  .pg-intelligence .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    gap:16px; margin-bottom:24px; flex-wrap:wrap;
+  }
+  .pg-intelligence .topbar .h1{ font-size:23px; font-weight:800; color:#fff; letter-spacing:-.2px; }
+  .pg-intelligence .topbar .h1 .grad{ background:linear-gradient(120deg,#fce38a,#d4af37 55%,#b88d1d); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+  .pg-intelligence .topbar .sub{ font-size:12.5px; color:var(--muted); margin-top:3px; }
+  .pg-intelligence .topbar .actions{ display:flex; gap:10px; align-items:center; }
+
+  .pg-intelligence .btn-gold{
+    display:inline-flex; align-items:center; gap:8px;
+    background:linear-gradient(135deg,#fce38a 0%,#d4af37 50%,#b88d1d 100%);
+    color:#0b121e; border:none; border-radius:12px; padding:11px 20px;
+    font-size:13.5px; font-weight:800; font-family:inherit; cursor:pointer;
+    box-shadow:0 6px 18px rgba(212,175,55,0.3); transition:transform .15s, box-shadow .2s;
+    text-decoration:none;
+  }
+  .pg-intelligence .btn-gold:hover{ transform:translateY(-1px); box-shadow:0 9px 24px rgba(212,175,55,0.4); }
+  .pg-intelligence .btn-ghost{
+    display:inline-flex; align-items:center; gap:8px;
+    background:rgba(255,255,255,0.04); color:var(--muted);
+    border:1px solid var(--border); border-radius:12px; padding:11px 18px;
+    font-size:13px; font-weight:700; font-family:inherit; cursor:pointer; transition:all .2s;
+  }
+  .pg-intelligence .btn-ghost:hover{ color:var(--txt); background:rgba(255,255,255,0.07); }
+
+  /* ---------- کارت‌های KPI — مثل Bloomberg/TradingView ---------- */
+  .pg-intelligence .kpi-grid{
+    display:grid;
+    grid-template-columns:repeat(4, 1fr);
+    gap:14px; margin-bottom:22px;
+  }
+  .pg-intelligence .kpi{
+    position:relative; overflow:hidden;
+    background:linear-gradient(180deg, var(--card2), var(--card));
+    border:1px solid var(--border); border-radius:18px;
+    padding:16px 18px;
+    transition:transform .2s, border-color .2s;
+  }
+  .pg-intelligence .kpi:hover{ transform:translateY(-2px); border-color:rgba(212,175,55,0.3); }
+  .pg-intelligence .kpi::after{
+    content:''; position:absolute; top:-40px; left:50%; transform:translateX(-50%);
+    width:140px; height:90px; background:radial-gradient(closest-side, rgba(212,175,55,0.12), transparent); pointer-events:none;
+  }
+  .pg-intelligence .kpi .lbl{ font-size:11px; color:var(--muted); letter-spacing:.5px; display:flex; align-items:center; gap:6px; }
+  .pg-intelligence .kpi .lbl svg{ width:14px; height:14px; color:var(--faint); }
+  .pg-intelligence .kpi .val{ font-size:26px; font-weight:800; color:#fff; margin-top:8px; letter-spacing:-.5px; direction:ltr; text-align:right; font-variant-numeric:tabular-nums; }
+  .pg-intelligence .kpi .val em{ font-style:normal; font-size:13px; font-weight:600; margin-right:4px; }
+  .pg-intelligence .kpi .delta{ font-size:11.5px; margin-top:6px; display:inline-flex; align-items:center; gap:4px; font-weight:700; }
+  .pg-intelligence .delta.up{ color:var(--green); } .pg-intelligence .delta.down{ color:var(--red); }
+
+  /* ---------- نمودار سرمایه — مثل TradingView ---------- */
+  .pg-intelligence .panel{
+    background:linear-gradient(180deg, var(--card2), var(--card));
+    border:1px solid var(--border); border-radius:18px;
+    padding:18px 20px; margin-bottom:22px;
+  }
+  .pg-intelligence .panel-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; flex-wrap:wrap; gap:10px; }
+  .pg-intelligence .panel-head .t{ font-size:14.5px; font-weight:800; color:#fff; display:flex; align-items:center; gap:8px; }
+  .pg-intelligence .panel-head .t svg{ width:17px; height:17px; color:var(--gold); }
+  .pg-intelligence .panel-head .range{ display:flex; gap:4px; background:rgba(255,255,255,0.04); border-radius:10px; padding:3px; }
+  .pg-intelligence .panel-head .range button{
+    background:none; border:none; color:var(--faint); font-size:11.5px; font-weight:700;
+    padding:6px 12px; border-radius:8px; cursor:pointer; font-family:inherit; transition:all .18s;
+  }
+  .pg-intelligence .panel-head .range button.active{ background:rgba(212,175,55,0.18); color:var(--gold-l); }
+  .pg-intelligence .chart-box{ position:relative; width:100%; }
+  .pg-intelligence .chart-box svg{ width:100%; height:auto; display:block; }
+  .pg-intelligence .chart-grid-l{ stroke:rgba(255,255,255,0.05); stroke-width:1; }
+  .pg-intelligence .chart-area{ fill:url(#areaG); opacity:.35; }
+  .pg-intelligence .chart-line{ fill:none; stroke:url(#lineG); stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; }
+  .pg-intelligence .chart-dot{ fill:#fce38a; filter:drop-shadow(0 0 6px rgba(212,175,55,0.8)); }
+  .pg-intelligence .chart-tip{
+    position:absolute; background:rgba(10,16,32,0.95); border:1px solid rgba(212,175,55,0.4);
+    border-radius:10px; padding:8px 12px; font-size:11px; color:var(--txt);
+    pointer-events:none; white-space:nowrap; display:none; box-shadow:0 8px 20px rgba(0,0,0,0.4);
+  }
+  .pg-intelligence .chart-tip b{ color:var(--gold-l); }
+
+  /* ---------- دو ستون: جدول + ساید ---------- */
+  .pg-intelligence .cols{ display:grid; grid-template-columns: 1.6fr 1fr; gap:22px; margin-bottom:22px; }
+
+  /* ---------- جدول معاملات — مثل Binance ---------- */
+  .pg-intelligence .table-wrap{ overflow-x:auto; border-radius:14px; }
+  .pg-intelligence table.trades{ width:100%; border-collapse:collapse; min-width:520px; }
+  .pg-intelligence table.trades th{
+    text-align:right; font-size:11px; color:var(--faint); font-weight:700;
+    padding:10px 12px; border-bottom:1px solid var(--border); white-space:nowrap; letter-spacing:.3px;
+  }
+  .pg-intelligence table.trades td{
+    padding:11px 12px; font-size:12.5px; color:var(--muted);
+    border-bottom:1px solid rgba(255,255,255,0.04); white-space:nowrap; font-variant-numeric:tabular-nums;
+  }
+  .pg-intelligence table.trades tr{ transition:background .15s; }
+  .pg-intelligence table.trades tbody tr:hover{ background:rgba(255,255,255,0.03); }
+  .pg-intelligence .sym{ font-weight:800; color:#fff; font-size:13px; }
+  .pg-intelligence .dir{ display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:800; padding:4px 10px; border-radius:8px; }
+  .pg-intelligence .dir.buy{ color:var(--green); background:rgba(76,211,154,0.12); }
+  .pg-intelligence .dir.sell{ color:var(--red); background:rgba(255,107,107,0.12); }
+  .pg-intelligence .pnl{ font-weight:800; font-size:12.5px; direction:ltr; text-align:right; }
+  .pg-intelligence .pnl.pos{ color:var(--green); } .pg-intelligence .pnl.neg{ color:var(--red); }
+  .pg-intelligence .tag{ font-size:10.5px; background:rgba(139,92,246,0.14); color:#C4B5FD; padding:3px 9px; border-radius:7px; }
+  .pg-intelligence .emot{ font-size:13px; }
+
+  /* ---------- استراتژی‌ها — مثل Coinbase ---------- */
+  .pg-intelligence .strat-item{ padding:12px 2px; border-bottom:1px solid rgba(255,255,255,0.05); }
+  .pg-intelligence .strat-item:last-child{ border-bottom:none; }
+  .pg-intelligence .strat-top{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+  .pg-intelligence .strat-top b{ font-size:13px; color:var(--txt); }
+  .pg-intelligence .strat-top span{ font-size:12px; color:var(--gold-l); font-weight:800; direction:ltr; }
+  .pg-intelligence .strat-bar{ height:6px; background:rgba(255,255,255,0.06); border-radius:6px; overflow:hidden; }
+  .pg-intelligence .strat-fill{ height:100%; border-radius:6px; background:linear-gradient(90deg, #b88d1d, #fce38a); transition:width .8s ease; }
+  .pg-intelligence .strat-meta{ display:flex; justify-content:space-between; margin-top:6px; font-size:10.5px; color:var(--faint); }
+
+  /* ---------- کارت حساب — مثل Revolut ---------- */
+  .pg-intelligence .acct-card{
+    position:relative; overflow:hidden;
+    border-radius:18px; padding:18px 20px;
+    background:linear-gradient(135deg, #16233f 0%, #0f1b3d 55%, #16233f 100%);
+    border:1px solid rgba(212,175,55,0.3);
+    margin-bottom:14px;
+  }
+  .pg-intelligence .acct-card::before{
+    content:''; position:absolute; top:-50px; left:-30px; width:180px; height:180px;
+    background:radial-gradient(closest-side, rgba(212,175,55,0.18), transparent); pointer-events:none;
+  }
+  .pg-intelligence .acct-top{ display:flex; align-items:center; justify-content:space-between; }
+  .pg-intelligence .acct-top .prov{ font-size:11px; color:var(--muted); font-weight:700; letter-spacing:1px; }
+  .pg-intelligence .acct-top .st{ display:inline-flex; align-items:center; gap:5px; font-size:10.5px; color:var(--green); font-weight:700; }
+  .pg-intelligence .acct-top .st .dot{ width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 8px var(--green); }
+  .pg-intelligence .acct-num{ font-size:15px; font-weight:800; color:#fff; letter-spacing:2px; margin-top:14px; direction:ltr; text-align:left; }
+  .pg-intelligence .acct-bal{ display:flex; justify-content:space-between; align-items:flex-end; margin-top:12px; }
+  .pg-intelligence .acct-bal .lbl{ font-size:10px; color:var(--faint); }
+  .pg-intelligence .acct-bal .val{ font-size:22px; font-weight:800; color:#fff; direction:ltr; }
+  .pg-intelligence .acct-bal .eq{ font-size:12px; color:var(--gold-l); font-weight:700; direction:ltr; }
+
+  .pg-intelligence .acct-meta{ display:flex; gap:14px; margin-top:10px; font-size:10.5px; color:var(--faint); }
+  .pg-intelligence .acct-meta b{ color:var(--muted); font-weight:700; }
+
+  /* ---------- خالی بودن ---------- */
+  .pg-intelligence .empty{ text-align:center; padding:40px 20px; color:var(--faint); font-size:13px; }
+  .pg-intelligence .empty svg{ width:40px; height:40px; margin-bottom:12px; opacity:.4; }
+
+  /* ---------- حالت موبایل ---------- */
+  .pg-intelligence .mobile-top{ display:none; }
+  @media (max-width: 980px) {
+    .pg-intelligence .sidebar{ display:none; }
+    .pg-intelligence .mobile-top{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:14px 16px; position:sticky; top:0; z-index:50;
+      background:rgba(6,10,20,0.85); backdrop-filter:blur(12px);
+      border-bottom:1px solid var(--border);
+    }
+    .pg-intelligence .mobile-top .l{ display:flex; align-items:center; gap:9px; }
+    .pg-intelligence .mobile-top img{ width:30px; height:30px; }
+    .pg-intelligence .mobile-top span{ font-size:17px; font-weight:800; letter-spacing:4px; color:var(--gold); }
+    .pg-intelligence .mobile-top .av{
+      width:34px; height:34px; border-radius:50%;
+      background:linear-gradient(135deg, var(--gold-d), var(--gold));
+      display:flex; align-items:center; justify-content:center;
+      font-weight:800; color:#0b121e; font-size:14px; cursor:pointer;
+    }
+    .pg-intelligence .main{ padding:16px 14px 90px; }
+    .pg-intelligence .kpi-grid{ grid-template-columns:repeat(2, 1fr); gap:10px; }
+    .pg-intelligence .kpi .val{ font-size:21px; }
+    .pg-intelligence .cols{ grid-template-columns:1fr; gap:16px; }
+    .pg-intelligence .topbar .h1{ font-size:19px; }
+    .pg-intelligence .panel{ padding:14px; }
+  }
+  @media (max-width: 480px) {
+    .pg-intelligence .kpi-grid{ grid-template-columns:1fr 1fr; }
+    .pg-intelligence .kpi .val{ font-size:18px; }
+  }
+
+  /* ---------- نوبار پایین موبایل — مثل اپ‌های مدرن ---------- */
+  .pg-intelligence .bottom-nav{
+    display:none;
+  }
+  @media (max-width: 980px) {
+    .pg-intelligence .bottom-nav{
+      display:flex;
+      position:fixed; bottom:0; left:0; right:0; z-index:60;
+      background:rgba(8,13,28,0.94); backdrop-filter:blur(14px);
+      border-top:1px solid var(--border);
+      padding:8px 6px calc(8px + env(safe-area-inset-bottom));
+      justify-content:space-around;
+    }
+    .pg-intelligence .bn-item{
+      display:flex; flex-direction:column; align-items:center; gap:4px;
+      color:var(--faint); font-size:10px; font-weight:700;
+      text-decoration:none; padding:6px 10px; border-radius:12px; transition:all .18s; flex:1;
+    }
+    .pg-intelligence .bn-item svg{ width:20px; height:20px; }
+    .pg-intelligence .bn-item.active{ color:var(--gold-l); background:rgba(212,175,55,0.1); }
+  }
+
+  /* ---------- مودال خروج ---------- */
+  .pg-intelligence .overlay{
+    position:fixed; inset:0; background:rgba(6,10,20,0.7); backdrop-filter:blur(6px);
+    z-index:200; display:none; align-items:center; justify-content:center; padding:20px;
+  }
+  .pg-intelligence .overlay.show{ display:flex; }
+  .pg-intelligence .o-card{
+    background:linear-gradient(180deg, var(--card2), var(--card));
+    border:1px solid rgba(212,175,55,0.3); border-radius:20px;
+    padding:28px; max-width:380px; width:100%; text-align:center;
+    box-shadow:0 30px 70px rgba(0,0,0,0.6);
+    animation:popIn .3s ease;
+  }
+  @keyframes popIn { from{transform:scale(.92); opacity:0} to{transform:scale(1); opacity:1} }
+  .pg-intelligence .o-card h3{ font-size:17px; color:#fff; margin-bottom:8px; }
+  .pg-intelligence .o-card p{ font-size:13px; color:var(--muted); line-height:1.9; margin-bottom:20px; }
+  .pg-intelligence .o-btns{ display:flex; gap:10px; justify-content:center; }
+  .pg-intelligence .o-btn{ padding:11px 24px; border-radius:12px; font-weight:800; font-size:13px; cursor:pointer; font-family:inherit; border:none; }
+  .pg-intelligence .o-btn.confirm{ background:linear-gradient(135deg,#fce38a,#d4af37); color:#0b121e; }
+  .pg-intelligence .o-btn.cancel{ background:rgba(255,255,255,0.06); color:var(--muted); border:1px solid var(--border); }
+
+  .pg-intelligence .loading-screen{
+    position:fixed; inset:0; z-index:300; background:var(--bg);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px;
+  }
+  .pg-intelligence .ls-logo{ width:56px; height:56px; border-radius:50%; border:2px solid rgba(212,175,55,0.3); border-top-color:var(--gold); animation:spin 1s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .pg-intelligence .loading-screen p{ color:var(--muted); font-size:13px; letter-spacing:1px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pg-intelligence .kpi:hover, .pg-intelligence .btn-gold:hover, .pg-intelligence .chart-line{ transition:none; }
+  }
+
+/* ---- legacy <style> block 1 (63ccc7b5) ---- */
+
+/* VELORA Nebula Grid — visual layer, functions and IDs remain untouched */
+.pg-intelligence{--bg:#070707;--bg2:#0a0a0c;--card:rgba(12,12,15,.45);--card2:rgba(27,25,22,.42);--border:rgba(255,255,255,.20);--gold:#c99c45;--gold-l:#f5ead0;--gold-d:#a77a18;--txt:#f9f7f2;--muted:#b3b6bd;--faint:#8790a0;--green:#65e2a6;--red:#ff8e98}
+.pg-intelligence{background:radial-gradient(circle at 9% 28%,#3a352c55,transparent 33%),radial-gradient(circle at 82% 21%,#4e352555,transparent 31%),radial-gradient(circle at 60% 88%,#c28d1d66,transparent 35%),#070707;color:var(--txt)}
+.pg-intelligence:before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;background-image:radial-gradient(#fff 1px,transparent 1px),radial-gradient(#f5d46a 1px,transparent 1.3px);background-size:84px 84px,137px 137px;background-position:10px 8px,48px 60px}.pg-intelligence .bgfx{display:none}.pg-intelligence .shell{z-index:1;gap:18px;padding:22px;direction:rtl}.pg-intelligence .sidebar, .pg-intelligence .panel, .pg-intelligence .kpi, .pg-intelligence .topbar{background:linear-gradient(135deg,rgba(255,255,255,.105),rgba(8,8,10,.27) 55%,rgba(211,174,65,.10));border:1px solid rgba(255,255,255,.30);border-top-color:rgba(255,255,255,.62);box-shadow:0 28px 78px #000b,inset 0 1px rgba(255,255,255,.40),inset -16px -12px 42px rgba(214,174,67,.07);backdrop-filter:blur(42px) saturate(120%)}
+.pg-intelligence .sidebar{width:260px;height:calc(100vh - 44px);top:22px;padding:23px 17px;border-radius:18px;background:linear-gradient(135deg,rgba(255,255,255,.10),rgba(8,8,10,.38) 55%,rgba(211,174,65,.10))}.pg-intelligence .sb-logo{padding:2px 8px 35px}.pg-intelligence .sb-logo img{filter:drop-shadow(0 0 12px rgba(230,189,78,.38))}.pg-intelligence .sb-logo span{font-size:22px;letter-spacing:5px;background:none;-webkit-text-fill-color:var(--gold-l);color:var(--gold-l)}.pg-intelligence .sb-item{color:#b1bed3;padding:13px 14px;border-radius:11px;font-size:13px}.pg-intelligence .sb-item:hover{color:#fff;background:rgba(255,255,255,.07)}.pg-intelligence .sb-item.active{color:white;border-color:#e9c75e70;background:linear-gradient(90deg,#e9c75e0d,#e9c75e26);box-shadow:0 0 25px #e9c75e1b}.pg-intelligence .sb-user{background:#06112655;border-color:#fff2;border-radius:14px}.pg-intelligence .sb-user .av, .pg-intelligence .mobile-top .av{background:linear-gradient(135deg,#f5ead0,#c99c45);color:#16110a}.pg-intelligence .main{padding:0;min-width:0}.pg-intelligence .topbar{min-height:68px;padding:13px 20px;margin-bottom:18px;border-radius:12px;position:relative;overflow:hidden;background:#050505;border-bottom-color:rgba(218,178,72,.48)}.pg-intelligence .topbar:after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(90deg,transparent 52%,rgba(154,110,23,.18) 82%,rgba(213,174,67,.32) 100%)}.pg-intelligence .topbar>*{position:relative;z-index:1}.pg-intelligence .topbar .h1{font-size:16px}.pg-intelligence .topbar .h1 .grad{background:none;-webkit-text-fill-color:#fff;color:#fff}.pg-intelligence .topbar .sub{font-size:11px;color:var(--muted);margin-top:5px}.pg-intelligence .btn-gold{min-height:43px;padding:8px 14px;border:1px solid rgba(232,197,98,.75);border-radius:10px;background:linear-gradient(135deg,rgba(255,255,255,.10),rgba(209,168,56,.16));color:#fff0bd;box-shadow:inset 0 1px rgba(255,255,255,.25),0 8px 20px rgba(0,0,0,.2)}.pg-intelligence .btn-ghost{background:rgba(255,255,255,.08);border-color:#ffe49a66;color:#ffe49a}.pg-intelligence .kpi-grid{gap:12px;margin-bottom:18px}.pg-intelligence .kpi{border-radius:18px;padding:15px;min-height:105px}.pg-intelligence .kpi:hover{border-color:rgba(255,233,147,.60);transform:translateY(-2px)}.pg-intelligence .kpi .lbl{color:var(--muted);font-size:10px}.pg-intelligence .kpi .val{color:var(--gold-l);font-size:24px}.pg-intelligence .panel{border-radius:18px;padding:17px 18px;margin-bottom:18px}.pg-intelligence .panel-head .t{color:#fff;font-size:14px}.pg-intelligence .panel-head .t svg{color:var(--gold)}.pg-intelligence .panel-head .range{background:rgba(255,255,255,.07)}.pg-intelligence .panel-head .range button.active{background:rgba(213,174,67,.24);color:var(--gold-l)}.pg-intelligence .chart-grid-l{stroke:rgba(255,255,255,.12)}.pg-intelligence .chart-area{opacity:.40}.pg-intelligence .cols{grid-template-columns:1.65fr 1fr;gap:18px;margin-bottom:0}.pg-intelligence table.trades th{color:#a9b9d3;border-bottom-color:#fff2}.pg-intelligence table.trades td{color:#dbe5f5;border-bottom-color:#fff1}.pg-intelligence .dir.buy{color:#65e2a6;background:rgba(101,226,166,.12)}.pg-intelligence .dir.sell{color:#ff8e98;background:rgba(255,142,152,.12)}.pg-intelligence .acct-card{background:linear-gradient(135deg,rgba(255,255,255,.14),rgba(7,7,10,.23));border-color:#e9c75e66;box-shadow:inset 0 1px rgba(255,255,255,.28),0 16px 38px #0005}.pg-intelligence .acct-card .val{color:var(--gold-l)}.pg-intelligence .strat-fill{background:linear-gradient(90deg,#a77a18,#f5ead0)}.pg-intelligence .loading-screen{background:#070707}.pg-intelligence .o-card{background:linear-gradient(135deg,rgba(80,111,151,.64),rgba(6,18,43,.72));border-color:#f0d37188}
+@media(max-width:980px){.pg-intelligence .shell{padding:12px;display:block}.pg-intelligence .main{padding:0 0 90px}.pg-intelligence .topbar{margin-top:4px}.pg-intelligence .mobile-top{border:1px solid rgba(255,255,255,.20);border-radius:13px;background:rgba(8,8,10,.60);margin-bottom:12px}.pg-intelligence .mobile-top span{color:var(--gold-l)}.pg-intelligence .kpi-grid{gap:10px}.pg-intelligence .cols{gap:12px}}
+@media(max-width:480px){.pg-intelligence .shell{padding:7px}.pg-intelligence .topbar{padding:12px}.pg-intelligence .topbar .actions{gap:6px}.pg-intelligence .btn-gold, .pg-intelligence .btn-ghost{font-size:11px;padding:9px 10px}.pg-intelligence .kpi{padding:12px}.pg-intelligence .panel{padding:14px}}
+
+/* ---- legacy <style> block 2 (a498ed88) ---- */
+
+/* Approved mockup 07 — Conservative / outlined controls */
+.pg-intelligence .btn-gold{background:rgba(8,9,10,.28);border:1px solid rgba(231,193,88,.88);color:#ffe9a2;box-shadow:inset 0 1px rgba(255,255,255,.16),0 8px 20px rgba(0,0,0,.24)}
+.pg-intelligence .btn-gold:hover{background:rgba(213,174,67,.16);border-color:#ffdf83;box-shadow:inset 0 1px rgba(255,255,255,.20),0 10px 24px rgba(213,170,62,.20)}
+.pg-intelligence .btn-ghost{background:transparent;border-color:rgba(231,193,88,.48);color:#d9c382}.pg-intelligence .btn-ghost:hover{background:rgba(255,255,255,.07);color:#fff0bd;border-color:rgba(245,224,151,.76)}
+.pg-intelligence .panel-head .range{padding:3px;border:1px solid rgba(255,255,255,.10);background:rgba(5,5,6,.34)}
+.pg-intelligence .panel-head .range button{border:1px solid transparent}.pg-intelligence .panel-head .range button.active{background:rgba(213,174,67,.14);border-color:rgba(231,193,88,.48);color:#fff0bd}
+.pg-intelligence .chart-caption{display:block;margin-top:2px;color:var(--faint);font-size:10px;text-align:end}
+
+/* ---- legacy <style> block 3 (a79cdda9) ---- */
+
+.pg-intelligence .velora-toast{position:fixed;left:22px;bottom:22px;z-index:10000;max-width:min(360px,calc(100vw - 44px));padding:12px 15px;border:1px solid rgba(232,197,98,.62);border-radius:12px;background:rgba(10,11,14,.93);box-shadow:0 18px 44px rgba(0,0,0,.55);color:#fff0bd;font-size:12px;transform:translateY(160%);opacity:0;transition:transform .25s ease,opacity .25s ease}.pg-intelligence .velora-toast.show{transform:translateY(0);opacity:1}.pg-intelligence .acct-action-row{display:flex;gap:7px;margin-top:13px}.pg-intelligence .acct-action-row button{flex:1;background:transparent;color:#f6e3a1;border:1px solid rgba(229,190,82,.58);border-radius:8px;padding:7px 6px;font:700 10px Tahoma;cursor:pointer;transition:.18s}.pg-intelligence .acct-action-row button:hover{background:rgba(213,174,67,.15);border-color:#ffe49a}.pg-intelligence .acct-action-row .ghost{color:#c7d0df;border-color:rgba(255,255,255,.22)}
+
+/* [block 4 55466e76] shared shell CSS — see src/styles/shell.css */
+
+/* [block 5 ee3c44d9] shared shell CSS — see src/styles/shell.css */
+
+/* [block 6 7e436912] shared shell CSS — see src/styles/shell.css */

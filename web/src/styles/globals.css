@@ -1,0 +1,242 @@
+/*
+ * Velora global styles — ported from legacy page-level resets.
+ * Cascade order mirrors legacy <head>: page tokens → shell/sidebar/topbar →
+ * sidebar-icons overrides → localization → latin digits.
+ */
+@import './tokens.css';
+@import './shell.css';
+
+:root {
+  /* used by sidebar avatar gradient in legacy dashboard block; defined in accounts/connect */
+  --gold-d: #b88d1d;
+  --gold2: #b8862a;
+  --gold3: #f9e6a8;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+html,
+body {
+  min-height: 100%;
+}
+body {
+  font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--txt);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Legacy aurora background (dashboard/app pages) */
+.bgfx {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background:
+    radial-gradient(900px 500px at 85% -10%, rgba(212, 175, 55, 0.08), transparent 60%),
+    radial-gradient(800px 600px at -5% 110%, rgba(59, 130, 246, 0.08), transparent 55%);
+}
+
+/* Shell layout */
+.shell {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-height: 100vh;
+}
+.main {
+  flex: 1;
+  min-width: 0;
+  padding: 24px 28px 80px;
+}
+
+/* Shared buttons (legacy dashboard block) */
+.btn-gold {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #fce38a 0%, #d4af37 50%, #b88d1d 100%);
+  color: #0b121e;
+  border: none;
+  border-radius: 12px;
+  padding: 11px 20px;
+  font-size: 13.5px;
+  font-weight: 800;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(212, 175, 55, 0.3);
+  transition:
+    transform 0.15s,
+    box-shadow 0.2s;
+  text-decoration: none;
+}
+.btn-gold:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 9px 24px rgba(212, 175, 55, 0.4);
+}
+.btn-gold:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 11px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-decoration: none;
+}
+.btn-ghost:hover {
+  color: var(--txt);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+/* Sidebar drawer toggle is hidden on desktop (legacy shows it only ≤980px) */
+.sidebar-drawer-toggle {
+  display: none;
+  background: none;
+  border: none;
+  color: #ffd36c;
+  font-family: inherit;
+}
+
+/* Loading screen (legacy #loading.loading-screen) */
+.loading-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  transition: opacity 0.35s ease;
+}
+.loading-screen.hide {
+  opacity: 0;
+  pointer-events: none;
+}
+.ls-logo {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 2px solid rgba(212, 175, 55, 0.3);
+  border-top-color: var(--gold);
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.loading-screen p {
+  color: var(--muted);
+  font-size: 13px;
+  letter-spacing: 1px;
+}
+
+/* Toast (legacy .velora-toast / #toast) */
+.velora-toast {
+  position: fixed;
+  inset-block-end: 24px;
+  inset-inline-start: 50%;
+  transform: translateX(-50%) translateY(20px);
+  z-index: 9500;
+  padding: 12px 18px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(28, 35, 54, 0.98), rgba(9, 14, 27, 0.98));
+  border: 1px solid rgba(212, 175, 55, 0.4);
+  color: #f4f1e8;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.25s,
+    transform 0.25s;
+}
+[dir='rtl'] .velora-toast {
+  transform: translateX(50%) translateY(20px);
+}
+.velora-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+[dir='rtl'] .velora-toast.show {
+  transform: translateX(50%) translateY(0);
+}
+.velora-toast.ok {
+  border-color: rgba(76, 211, 154, 0.5);
+}
+.velora-toast.err {
+  border-color: rgba(255, 107, 107, 0.5);
+}
+
+/* Confirm dialog (legacy velora-dialog.js injected CSS) */
+.velora-dialog-backdrop{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:20px;background:rgba(2,5,12,.72);backdrop-filter:blur(8px)}
+.velora-dialog{width:min(420px,100%);padding:25px;border:1px solid rgba(233,196,92,.44);border-radius:18px;background:linear-gradient(135deg,rgba(28,35,54,.98),rgba(9,14,27,.98));box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 28px 80px rgba(0,0,0,.58);color:#f4f1e8;font-family:inherit}
+.velora-dialog-icon{width:42px;height:42px;display:grid;place-items:center;border:1px solid rgba(245,135,135,.36);border-radius:12px;background:rgba(231,94,94,.1);color:#f59494}
+.velora-dialog-icon svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8}
+.velora-dialog h2{margin:15px 0 5px;font-size:19px}
+.velora-dialog p{margin:0;color:#aeb6c5;font-size:13px;line-height:1.9}
+.velora-dialog-actions{display:flex;gap:10px;margin-top:22px}
+.velora-dialog button{font:700 12px inherit;font-family:inherit;padding:10px 14px;border-radius:10px;cursor:pointer}
+.velora-dialog-cancel{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);color:#d7dce4}
+.velora-dialog-confirm{background:linear-gradient(135deg,#f1a0a0,#cc5858);border:1px solid rgba(255,220,220,.5);color:#2a0d10;box-shadow:inset 0 1px rgba(255,255,255,.5)}
+
+/* Form primitives shared by app pages (legacy .field/.input/.error-box/.ok-box) */
+.error-box {
+  display: none;
+  background: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.35);
+  color: #ffb4b4;
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-size: 13px;
+  margin-bottom: 14px;
+  line-height: 1.7;
+}
+.error-box.show {
+  display: block;
+}
+.ok-box {
+  display: none;
+  background: rgba(76, 211, 154, 0.1);
+  border: 1px solid rgba(76, 211, 154, 0.35);
+  color: #a8f0d0;
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-size: 13px;
+  margin-bottom: 14px;
+  line-height: 1.7;
+}
+.ok-box.show {
+  display: block;
+}
+
+@media (max-width: 980px) {
+  .main {
+    padding: 16px 14px 24px;
+  }
+}
+
+/* Page roots (legacy `body` per-page themes are scoped under .pg-<route>) */
+[class^='pg-'],
+[class*=' pg-'] {
+  min-height: 100vh;
+}

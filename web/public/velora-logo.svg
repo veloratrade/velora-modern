@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256">
+  <!-- Velora Mark — sharp faceted V + candlestick + spark -->
+  <defs>
+    <linearGradient id="lgA" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f9e6a8"/>
+      <stop offset=".55" stop-color="#e8c45a"/>
+      <stop offset="1" stop-color="#b8862a"/>
+    </linearGradient>
+    <linearGradient id="lgD" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9a741f"/>
+      <stop offset="1" stop-color="#5f4510"/>
+    </linearGradient>
+    <linearGradient id="lgC" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fdf3cd"/>
+      <stop offset="1" stop-color="#d9a936"/>
+    </linearGradient>
+  </defs>
+
+  <!-- sharp outline of the V silhouette -->
+  <path d="M8 10L21 10L32 52L43 10L56 10L32 58Z" fill="none" stroke="#e8c45a" stroke-width=".7"/>
+
+  <!-- left facet (dark bronze) -->
+  <path d="M8 10L21 10L32 52L43 10L56 10L32 58Z" fill="url(#lgD)"/>
+  <path d="M21 10L32 52L32 58L8 10Z" fill="url(#lgD)" opacity=".55"/>
+
+  <!-- right facet (bright gold) -->
+  <path d="M43 10L32 52L32 58L56 10Z" fill="url(#lgA)"/>
+
+  <!-- candlestick rising from the vertex -->
+  <path d="M32 14V24M32 37V52" stroke="url(#lgC)" stroke-width="2.6"/>
+  <rect x="28.5" y="24" width="7" height="13" fill="url(#lgC)"/>
+
+  <!-- spark -->
+  <path d="M32 6.5L33.3 9.7L36.5 11L33.3 12.3L32 15.5L30.7 12.3L27.5 11L30.7 9.7Z" fill="#f7e3a1"/>
+</svg>

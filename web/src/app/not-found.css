@@ -1,0 +1,6 @@
+/* Ported from legacy 404/index.html — page-scoped under .pg-not-found. Do not hand-edit selectors; regenerate with tools/port-legacy-css.py */
+
+/* ---- legacy <style> block 0 (98721a49) ---- */
+
+    .pg-not-found *{box-sizing:border-box}.pg-not-found{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:#07111f;color:#e5edf6;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}.pg-not-found .card{width:min(560px,100%);padding:48px 28px;text-align:center;border:1px solid #20334a;border-radius:22px;background:linear-gradient(145deg,#101d2e,#091522);box-shadow:0 24px 70px #0007}.pg-not-found .logo{width:154px;max-width:55%;height:auto}.pg-not-found .code{margin:28px 0 4px;color:#d4af37;font-size:clamp(64px,18vw,116px);font-weight:800;line-height:1;letter-spacing:.03em;font-variant-numeric:tabular-nums}.pg-not-found .card h1{margin:14px 0 10px;font-size:clamp(23px,5vw,32px)}.pg-not-found .card p{margin:0 auto 30px;max-width:430px;color:#9aa9ba;line-height:1.8}.pg-not-found .action{display:inline-flex;min-height:46px;align-items:center;justify-content:center;padding-inline:24px;border-radius:12px;background:#d4af37;color:#07111f;text-decoration:none;font-weight:750}.pg-not-found .action:hover{background:#e6c45b}.pg-not-found .action:focus-visible{outline:3px solid #fff;outline-offset:3px}
+  
