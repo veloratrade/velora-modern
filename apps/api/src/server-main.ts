@@ -53,7 +53,32 @@ import type { MailPort } from "./mail/mailPort.js";
 import { ResendMailProvider } from "./mail/resendMailProvider.js";
 import { LogMailProvider } from "./mail/logMailProvider.js";
 // AUD-03: the single transaction primitive used across the API adapters.
-import { withTransaction } from "./persistence/pg.js";
+import { withTransaction, poolQuery } from "./persistence/pg.js";
+// ---------------------------------------------------------------------------
+// Backend migration (directive t) — capability composition.
+//
+// RESTRICTED TO PERSISTENCE=postgres, DELIBERATELY. Every migrated capability
+// reads or writes tables the memory posture does not model; wiring them over
+// memory stores would produce a server that LOOKS complete while its state
+// evaporates on restart. Under the memory posture they are simply absent, and
+// every migrated route answers its documented fail-closed 503 — which is the
+// same contract the Phase C capabilities already use.
+// ---------------------------------------------------------------------------
+import { MetaApiWebhookService } from "./webhooks/metaApiWebhookService.js";
+import { PgWebhookEventStore } from "./webhooks/pgWebhookStore.js";
+import { PgBossSyncTrigger, DurableOnlySyncTrigger, type SyncTrigger } from "./webhooks/syncTrigger.js";
+import type { WebhookAccountRef } from "./webhooks/metaApiWebhookService.js";
+import { PgSyncStatusStore } from "./accounts/syncStatusService.js";
+import { PgAnalyticsStore } from "./analytics/analyticsStore.js";
+import { PgTagStore } from "./tags/tagService.js";
+import { AttachmentService, PgAttachmentStore, LocalAttachmentStorage } from "./attachments/attachmentService.js";
+import { PgSubscriptionStore } from "./billing/subscriptionService.js";
+import { PgAiCoachStore } from "./aicoach/aiCoachRoutes.js";
+import { PgAdminStore } from "./admin/adminRoutes.js";
+import { PgPortfolioStore } from "./portfolio/portfolioRoutes.js";
+import { PgEaStore } from "./ea/eaRoutes.js";
+import { PgTenancyStore } from "./tenancy/tenancyRoutes.js";
+import { PgDeveloperStore } from "./developer/developerRoutes.js";
 
 
 async function main(): Promise<void> {
@@ -144,6 +169,21 @@ async function main(): Promise<void> {
     ownership?: OwnershipService;
     credentials?: CredentialService;
     provisioning?: MetaApiProvisioningService;
+    // --- backend migration (directive t) ---
+    webhooks?: MetaApiWebhookService;
+    syncStatus?: import("./accounts/syncStatusService.js").SyncStatusStore;
+    analytics?: import("./analytics/analyticsStore.js").AnalyticsStore;
+    tags?: import("./tags/tagService.js").TagStore;
+    attachments?: AttachmentService;
+    subscriptions?: import("./billing/subscriptionService.js").SubscriptionStore;
+    aiCoach?: import("./aicoach/aiCoachRoutes.js").AiCoachStore;
+    admin?: import("./admin/adminRoutes.js").AdminStore;
+    portfolio?: import("./portfolio/portfolioRoutes.js").PortfolioStore;
+    ea?: import("./ea/eaRoutes.js").EaStore;
+    eaSync?: import("./ea/eaRoutes.js").SyncTriggerPort;
+    deviceTokens?: import("./ea/eaRoutes.js").DeviceTokenEncryptor;
+    tenancy?: import("./tenancy/tenancyRoutes.js").TenancyStore;
+    developer?: import("./developer/developerRoutes.js").DeveloperStore;
   } = {};
   if (boot.jwtSecret !== undefined) {
     capabilities.auth = new AuthService({
@@ -331,6 +371,103 @@ async function main(): Promise<void> {
     });
     console.log(JSON.stringify({ level: "info", event: "metaapi.provisioning.enabled" }));
   }
+
+  // -------------------------------------------------------------------------
+  // Backend migration (directive t): capability wiring.
+  //
+  // Each block states its own precondition and logs whether it is ENABLED, so a
+  // deployment's real capability set is visible at boot instead of being
+  // inferred from which routes happen to answer 503.
+  // -------------------------------------------------------------------------
+  if (pool !== undefined) {
+    // ONE executor over the pool, shared by every migrated store — the same
+    // `QueryFn` shape the Phase C stores already receive (persistence/pg.ts).
+    const q = poolQuery(pool);
+    capabilities.syncStatus = new PgSyncStatusStore(q);
+    capabilities.analytics = new PgAnalyticsStore(q);
+    capabilities.tags = new PgTagStore(q);
+    capabilities.subscriptions = new PgSubscriptionStore(q);
+    capabilities.aiCoach = new PgAiCoachStore(q);
+    capabilities.admin = new PgAdminStore(q);
+    capabilities.portfolio = new PgPortfolioStore(q);
+    capabilities.ea = new PgEaStore(q);
+    capabilities.tenancy = new PgTenancyStore(q);
+    capabilities.developer = new PgDeveloperStore(q);
+
+    // v0.2 webhook ingress. The SECRET decides whether the capability exists at
+    // all: with no secret the route answers 503 WEBHOOK_SECRET_MISSING (the
+    // Legacy contract), never an unverified accept. The secret is read through a
+    // thunk so a rotation takes effect without a restart and no module-scope
+    // binding ever holds it.
+    const webhookSecret = (process.env["METAAPI_WEBHOOK_SECRET"] ?? "").trim();
+    if (webhookSecret !== "") {
+      const webhookStore = new PgWebhookEventStore(pool);
+      let trigger: SyncTrigger = new DurableOnlySyncTrigger();
+      const databaseUrl = boot.persistence.databaseUrl;
+      if (databaseUrl !== undefined) {
+        try {
+          trigger = await PgBossSyncTrigger.create(databaseUrl);
+        } catch {
+          // Degradation, not failure: the event is already recorded durably and
+          // the worker's scheduled tick still converges. Code only in the log —
+          // never the connection string.
+          console.log(JSON.stringify({ level: "warn", event: "webhooks.sync_trigger_unavailable" }));
+        }
+      }
+      capabilities.webhooks = new MetaApiWebhookService({
+        store: webhookStore,
+        secret: () => (process.env["METAAPI_WEBHOOK_SECRET"] ?? "").trim() || null,
+        resolveAccount: async (metaapiAccountId): Promise<WebhookAccountRef | null> => {
+          const rows = await q(
+            `SELECT id::text AS id, user_id::text AS user_id, metaapi_account_id, sync_cursor
+               FROM trading_accounts WHERE metaapi_account_id = $1 LIMIT 1`,
+            [metaapiAccountId],
+          );
+          const row = rows[0];
+          if (row === undefined) return null;
+          return {
+            accountId: String(row.id),
+            userId: String(row.user_id),
+            metaapiAccountId: String(row.metaapi_account_id),
+            syncCursor: row.sync_cursor === null ? null : String(row.sync_cursor),
+          };
+        },
+        markSyncPending: async (accountId) => {
+          // `sync_status` is constrained by 0004 to
+          // DISCONNECTED|CONNECTING|SYNCING|CONNECTED|ERROR. There is no
+          // "PENDING": the closest TRUE statement the vocabulary can make is
+          // CONNECTING ("not yet converged"), and the DURABLE record of the
+          // outstanding work is the webhook_events row plus the queued job — not
+          // this column. Writing an out-of-vocabulary value would be rejected by
+          // the engine (found by the real-PG battery).
+          await q(
+            "UPDATE trading_accounts SET sync_status = 'CONNECTING', updated_at = now() WHERE id = $1 AND sync_status NOT IN ('SYNCING', 'CONNECTED')",
+            [accountId],
+          );
+        },
+        trigger,
+      });
+      console.log(JSON.stringify({ level: "info", event: "webhooks.enabled", trigger: trigger.name }));
+    } else {
+      console.log(JSON.stringify({ level: "warn", event: "webhooks.secret_absent" }));
+    }
+
+    // Attachments: only with an explicitly configured storage root. A container
+    // filesystem is ephemeral, so this is never enabled implicitly — the local
+    // adapter is for staging/dev, and the production object store is an Owner
+    // decision recorded in the migration report.
+    const attachmentDir = (process.env["ATTACHMENT_STORAGE_DIR"] ?? "").trim();
+    if (attachmentDir !== "") {
+      capabilities.attachments = new AttachmentService(
+        new PgAttachmentStore(q),
+        new LocalAttachmentStorage(attachmentDir),
+      );
+      console.log(JSON.stringify({ level: "info", event: "attachments.enabled", storage: "local-disk" }));
+    } else {
+      console.log(JSON.stringify({ level: "warn", event: "attachments.storage_absent" }));
+    }
+  }
+  void withTransaction;
 
   const app = createApp({
     allowedOrigins: boot.allowedOrigins,

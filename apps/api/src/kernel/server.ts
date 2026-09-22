@@ -24,6 +24,7 @@ import {
   type AuthorityContext,
 } from "@velora/contracts";
 import { newSecurityContext, buildCsp, SECURITY_HEADERS, originAllowed } from "./security.js";
+import { dispatchExtendedRoutes } from "../routes/extendedRoutes.js";
 import { AuthService, AuthError } from "../auth/authService.js";
 import { AdminUserService, type ActorContext } from "../auth/adminUserService.js";
 import { OwnershipService } from "../auth/ownershipService.js";
@@ -76,6 +77,43 @@ export interface ApiConfig {
   /** Trusted reverse-proxy CIDRs for X-Forwarded-For (PHP parity). Default:
    *  none — the header is never honored (fail-closed). */
   readonly trustedProxyCidrs?: readonly string[];
+  // ------------------------------------------------------------------------
+  // Backend migration (directive t) capability slots.
+  //
+  // Each slot is OPTIONAL and carries the identical fail-closed contract the
+  // Phase C slots already use: absent ⇒ the migrated route answers 503 rather
+  // than degrading to an unauthenticated or unbounded path. The kernel never
+  // constructs these services itself — `server-main.ts` is the single
+  // composition root, so a capability's dependencies stay visible in one place.
+  // ------------------------------------------------------------------------
+  /** v0.2 MetaAPI webhook ingress (signature-authenticated, no bearer). */
+  readonly webhooks?: import("../webhooks/metaApiWebhookService.js").MetaApiWebhookService;
+  /** v0.2 connection status monitor. */
+  readonly syncStatus?: import("../accounts/syncStatusService.js").SyncStatusStore;
+  /** v0.5 analytics reads. */
+  readonly analytics?: import("../analytics/analyticsStore.js").AnalyticsStore;
+  /** v0.5 journal tags. */
+  readonly tags?: import("../tags/tagService.js").TagStore;
+  /** v0.5 trade attachments (screenshots). */
+  readonly attachments?: import("../attachments/attachmentService.js").AttachmentService;
+  /** v1.0 subscriptions (Stripe). */
+  readonly subscriptions?: import("../billing/subscriptionService.js").SubscriptionStore;
+  /** v1.0 AI coach insight store + consent. */
+  readonly aiCoach?: import("../aicoach/aiCoachRoutes.js").AiCoachStore;
+  /** v1.0 admin read surface (audit trail + platform KPIs). */
+  readonly admin?: import("../admin/adminRoutes.js").AdminStore;
+  /** v1.5 portfolio / prop drawdown / FX reads. */
+  readonly portfolio?: import("../portfolio/portfolioRoutes.js").PortfolioStore;
+  /** v2.0 EA ingestion store. */
+  readonly ea?: import("../ea/eaRoutes.js").EaStore;
+  /** v2.0 sync dispatch used by EA ingestion (falls back to durable-only). */
+  readonly eaSync?: import("../ea/eaRoutes.js").SyncTriggerPort;
+  /** v2.0 push registration encryptor (credential master key). */
+  readonly deviceTokens?: import("../ea/eaRoutes.js").DeviceTokenEncryptor;
+  /** v2.5 public profiles + copy relationships. */
+  readonly tenancy?: import("../tenancy/tenancyRoutes.js").TenancyStore;
+  /** v3.0 developer API keys + ML prediction reads. */
+  readonly developer?: import("../developer/developerRoutes.js").DeveloperStore;
 }
 
 /** Throttled routes (inc 7): the implemented Local auth routes with
@@ -1024,7 +1062,57 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
     }
   }
 
+  // ------------------------------------------------------------------------
+  // Backend migration (directive t) — delegated capability surface.
+  //
+  // Placed immediately BEFORE the terminal 404 so the Phase C routes above keep
+  // precedence and a migrated handler can never shadow an existing route. A
+  // handler returns `null` for the (method, path) pairs it does not own, and
+  // control falls through to the 404 exactly as before.
+  //
+  // The context exposes only what a migrated route needs: the verified bearer
+  // claims (reusing THIS function's single verification implementation), the
+  // kernel's body readers, and the System Owner predicate. No route re-derives
+  // identity, and no route reads ownership state directly.
+  // ------------------------------------------------------------------------
+  const extended = await dispatchExtendedRoutes({
+    req,
+    method,
+    path: url.pathname,
+    url,
+    config,
+    requestId: sec.requestId,
+    authenticate: (r) => (config.auth === undefined ? null : authenticateRequest(r, config.auth)),
+    readBody: parseJsonBody,
+    readRawBody,
+    isSystemOwner: async (userId: string) => {
+      if (config.ownership === undefined) return false;
+      const state = await config.ownership.status();
+      return state.claimed && state.ownerUserId === userId;
+    },
+  });
+  if (extended !== null) return extended;
+
   return { status: 404, body: fail("NOT_FOUND", "no such route", sec.requestId) };
+}
+
+/**
+ * Read the raw request bytes (backend migration).
+ *
+ * Separate from `parseJsonBody` on purpose: HMAC verification is over the bytes
+ * the provider signed, and re-encoding a parsed object would produce different
+ * bytes. `maxBytes` defaults to the 1 MiB JSON cap; an attachment upload passes
+ * its own 5 MiB bound.
+ */
+async function readRawBody(req: IncomingMessage, maxBytes = 1_048_576): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > maxBytes) throw new BodyParseError("request body too large");
+    chunks.push(chunk as Buffer);
+  }
+  return Buffer.concat(chunks);
 }
 
 export function createApp(config: ApiConfig): Server {
@@ -1052,6 +1140,14 @@ export function createApp(config: ApiConfig): Server {
           delete headers["Content-Type"];
           res.writeHead(204, headers);
           res.end();
+          return;
+        }
+        if (Buffer.isBuffer(r.body)) {
+          // Binary payload (an attachment's bytes). The handler already set the
+          // exact Content-Type/Length; the JSON envelope does not apply.
+          headers["Content-Type"] = r.headers?.["Content-Type"] ?? "application/octet-stream";
+          res.writeHead(r.status, headers);
+          res.end(r.body);
           return;
         }
         res.writeHead(r.status, headers);
