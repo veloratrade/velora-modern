@@ -46,6 +46,12 @@ export const HANDSHAKE = "/api/v1/ea/handshake";
 export const TRADE_EVENT = "/api/v1/ea/trade-event";
 export const REGISTER_PUSH = "/api/v1/devices/register-push";
 const DEVICE_ID = /^\/api\/v1\/devices\/([^/]+)$/;
+/**
+ * EA key lifecycle. The key belongs to an ACCOUNT (`trading_accounts.ea_api_key_hash`),
+ * so the path is account-scoped: an EA authorises one terminal on one account,
+ * never "the user".
+ */
+const EA_KEY = /^\/api\/v1\/accounts\/([^/]+)\/ea-key$/;
 
 export const DEVICE_PLATFORMS: readonly string[] = ["ios", "android", "web"];
 
@@ -73,7 +79,10 @@ export interface EaStore {
   /** Look up a candidate account by the HASH of the presented key. */
   findByKeyHash(keyHash: string): Promise<EaAccount | null>;
   touchLastSeen(accountId: string): Promise<void>;
+  /** Issue (or rotate) an account's EA key. Ownership is part of the predicate. */
   setKeyHash(accountId: string, userId: string, keyHash: string): Promise<boolean>;
+  /** Revoke without deleting the hash, so the key can never be re-used. */
+  revokeKey(accountId: string, userId: string): Promise<boolean>;
   /** Record a device token: encrypted at rest, per 0019. */
   registerDevice(input: {
     userId: string;
@@ -123,6 +132,17 @@ export class PgEaStore implements EaStore {
         WHERE id = $1 AND user_id = $2
         RETURNING id`,
       [accountId, userId, keyHash],
+    );
+    return rows.length > 0;
+  }
+
+  async revokeKey(accountId: string, userId: string): Promise<boolean> {
+    const rows = await this.q(
+      `UPDATE trading_accounts
+          SET ea_key_revoked_at = now(), updated_at = now()
+        WHERE id = $1 AND user_id = $2 AND ea_api_key_hash IS NOT NULL AND ea_key_revoked_at IS NULL
+        RETURNING id`,
+      [accountId, userId],
     );
     return rows.length > 0;
   }
@@ -196,6 +216,16 @@ export class MemoryEaStore implements EaStore {
     return false;
   }
 
+  async revokeKey(accountId: string, userId: string): Promise<boolean> {
+    for (const [hash, account] of [...this.#accounts]) {
+      if (account.accountId === accountId && account.userId === userId) {
+        this.#accounts.delete(hash);
+        return true;
+      }
+    }
+    return false;
+  }
+
   async registerDevice(input: {
     userId: string;
     platform: string;
@@ -260,12 +290,41 @@ async function authenticateEa(ctx: ExtendedRouteContext, store: EaStore): Promis
 
 export async function handleEaRoutes(ctx: ExtendedRouteContext): Promise<RouteResult | null> {
   const deviceMatch = DEVICE_ID.exec(ctx.path);
+  const eaKeyMatch = EA_KEY.exec(ctx.path);
   const isEa = ctx.path === HANDSHAKE || ctx.path === TRADE_EVENT;
   const isDevice = ctx.path === REGISTER_PUSH || deviceMatch !== null;
-  if (!isEa && !isDevice) return null;
+  if (!isEa && !isDevice && eaKeyMatch === null) return null;
 
   const store: EaStore | null = ctx.config.ea ?? null;
   if (store === null) return capabilityAbsent(ctx, "EA ingestion");
+
+  // ---- EA key lifecycle (bearer-authenticated: a human, not an EA) ----------
+  if (eaKeyMatch !== null) {
+    const claims = ctx.authenticate(ctx.req);
+    if (claims === null) return { status: 401, body: fail("UNAUTHENTICATED", "Unauthenticated.", ctx.requestId) };
+    const accountId = decodeURIComponent(eaKeyMatch[1] ?? "");
+
+    if (ctx.method === "POST") {
+      const generated = generateEaKey();
+      const stored = await store.setKeyHash(accountId, claims.sub, generated.hash);
+      // Non-disclosing 404: an account the caller does not own is indistinguishable
+      // from one that does not exist.
+      if (!stored) return { status: 404, body: fail("NOT_FOUND", "Account not found.", ctx.requestId) };
+      // The plaintext exists only in this response. The hash is what is stored,
+      // so a lost key is ROTATED (another POST), never recovered.
+      return {
+        status: 201,
+        body: ok({ account_id: accountId, ea_key: generated.key, key_shown_once: true }),
+      };
+    }
+    if (ctx.method === "DELETE") {
+      const revoked = await store.revokeKey(accountId, claims.sub);
+      if (!revoked) return { status: 404, body: fail("NOT_FOUND", "No active EA key for that account.", ctx.requestId) };
+      return { status: 204, body: null };
+    }
+    return { status: 405, body: fail("METHOD_NOT_ALLOWED", "Method not allowed.", ctx.requestId), headers: { Allow: "POST, DELETE" } };
+  }
+
   if (ctx.method === "GET") return { status: 405, body: fail("METHOD_NOT_ALLOWED", "Method not allowed.", ctx.requestId) };
 
   if (isEa) {
@@ -278,14 +337,18 @@ export async function handleEaRoutes(ctx: ExtendedRouteContext): Promise<RouteRe
     await store.touchLastSeen(account.accountId);
 
     if (ctx.path === HANDSHAKE) {
-      // The handshake confirms identity and tells the EA whether server-side
-      // history is still wanted. It never returns the key or its hash.
+      // CONTRACT ACCURACY: the earlier draft advertised `hmac_required: true`
+      // while no request signature was ever verified. Neither the roadmap (v2.0
+      // names `/ea/handshake`, `/ea/trade-event` and `ea_api_key_hash`) nor any
+      // Legacy evidence defines an EA request-signature scheme, so the handshake
+      // now states the scheme that is ACTUALLY enforced: a per-account bearer
+      // key over TLS. No transport is claimed that does not exist.
       return {
         status: 200,
         body: ok({
           account_id: account.accountId,
           label: account.label,
-          hmac_required: true,
+          auth_scheme: "bearer-ea-key",
           server_time: new Date().toISOString(),
         }),
       };
