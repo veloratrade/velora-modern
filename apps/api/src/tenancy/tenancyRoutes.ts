@@ -36,7 +36,7 @@
 // verified in this pass. Relationships are recorded; nothing claims to execute.
 import { fail, ok } from "@velora/contracts";
 import { computeSummary, type MetricTrade } from "@velora/domain";
-import { isUniqueViolation, type QueryFn } from "../persistence/pg.js";
+import { isCheckViolation, isUniqueViolation, type QueryFn } from "../persistence/pg.js";
 import { capabilityAbsent, unauthenticated, validation } from "../routes/responses.js";
 import type { ExtendedRouteContext, RouteResult } from "../routes/types.js";
 
@@ -67,20 +67,45 @@ export interface Relationship {
   status: string;
 }
 
+/** Why a relationship could not be created. Each maps to one HTTP status. */
+export type RelationshipOutcome =
+  | { readonly ok: true; readonly relationship: Relationship }
+  | { readonly ok: false; readonly reason: "leader-account-not-found" | "self-copy" | "duplicate" };
+
 export interface TenancyStore {
   publicProfileByHash(hash: string): Promise<PublicProfile | null>;
   publicProfileByHandle(handle: string): Promise<PublicProfile | null>;
   accountOwnedBy(userId: string, accountId: string): Promise<boolean>;
+  /**
+   * Create a copy relationship.
+   *
+   * SECURITY: the leader's USER id is NOT a parameter. It is derived by the
+   * store from the leader ACCOUNT row, so a caller cannot claim to be copying an
+   * account they do not own by supplying someone else's user id — the previous
+   * signature allowed exactly that, and the client-supplied id was written
+   * straight into the row.
+   */
   createRelationship(input: {
-    leaderUserId: string;
     followerUserId: string;
     leaderAccountId: string;
     followerAccountId: string;
     allocationMode: string;
     allocationValue: string;
-  }): Promise<Relationship | null>;
+  }): Promise<RelationshipOutcome>;
   listRelationships(userId: string): Promise<Relationship[]>;
   revokeRelationship(userId: string, id: string): Promise<boolean>;
+  /**
+   * Transition a live relationship's status.
+   *
+   * `active` may only be set by the LEADER (the party whose signals would be
+   * broadcast); `paused` may be set by either party. `revoked` is terminal and
+   * is reached through `revokeRelationship`, never through a status write.
+   */
+  setRelationshipStatus(
+    userId: string,
+    id: string,
+    status: "active" | "paused",
+  ): Promise<Relationship | null>;
 }
 
 type Row = Record<string, unknown>;
@@ -140,52 +165,59 @@ export class PgTenancyStore implements TenancyStore {
   }
 
   async createRelationship(input: {
-    leaderUserId: string;
     followerUserId: string;
     leaderAccountId: string;
     followerAccountId: string;
     allocationMode: string;
     allocationValue: string;
-  }): Promise<Relationship | null> {
+  }): Promise<RelationshipOutcome> {
     let rows: ReadonlyArray<Record<string, unknown>>;
     try {
+      // `leader_user_id` is SELECTed from the leader ACCOUNT row inside the same
+      // statement: the leader identity is server-derived, never client-supplied.
+      // A non-existent leader account simply inserts nothing.
       rows = await this.q(
         `INSERT INTO copy_relationships
            (leader_user_id, follower_user_id, leader_account_id, follower_account_id, allocation_mode, allocation_value, status)
-         VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+         SELECT a.user_id, $1, a.id, $2, $3, $4, 'pending'
+           FROM trading_accounts a
+          WHERE a.id = $5
          RETURNING id::text, leader_user_id::text, follower_user_id::text, leader_account_id::text,
                    follower_account_id::text, allocation_mode, allocation_value::text, status`,
         [
-          input.leaderUserId,
           input.followerUserId,
-          input.leaderAccountId,
           input.followerAccountId,
           input.allocationMode,
           input.allocationValue,
+          input.leaderAccountId,
         ],
       );
     } catch (err) {
       // 0020's PARTIAL UNIQUE index (leader_account_id, follower_account_id)
       // WHERE status IN (pending, active, paused) is the authority on "a live
-      // relationship for this pair already exists". `ON CONFLICT` cannot be used
-      // here: index inference needs the partial predicate, and a self-copy
-      // (leader_user_id = follower_user_id) fails the different CHECK first, so
-      // conflating them would report the wrong conflict. A unique violation is
-      // therefore translated explicitly, and anything else propagates.
-      if (isUniqueViolation(err, "copy_relationships")) return null;
+      // relationship for this pair already exists", and its
+      // `leader_user_id <> follower_user_id` CHECK is the authority on self-copy.
+      // `ON CONFLICT` cannot express either (index inference needs the partial
+      // predicate; a CHECK is not a conflict target), so both violations are
+      // translated explicitly and anything else propagates.
+      if (isUniqueViolation(err, "copy_relationships")) return { ok: false, reason: "duplicate" };
+      if (isCheckViolation(err)) return { ok: false, reason: "self-copy" };
       throw err;
     }
     const row = rows[0];
-    if (row === undefined) return null;
+    if (row === undefined) return { ok: false, reason: "leader-account-not-found" };
     return {
-      id: s(row["id"]),
-      leaderUserId: s(row["leader_user_id"]),
-      followerUserId: s(row["follower_user_id"]),
-      leaderAccountId: s(row["leader_account_id"]),
-      followerAccountId: s(row["follower_account_id"]),
-      allocationMode: s(row["allocation_mode"]),
-      allocationValue: s(row["allocation_value"]),
-      status: s(row["status"]),
+      ok: true,
+      relationship: {
+        id: s(row["id"]),
+        leaderUserId: s(row["leader_user_id"]),
+        followerUserId: s(row["follower_user_id"]),
+        leaderAccountId: s(row["leader_account_id"]),
+        followerAccountId: s(row["follower_account_id"]),
+        allocationMode: s(row["allocation_mode"]),
+        allocationValue: s(row["allocation_value"]),
+        status: s(row["status"]),
+      },
     };
   }
 
@@ -208,6 +240,39 @@ export class PgTenancyStore implements TenancyStore {
       allocationValue: s(row["allocation_value"]),
       status: s(row["status"]),
     }));
+  }
+
+  async setRelationshipStatus(
+    userId: string,
+    id: string,
+    status: "active" | "paused",
+  ): Promise<Relationship | null> {
+    // AUTHORIZATION IS IN THE PREDICATE, not in a preceding read: only the
+    // LEADER may activate (its signals would be broadcast), while either party
+    // may pause. A revoked link can never be resumed, and a row the caller is
+    // not part of cannot be touched at all.
+    const rows = await this.q(
+      `UPDATE copy_relationships SET status = $3, updated_at = now()
+        WHERE id = $1
+          AND status <> 'revoked'
+          AND (($3 = 'active' AND leader_user_id = $2)
+            OR ($3 = 'paused' AND (leader_user_id = $2 OR follower_user_id = $2)))
+        RETURNING id::text, leader_user_id::text, follower_user_id::text, leader_account_id::text,
+                  follower_account_id::text, allocation_mode, allocation_value::text, status`,
+      [id, userId, status],
+    );
+    const row = rows[0];
+    if (row === undefined) return null;
+    return {
+      id: s(row["id"]),
+      leaderUserId: s(row["leader_user_id"]),
+      followerUserId: s(row["follower_user_id"]),
+      leaderAccountId: s(row["leader_account_id"]),
+      followerAccountId: s(row["follower_account_id"]),
+      allocationMode: s(row["allocation_mode"]),
+      allocationValue: s(row["allocation_value"]),
+      status: s(row["status"]),
+    };
   }
 
   async revokeRelationship(userId: string, id: string): Promise<boolean> {
@@ -248,24 +313,50 @@ export class MemoryTenancyStore implements TenancyStore {
     return this.#accounts.get(accountId) === userId;
   }
   async createRelationship(input: {
-    leaderUserId: string;
     followerUserId: string;
     leaderAccountId: string;
     followerAccountId: string;
     allocationMode: string;
     allocationValue: string;
-  }): Promise<Relationship | null> {
+  }): Promise<RelationshipOutcome> {
+    // The leader identity comes from the ACCOUNT row, exactly as the PostgreSQL
+    // implementation derives it in SQL.
+    const leaderUserId = this.#accounts.get(input.leaderAccountId);
+    if (leaderUserId === undefined) return { ok: false, reason: "leader-account-not-found" };
+    if (leaderUserId === input.followerUserId) return { ok: false, reason: "self-copy" };
     const duplicate = this.#relationships.some(
       (r) =>
         r.leaderAccountId === input.leaderAccountId &&
         r.followerAccountId === input.followerAccountId &&
         r.status !== "revoked",
     );
-    if (duplicate) return null;
+    if (duplicate) return { ok: false, reason: "duplicate" };
     this.#seq += 1;
-    const relationship: Relationship = { id: String(this.#seq), status: "pending", ...input };
+    const relationship: Relationship = {
+      id: String(this.#seq),
+      leaderUserId,
+      followerUserId: input.followerUserId,
+      leaderAccountId: input.leaderAccountId,
+      followerAccountId: input.followerAccountId,
+      allocationMode: input.allocationMode,
+      allocationValue: input.allocationValue,
+      status: "pending",
+    };
     this.#relationships.push(relationship);
-    return relationship;
+    return { ok: true, relationship };
+  }
+
+  async setRelationshipStatus(
+    userId: string,
+    id: string,
+    status: "active" | "paused",
+  ): Promise<Relationship | null> {
+    const found = this.#relationships.find((r) => r.id === id && r.status !== "revoked");
+    if (found === undefined) return null;
+    if (status === "active" && found.leaderUserId !== userId) return null;
+    if (status === "paused" && found.leaderUserId !== userId && found.followerUserId !== userId) return null;
+    found.status = status;
+    return found;
   }
   async listRelationships(userId: string): Promise<Relationship[]> {
     return this.#relationships.filter((r) => (r.leaderUserId === userId || r.followerUserId === userId) && r.status !== "revoked");
@@ -305,7 +396,7 @@ export async function handleTenancyRoutes(ctx: ExtendedRouteContext): Promise<Ro
 
   const store: TenancyStore | null = ctx.config.tenancy ?? null;
   if (store === null) return capabilityAbsent(ctx, "tenancy");
-  if (ctx.method !== "GET" && ctx.method !== "POST" && ctx.method !== "DELETE") {
+  if (ctx.method !== "GET" && ctx.method !== "POST" && ctx.method !== "DELETE" && ctx.method !== "PATCH") {
     return { status: 405, body: fail("METHOD_NOT_ALLOWED", "Method not allowed.", ctx.requestId) };
   }
 
@@ -342,33 +433,55 @@ export async function handleTenancyRoutes(ctx: ExtendedRouteContext): Promise<Ro
     const value = typeof body["allocation_value"] === "string" ? body["allocation_value"] : "1";
     if (!/^\d+(\.\d{1,8})?$/.test(value) || /^0(\.0+)?$/.test(value)) return validation(ctx, { allocation_value: "must be a positive decimal" });
 
-    // The FOLLOWER must own the follower account: nobody can be subscribed to
-    // copying without their own consenting account. A leader account belonging
-    // to somebody else is resolved to its real owner by the store's INSERT via
-    // the account row's user_id — queried here so a forged owner id cannot be
-    // supplied by the client.
+    // The FOLLOWER must own the follower account: a subscription to copying
+    // requires the caller's own consenting account.
     if (!(await store.accountOwnedBy(claims.sub, followerAccountId))) {
       return { status: 404, body: fail("NOT_FOUND", "Follower account not found.", ctx.requestId) };
     }
-    const leaderUserId = body["leader_user_id"];
-    if (typeof leaderUserId !== "string" || !/^\d+$/.test(leaderUserId)) return validation(ctx, { leader_user_id: "required" });
-    if (leaderUserId === claims.sub) return validation(ctx, { leader_user_id: "cannot copy yourself" });
 
-    const created = await store.createRelationship({
-      leaderUserId,
+    // NOTE: `leader_user_id` is deliberately NOT read from the body. The leader
+    // is derived from the leader ACCOUNT row by the store, so a client cannot
+    // attach somebody else's user id to a relationship pointing at their account.
+    const outcome = await store.createRelationship({
       followerUserId: claims.sub,
       leaderAccountId,
       followerAccountId,
       allocationMode: mode,
       allocationValue: value,
     });
-    if (created === null) {
+    if (!outcome.ok) {
+      if (outcome.reason === "leader-account-not-found") {
+        return { status: 404, body: fail("NOT_FOUND", "Leader account not found.", ctx.requestId) };
+      }
+      if (outcome.reason === "self-copy") {
+        return validation(ctx, { leader_account_id: "cannot copy your own account" });
+      }
       return { status: 409, body: fail("RELATIONSHIP_EXISTS", "An active relationship already exists for that pair.", ctx.requestId) };
     }
-    return { status: 201, body: ok(created) };
+    return { status: 201, body: ok(outcome.relationship) };
   }
 
   const id = decodeURIComponent(relationshipMatch?.[1] ?? "");
+
+  if (ctx.method === "PATCH") {
+    // Status transitions: the LEADER activates (its signals would be broadcast)
+    // and either party may pause. `revoked` is terminal and is reached only
+    // through DELETE below.
+    const body = await ctx.readBody(ctx.req);
+    const status = body["status"];
+    if (status !== "active" && status !== "paused") {
+      return validation(ctx, { status: "must be active or paused" });
+    }
+    const updated = await store.setRelationshipStatus(claims.sub, id, status);
+    if (updated === null) {
+      // One response for "not yours", "not found", "already revoked" and "not
+      // permitted by your side of the relationship" — the endpoint must not
+      // disclose another user's relationship ids or scope of authority.
+      return { status: 404, body: fail("NOT_FOUND", "Relationship not found.", ctx.requestId) };
+    }
+    return { status: 200, body: ok(updated) };
+  }
+
   if (ctx.method !== "DELETE") return { status: 405, body: fail("METHOD_NOT_ALLOWED", "Method not allowed.", ctx.requestId) };
   const revoked = await store.revokeRelationship(claims.sub, id);
   if (!revoked) return { status: 404, body: fail("NOT_FOUND", "Relationship not found.", ctx.requestId) };
