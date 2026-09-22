@@ -25,6 +25,7 @@ import {
   RecomputeBoundError,
   recomputeUserAnalytics,
 } from "../../apps/worker/src/analytics/dailyRecompute.ts";
+import { listRecomputeUsers, recomputeWindow } from "../../apps/worker/src/scheduler/analyticsScheduler.ts";
 import type { Pool } from "pg";
 
 const PG_URL = process.env.DATABASE_URL;
@@ -128,6 +129,15 @@ const dailyRows = async (pool: Pool, userId: string): Promise<DailyRow[]> =>
        FROM user_analytics_daily WHERE user_id = $1::bigint ORDER BY day, tz_basis`,
     [userId],
   )).rows as DailyRow[];
+
+/** The tick's own due-set query (this is what decides who gets a job). */
+const due = async (h: Fixture, from = FROM, to = TO): Promise<string[]> =>
+  listRecomputeUsers(
+    async (sql, params) => (await h.pool.query(sql, params as unknown[])).rows,
+    from,
+    to,
+    50,
+  );
 
 const run = (h: Fixture, from = FROM, to = TO) =>
   recomputeUserAnalytics(async (sql, params) => (await h.pool.query(sql, params as unknown[])).rows, {
@@ -358,6 +368,125 @@ test("PG: the account summary aggregates the full history and carries peak/troug
     assert.equal(row["equity_peak"], "110.00", "the cumulative series peaks after the 100.00 trade");
     assert.equal(row["equity_trough"], "0.00", "the series starts at zero and never goes below it");
     assert.equal(row["max_drawdown"], "40.00");
+  } finally {
+    await h.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// CONVERGENCE THROUGH THE TICK — the property the pass-2 due set could not reach
+// ---------------------------------------------------------------------------
+
+test("PG: a deleted trade brings its user BACK into the due set, and the run removes the stale row", { skip: SKIP }, async () => {
+  const h = await harness();
+  try {
+    const tradeId = await addTrade(h, { accountId: h.utcAccount, occurredAt: "2026-09-20T09:00:00.000Z", netPnl: "50.00" });
+
+    // A fresh ledger with no derived rows is due for reason (1): new work.
+    assert.deepEqual(await due(h), [h.user]);
+    await run(h);
+    assert.equal((await dailyRows(h.pool, h.user)).length, 1);
+
+    // Converged: the tick is now silent for this user (no needless hourly work).
+    assert.deepEqual(await due(h), [], "a converged user is not re-enqueued forever");
+
+    // The user deletes the trade. The tombstone bumps `updated_at`, which is the
+    // ONLY evidence that the derived row is now wrong — and pass 2's due set
+    // (activity only) could not see it: the trade is no longer a live row inside
+    // the window. This is report item Q-4.
+    await h.pool.query("UPDATE trades SET deleted_at = now(), updated_at = now() WHERE id = $1::bigint", [tradeId]);
+    assert.deepEqual(await due(h), [h.user], "stale derived state is work, not history");
+
+    // The recompute removes the row it can no longer justify…
+    const second = await run(h);
+    assert.equal(second.dailyRows, 0);
+    assert.equal(second.removedDailyRows, 1);
+    assert.equal((await dailyRows(h.pool, h.user)).length, 0);
+    // …and the loop TERMINATES: nothing is left to fix, so nothing is re-queued.
+    assert.deepEqual(await due(h), [], "the due set is self-terminating, not a permanent queue");
+  } finally {
+    await h.close();
+  }
+});
+
+test("PG: an edited trade re-enters the due set, and a quarantined ledger is caught without a bump", { skip: SKIP }, async () => {
+  const h = await harness();
+  try {
+    const tradeId = await addTrade(h, { accountId: h.utcAccount, occurredAt: "2026-09-20T09:00:00.000Z", netPnl: "50.00" });
+    await run(h);
+    assert.deepEqual(await due(h), []);
+
+    // (a) An in-window edit: the ledger moved after the aggregate was computed.
+    await h.pool.query("UPDATE trades SET net_pnl = 75.00, updated_at = now() WHERE id = $1::bigint", [tradeId]);
+    assert.deepEqual(await due(h), [h.user]);
+    await run(h);
+    assert.equal((await dailyRows(h.pool, h.user))[0]?.net_pnl, "75.00", "the corrected figure reaches the aggregate");
+    assert.deepEqual(await due(h), []);
+
+    // (b) Quarantine does NOT bump `updated_at` — the derived row is nonetheless
+    //     unjustified, which is why the due set has reason (3) as well.
+    await h.pool.query("UPDATE trades SET quarantined = true WHERE id = $1::bigint", [tradeId]);
+    assert.deepEqual(await due(h), [h.user], "reason (3): the ledger behind the row is gone");
+    await run(h);
+    assert.equal((await dailyRows(h.pool, h.user)).length, 0);
+    assert.deepEqual(await due(h), []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("PG: an orphaned account summary is due; a merely stale one for an inactive account is not", { skip: SKIP }, async () => {
+  const h = await harness();
+  try {
+    const tradeId = await addTrade(h, { accountId: h.utcAccount, occurredAt: "2026-09-20T09:00:00.000Z", netPnl: "50.00" });
+    await run(h);
+    assert.equal((await h.pool.query("SELECT COUNT(*)::int AS n FROM account_performance_summary")).rows[0].n, 1);
+    assert.deepEqual(await due(h), []);
+
+    // The account's ledger is emptied: the summary is now an orphan and the
+    // recompute's account pass (which is NOT window-bounded) removes it.
+    await h.pool.query("UPDATE trades SET deleted_at = now(), updated_at = now() WHERE id = $1::bigint", [tradeId]);
+    assert.deepEqual(await due(h), [h.user]);
+    await run(h);
+    assert.equal((await h.pool.query("SELECT COUNT(*)::int AS n FROM account_performance_summary")).rows[0].n, 0);
+    assert.deepEqual(await due(h), [], "converged: no work is manufactured that the run cannot finish");
+
+    // A trade OUTSIDE the recompute window that changes later does NOT enter the
+    // due set: the window-bounded run could not refresh it, so listing it would
+    // queue the same user every hour forever.
+    const old = await addTrade(h, { accountId: h.utcAccount, occurredAt: "2025-01-15T09:00:00.000Z", netPnl: "10.00" });
+    await run(h, FROM, TO);
+    await h.pool.query("UPDATE trades SET net_pnl = 11.00, updated_at = now() WHERE id = $1::bigint", [old]);
+    assert.deepEqual(await due(h), [], "no unfixable work is queued");
+  } finally {
+    await h.close();
+  }
+});
+
+test("PG: the tick's window is the documented default and the due set is bounded", { skip: SKIP }, async () => {
+  const h = await harness();
+  try {
+    const now = new Date("2026-09-22T12:00:00.000Z");
+    const { from, to } = recomputeWindow(now);
+    assert.equal(to, now.toISOString());
+    assert.equal(from, "2026-06-24T12:00:00.000Z", "90 days by default");
+
+    // Inside the window ⇒ due. Outside ⇒ the recompute would ignore it, so it is
+    // not work (it is still legitimate data, just not this pass's business).
+    await addTrade(h, { accountId: h.utcAccount, occurredAt: "2026-09-20T09:00:00.000Z", netPnl: "5.00" });
+    await addTrade(h, { accountId: h.utcAccount, occurredAt: "2026-01-01T09:00:00.000Z", netPnl: "5.00" });
+    assert.deepEqual(await due(h, from, to), [h.user]);
+    const bounded = await due(h, from, to);
+    assert.equal(bounded.length, 1, "one entry per user, not per trade");
+
+    // The batch bound is a bound: LIMIT is applied to the union.
+    const short = await listRecomputeUsers(
+      async (sql, params) => (await h.pool.query(sql, params as unknown[])).rows,
+      from,
+      to,
+      0,
+    );
+    assert.deepEqual(short, [], "batch 0 is a legitimate (if useless) tick");
   } finally {
     await h.close();
   }

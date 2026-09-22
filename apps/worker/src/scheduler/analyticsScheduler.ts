@@ -40,17 +40,91 @@ export function buildAnalyticsDescriptor(userId: string, from: string, to: strin
   };
 }
 
-/** Users with ledger activity inside the window. */
-export async function listRecomputeUsers(q: AggregateQuery, from: string, limit: number): Promise<string[]> {
+/**
+ * The DUE SET — who must be recomputed, and why the answer must be FINITE.
+ *
+ * Pass 2's version selected only users with ledger activity inside the window,
+ * which had two costs: a user whose trades were deleted or edited AFTER their
+ * analytics were computed never returned to the due set (a derived row could
+ * outlive the ledger that justified it — the CONVERGENT property was not
+ * reachable from the tick), and every active user was re-enqueued every hour
+ * forever even after converging.
+ *
+ * The due set is therefore three bounded, index-supported reasons, UNIONed, each
+ * of which ONE window-bounded run removes:
+ *
+ *   (A) LEDGER MOVED — a LIVE trade inside the window whose `updated_at` is newer
+ *       than the user's newest `computed_at`: an insert, an exit, a correction.
+ *       `COALESCE(..., '-infinity')` makes a user who has never been aggregated
+ *       due. A converged user therefore goes SILENT (the assertion the pass-3
+ *       battery failed on first: an unfiltered "newer than the last run" rule
+ *       keeps a user due forever once their only trade is gone and the derived
+ *       rows have been pruned, because `max(computed_at)` over no rows is
+ *       `-infinity`). Deletion is not lost: a tombstone moves the trade out of
+ *       (A) and into (B), which is exactly the state that needs the prune.
+ *   (B) LEDGER GONE — a window row whose user has no live trade left at all. This
+ *       is the safety net for rows removed without a bump.
+ *   (C) ORPHANED SUMMARY — an account summary whose account has no live trade.
+ *       The account pass is not window-bounded, so this is always fixable.
+ *
+ * WHY EVERY REASON IS WINDOW-SCOPED (or provably fixable). The recompute only
+ * writes or prunes rows inside [from, to). A reason it could not act on would
+ * re-enqueue the same user every hour forever, which is why a merely stale
+ * summary for an account with no activity inside the window is deliberately NOT
+ * listed, and why a user who has converged is silent (asserted by the
+ * real-PostgreSQL battery: `due → []` after a run).
+ *
+ * KNOWN LIMITATION (documented, not invented away): a trade flipped to
+ * `quarantined` while other live trades remain, and outside the (A) window, is not
+ * detected — no application write path sets that column today (only tests do), so
+ * the rule to implement is "whoever writes `quarantined` must bump `updated_at`",
+ * exactly as the tombstone path already does.
+ *
+ * The day-range comparisons mirror `pruneDaily` exactly, so "fixable by this run"
+ * and "removed by this run" are the same statement.
+ */
+export async function listRecomputeUsers(
+  q: AggregateQuery,
+  from: string,
+  to: string,
+  limit: number,
+): Promise<string[]> {
   const rows = await q(
-    `SELECT DISTINCT t.user_id::text AS user_id
-       FROM trades t
-      WHERE t.deleted_at IS NULL
-        AND t.quarantined = false
-        AND t.occurred_at >= $1::timestamptz
-      ORDER BY 1
-      LIMIT $2::int`,
-    [from, limit],
+    `SELECT user_id FROM (
+       SELECT t.user_id::text AS user_id
+         FROM trades t
+        WHERE t.deleted_at IS NULL
+          AND t.quarantined = false
+          AND t.occurred_at >= $1::timestamptz
+          AND t.occurred_at <  $2::timestamptz
+          AND t.updated_at > COALESCE(
+                (SELECT max(d.computed_at) FROM user_analytics_daily d WHERE d.user_id = t.user_id),
+                '-infinity'::timestamptz
+              )
+       UNION
+       SELECT d.user_id::text AS user_id
+         FROM user_analytics_daily d
+        WHERE d.day >= ($1::timestamptz AT TIME ZONE 'UTC')::date
+          AND d.day <  ($2::timestamptz AT TIME ZONE 'UTC')::date
+          AND NOT EXISTS (
+            SELECT 1 FROM trades t3
+             WHERE t3.user_id = d.user_id
+               AND t3.deleted_at IS NULL
+               AND t3.quarantined = false
+          )
+       UNION
+       SELECT s.user_id::text AS user_id
+         FROM account_performance_summary s
+        WHERE NOT EXISTS (
+          SELECT 1 FROM trades t4
+           WHERE t4.account_id = s.account_id
+             AND t4.deleted_at IS NULL
+             AND t4.quarantined = false
+        )
+     ) AS due
+     ORDER BY user_id
+     LIMIT $3::int`,
+    [from, to, limit],
   );
   return rows.map((row) => String(row["user_id"]));
 }
@@ -74,7 +148,7 @@ export async function runAnalyticsTick(
 ): Promise<number> {
   const { from, to } = recomputeWindow(now);
   const hourBucket = now.toISOString().slice(0, 13); // YYYY-MM-DDTHH
-  const users = await listRecomputeUsers(q, from, batch);
+  const users = await listRecomputeUsers(q, from, to, batch);
   for (const userId of users) await queue.enqueue(buildAnalyticsDescriptor(userId, from, to, hourBucket));
   return users.length;
 }
