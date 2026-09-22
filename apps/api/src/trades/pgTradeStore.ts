@@ -21,6 +21,21 @@
 // EVIDENCE: adapter battery = db/tests/pgTradeStore.pg.test.ts, executed only
 // against a real disposable PostgreSQL (postgres-evidence workflow); the
 // PGlite trade suite remains separate, in-wasm evidence.
+//
+// ---------------------------------------------------------------------------
+// LEDGER HOOKS (pass 3) — the transactional-outbox seam
+// ---------------------------------------------------------------------------
+// A capability that must observe a ledger mutation ATOMICALLY WITH IT (the
+// v2.5 copy-signal emitter is the only current user) cannot be a second write
+// after the fact: a crash between the two would leave a committed trade whose
+// signal never existed, with no column anywhere to reconcile it from. The hooks
+// below therefore run INSIDE the existing BEGIN…COMMIT, on the same checked-out
+// client as the trade row, its exit rows and its `trade_events` append.
+//
+// The hooks are OPTIONAL and default to none, so every existing construction
+// (and every in-memory double) is unchanged, and an installation that has not
+// enabled copy trading pays nothing. `server-main.ts` — the single composition
+// root — is the only place that supplies them.
 import type { Pool } from "pg";
 import { poolQuery, withTransaction, iso, isoOrNull, type QueryFn } from "../persistence/pg.js";
 import type {
@@ -146,10 +161,31 @@ function sortColumn(sort: TradeSearchFilter["sort"]): string {
   return "occurred_open_at_utc";
 }
 
+/**
+ * Ledger hooks (pass 3). Both are optional and both run INSIDE the mutation's
+ * transaction; neither is allowed to swallow a failure — a hook that throws
+ * rolls the mutation back, which is the only honest alternative to a committed
+ * mutation with a missing dependent row.
+ */
+export interface TradeStoreHooks {
+  /** Called after a trade row (and its event) is written, before COMMIT. */
+  readonly onTradeCreated?: (q: QueryFn, trade: TradeRecord) => Promise<void>;
+  /** Called after an exit row (and its event, and the recompute) is written. */
+  readonly onExitRecorded?: (q: QueryFn, trade: TradeRecord, exit: TradeExitRecord) => Promise<void>;
+}
+
 export class PgTradeStore implements TradeStore {
   private readonly q: QueryFn;
 
-  constructor(private readonly pool: Pool) {
+  constructor(
+    private readonly pool: Pool,
+    /**
+     * In-transaction observers of ledger mutations (see the header). Each
+     * receives the transaction's own `QueryFn`, so its writes commit or roll
+     * back with the trade they describe.
+     */
+    private readonly hooks: TradeStoreHooks = {},
+  ) {
     this.q = poolQuery(pool);
   }
 
@@ -208,7 +244,13 @@ export class PgTradeStore implements TradeStore {
           event.at,
         ],
       );
-      return mapTrade(t as unknown as TradeRow);
+      const created = mapTrade(t as unknown as TradeRow);
+      // Transactional outbox (pass 3): runs on THIS client, inside THIS
+      // transaction, so "the trade exists" and "its copy signal exists" are one
+      // atomic fact (ADR-007). A no-op unless the composition root supplied a
+      // hook AND the leader actually has an active follower.
+      if (this.hooks.onTradeCreated !== undefined) await this.hooks.onTradeCreated(q, created);
+      return created;
     });
   }
 
@@ -410,7 +452,18 @@ export class PgTradeStore implements TradeStore {
           event.at,
         ],
       );
-      return mapExit(inserted as unknown as ExitRow, exit.pnl);
+      const recorded = mapExit(inserted as unknown as ExitRow, exit.pnl);
+      // Transactional outbox (pass 3), same discipline as createTrade: the exit
+      // signal is written with the exit, on the same client. `parent` is the
+      // row this transaction locked and (for a recompute) updated, so the hook
+      // sees the trade's account/symbol/direction without a second read.
+      if (this.hooks.onExitRecorded !== undefined) {
+        // `parent` is the locked RAW row; the hook gets the same projection the
+        // rest of the port speaks (accounts, symbol, direction, prices), so a
+        // consumer never has to know the column names of the trades table.
+        await this.hooks.onExitRecorded(q, mapTrade(parent as unknown as TradeRow), recorded);
+      }
+      return recorded;
     });
   }
 
