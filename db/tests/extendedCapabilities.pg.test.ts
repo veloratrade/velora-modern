@@ -26,6 +26,7 @@ import { PgPortfolioStore } from "../../apps/api/src/portfolio/portfolioRoutes.t
 import { PgEaStore } from "../../apps/api/src/ea/eaRoutes.ts";
 import { PgTenancyStore } from "../../apps/api/src/tenancy/tenancyRoutes.ts";
 import { PgDeveloperStore } from "../../apps/api/src/developer/developerRoutes.ts";
+import { PgAiAttemptStore } from "../../apps/api/src/aicoach/aiProvider.ts";
 import { poolQuery } from "../../apps/api/src/persistence/pg.ts";
 import type { Pool } from "pg";
 
@@ -832,6 +833,63 @@ test("PG v1.5: prop rules upsert is idempotent and round-trips exact values", { 
         dailyResetTime: null,
         dailyResetTz: null,
       }),
+      (err: { code?: string }) => err.code === "23514",
+    );
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("PG v1.0: AI attempts are recorded with 0017's vocabulary, and the schema refuses the rest", { skip: SKIP }, async () => {
+  const ctx = await harness("aiattempts");
+  try {
+    const store = new PgAiAttemptStore(ctx.q);
+    const base = {
+      userId: ctx.userId,
+      provider: "openai" as const,
+      model: "gpt-x-2026",
+      promptVersion: "v1",
+      windowFrom: "2026-09-01T00:00:00.000Z",
+      windowTo: "2026-09-20T00:00:00.000Z",
+      tradesAnalyzed: 12,
+    };
+
+    // A REFUSAL is stored, with an empty object insight (the column requires a JSON
+    // object; empty is the honest representation of "nothing was generated").
+    await store.record({ ...base, insight: {}, tokensIn: null, tokensOut: null, costMicroUsd: null, outcome: "refused", errorCode: "CONSENT_REQUIRED" });
+    // A SUCCESS carries provenance, tokens and cost.
+    await store.record({ ...base, insight: { summary: "ok" }, tokensIn: 120, tokensOut: 60, costMicroUsd: 900, outcome: "success", errorCode: null });
+
+    const rows = await ctx.pool.query(
+      "SELECT outcome, error_code, insight, tokens_in, tokens_out, cost_micro_usd FROM ai_coaching_logs WHERE user_id = $1 ORDER BY id ASC",
+      [ctx.userId],
+    );
+    assert.equal(rows.rows.length, 2, "both attempts are durable — a refusal is data, not silence");
+    assert.equal(rows.rows[0].outcome, "refused");
+    assert.equal(rows.rows[0].error_code, "CONSENT_REQUIRED");
+    assert.deepEqual(rows.rows[0].insight, {});
+    assert.equal(rows.rows[1].outcome, "success");
+    assert.equal(rows.rows[1].error_code, null);
+    assert.equal(rows.rows[1].tokens_in, 120);
+    assert.equal(String(rows.rows[1].cost_micro_usd), "900");
+
+    // The schema is the guard rail for the values a provider boundary must not
+    // smuggle in: a provider outside 0017's CHECK cannot be recorded at all.
+    await assert.rejects(
+      () => ctx.q(
+        `INSERT INTO ai_coaching_logs (user_id, provider, model, prompt_version, insight, outcome)
+         VALUES ($1, 'anthropic', 'x', 'v1', '{}'::jsonb, 'success')`,
+        [ctx.userId],
+      ),
+      (err: { code?: string }) => err.code === "23514",
+    );
+    // ... and an array is not a JSON object.
+    await assert.rejects(
+      () => ctx.q(
+        `INSERT INTO ai_coaching_logs (user_id, provider, model, prompt_version, insight, outcome)
+         VALUES ($1, 'openai', 'x', 'v1', '[]'::jsonb, 'success')`,
+        [ctx.userId],
+      ),
       (err: { code?: string }) => err.code === "23514",
     );
   } finally {
