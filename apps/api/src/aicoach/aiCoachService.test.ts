@@ -23,7 +23,9 @@ import {
 import { AiCoachService, INSIGHT_PROMPT_VERSION } from "./aiCoachService.js";
 
 const CONSENTED = { consentState: async () => ({ consented: true, consentedAt: "2026-09-01T00:00:00.000Z" }) };
-const UNCONSENTED = { consentState: async () => ({ consented: false, consentedAt: null }) };
+const UNCONSENTED: {
+  consentState(userId: string): Promise<{ consented: boolean; consentedAt: string | null }>;
+} = { consentState: async () => ({ consented: false, consentedAt: null }) };
 
 /** A stub that counts calls, so "the provider was never called" is assertable. */
 class StubProvider implements AiProvider {
@@ -142,7 +144,7 @@ test("malformed or empty provider output is refused before it is stored as an in
 
 test("a provider name the schema cannot store is never called", async () => {
   class RogueProvider extends StubProvider {
-    readonly name = "anthropic" as unknown as "openai";
+    override readonly name = "anthropic" as unknown as "openai";
   }
   const provider = new RogueProvider("ok");
   const attempts = new MemoryAiAttemptStore();
