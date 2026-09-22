@@ -20,12 +20,10 @@ import {
   type AiGenerationResult,
   type AiProvider,
 } from "./aiProvider.js";
-import { AiCoachService, INSIGHT_PROMPT_VERSION } from "./aiCoachService.js";
+import { AiCoachService, INSIGHT_PROMPT_VERSION, type ConsentPort } from "./aiCoachService.js";
 
-const CONSENTED = { consentState: async () => ({ consented: true, consentedAt: "2026-09-01T00:00:00.000Z" }) };
-const UNCONSENTED: {
-  consentState(userId: string): Promise<{ consented: boolean; consentedAt: string | null }>;
-} = { consentState: async () => ({ consented: false, consentedAt: null }) };
+const CONSENTED: ConsentPort = { consentState: async () => ({ consented: true, consentedAt: "2026-09-01T00:00:00.000Z" }) };
+const UNCONSENTED: ConsentPort = { consentState: async () => ({ consented: false, consentedAt: null }) };
 
 /** A stub that counts calls, so "the provider was never called" is assertable. */
 class StubProvider implements AiProvider {
@@ -49,7 +47,7 @@ class StubProvider implements AiProvider {
   }
 }
 
-const service = (provider: AiProvider, consent: typeof CONSENTED, attempts: MemoryAiAttemptStore) =>
+const service = (provider: AiProvider, consent: ConsentPort, attempts: MemoryAiAttemptStore) =>
   new AiCoachService({ provider, consent, attempts, allowedProviders: ["openai", "gemini"] });
 
 test("without consent the provider is NEVER called, and the refusal is recorded", async () => {
