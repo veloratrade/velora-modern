@@ -1,0 +1,23 @@
+/* Values lifted 1:1 from the legacy dashboard inline-styled #addAcctModal */
+.mt-modal{position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;align-items:center;justify-content:center;padding:16px}
+.mt-modal-card{background:#0f172a;border:1px solid #334155;border-radius:16px;max-width:440px;width:100%;padding:24px;box-shadow:0 20px 40px rgba(0,0,0,0.5);direction:rtl;color:#f8fafc}
+.mt-modal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;border-bottom:1px solid #1e293b;padding-bottom:12px}
+.mt-modal-head h3{margin:0;font-size:16px;font-weight:bold;color:#d4af37;display:flex;align-items:center;gap:8px}
+.mt-modal-x{background:none;border:none;color:#94a3b8;font-size:22px;cursor:pointer}
+.mt-modal-intro{font-size:12.5px;color:#cbd5e1;line-height:1.7;margin-top:0;margin-bottom:16px}
+.mt-field{margin-bottom:16px}
+.mt-field>label{display:block;font-size:13px;color:#fce38a;font-weight:bold;margin-bottom:6px}
+.mt-input{width:100%;padding:13px;background:#1e293b;border:1px solid #334155;border-radius:12px;color:#f8fafc;text-align:center;box-sizing:border-box}
+.mt-input-login{font-size:16px;letter-spacing:1px;font-weight:bold}
+.mt-input-pass{font-size:15px}
+.mt-note{font-size:11px;color:#64748b;margin-top:6px}
+.mt-note svg{vertical-align:middle}
+.mt-adv-link{background:none;border:none;color:#94a3b8;font-size:11.5px;cursor:pointer;text-decoration:underline;padding:0}
+.mt-adv{margin-top:10px;padding:12px;background:#1e293b;border-radius:10px;border:1px solid #334155}
+.mt-adv label{display:block;font-size:11px;color:#94a3b8;margin-bottom:4px}
+.mt-input-sm{width:100%;padding:8px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#f8fafc;font-size:12px;box-sizing:border-box}
+.mt-actions{display:flex;justify-content:flex-end;gap:10px}
+.mt-cancel{padding:11px 18px;background:none;border:1px solid #334155;color:#94a3b8;border-radius:10px;cursor:pointer;font-size:13px}
+.mt-submit{padding:11px 24px;background:linear-gradient(135deg,#fce38a,#d4af37,#b89728);border:none;color:#0b121e;font-weight:900;border-radius:10px;cursor:pointer;font-size:14px;box-shadow:0 10px 25px rgba(212,175,55,0.3)}
+.mt-submit svg{vertical-align:middle}
+[dir='ltr'] .mt-modal-card{direction:ltr}
