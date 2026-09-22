@@ -25,6 +25,8 @@ import { createMetaApiSyncHandler } from "./handlers/metaApiSyncHandler.js";
 import { METAAPI_SYNC_JOB_CLASS } from "@velora/contracts";
 import type { MetaApiSyncPayload } from "@velora/contracts";
 import { runSyncTick, SYNC_TICK_JOB_CLASS, DEFAULT_SYNC_CRON } from "./scheduler/syncScheduler.js";
+import { runFxTick, FX_TICK_JOB_CLASS, FX_RATES_JOB_CLASS, DEFAULT_FX_CRON } from "./scheduler/fxScheduler.js";
+import { fetchText, makeFxRatesHandler, poolRateQuery } from "./handlers/fxRatesHandler.js";
 
 // Explicit registration (B10-c). MetaAPI historical sync is the first — and
 // currently only — authorized production job class.
@@ -57,6 +59,15 @@ if (databaseUrl) {
     log({ level: "warn", event: "worker.token_absent", count: 0 });
   }
 
+  // DAILY ECB RATES (v1.5) — registered UNCONDITIONALLY, because it needs no
+  // provider credential: it reads a public ECB document and writes
+  // `currency_rates`. An installation that has not connected MetaAPI still gets
+  // the roadmap's "Daily background job pulling ECB rate data", so the old
+  // "no handlers → exit" guard is no longer triggered by a missing MetaAPI
+  // token alone (that absence is still logged, and the MetaAPI tick is simply
+  // not scheduled below).
+  registry.register(FX_RATES_JOB_CLASS, makeFxRatesHandler({ q: poolRateQuery(pool), fetchText }));
+
   if (registry.size === 0) {
     // Fail loudly rather than idling forever looking healthy. pg-boss v10 needs
     // concrete queue names to poll, so a worker with no registered class has
@@ -74,7 +85,7 @@ if (databaseUrl) {
   // by the owner bootstrap path (db/provision.ts); naming them here only
   // tells the adapter which queues to poll.
   const queue = await createPgBossQueue(databaseUrl, {
-    jobClasses: [...registry.jobClasses(), SYNC_TICK_JOB_CLASS],
+    jobClasses: [...registry.jobClasses(), SYNC_TICK_JOB_CLASS, FX_TICK_JOB_CLASS],
   });
 
   // --- Scheduled producer (pg-boss NATIVE cron) ---------------------------
@@ -86,14 +97,35 @@ if (databaseUrl) {
     const n = await runSyncTick(pool, queue);
     log({ level: "info", event: "scheduler.tick", count: n });
   };
-  registry.register(SYNC_TICK_JOB_CLASS, tickHandler);
+  // The MetaAPI tick is scheduled ONLY when the MetaAPI handler exists: a tick
+  // that enqueues jobs nobody can execute is work manufactured to be abandoned.
+  if (registry.has(METAAPI_SYNC_JOB_CLASS)) {
+    registry.register(SYNC_TICK_JOB_CLASS, tickHandler);
+
+    try {
+      await queue.schedule(SYNC_TICK_JOB_CLASS, DEFAULT_SYNC_CRON);
+      log({ level: "info", event: "scheduler.registered", jobClass: SYNC_TICK_JOB_CLASS });
+    } catch (err) {
+      // A missing schedule must not take the worker down: it still serves jobs
+      // enqueued by any other authorized producer. Code only, never the error.
+      log({ level: "warn", event: "scheduler.unavailable", errorCode: "UNKNOWN" });
+      void err;
+    }
+  }
+
+  // --- Daily ECB reference rates (v1.5) ------------------------------------
+  // Same durable mechanism, its own cadence: the ECB publishes once per working
+  // day, so a daily cron row (and an idempotent ingestion) is the whole design.
+  const fxTickHandler = async (): Promise<void> => {
+    const n = await runFxTick(queue);
+    log({ level: "info", event: "scheduler.fx_tick", count: n });
+  };
+  registry.register(FX_TICK_JOB_CLASS, fxTickHandler);
 
   try {
-    await queue.schedule(SYNC_TICK_JOB_CLASS, DEFAULT_SYNC_CRON);
-    log({ level: "info", event: "scheduler.registered", jobClass: SYNC_TICK_JOB_CLASS });
+    await queue.schedule(FX_TICK_JOB_CLASS, DEFAULT_FX_CRON);
+    log({ level: "info", event: "scheduler.registered", jobClass: FX_TICK_JOB_CLASS });
   } catch (err) {
-    // A missing schedule must not take the worker down: it still serves jobs
-    // enqueued by any other authorized producer. Code only, never the error.
     log({ level: "warn", event: "scheduler.unavailable", errorCode: "UNKNOWN" });
     void err;
   }
