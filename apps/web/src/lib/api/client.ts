@@ -89,6 +89,36 @@ function purgeLegacyAuthStorage(): void {
   }
 }
 
+/**
+ * Readable companion marker for the HttpOnly `refresh_token` cookie.
+ *
+ * The cookie itself is invisible to JS by design, so a brand-new/anonymous
+ * visitor cannot tell that there is nothing to restore — and boot would POST
+ * /auth/refresh with no cookie at all, burning C-14 rate-limit budget (and
+ * counting anonymous traffic against the refresh bucket in production).
+ * The marker is a NON-SECRET boolean ("a refresh cookie may exist"); it is
+ * never a credential. Set whenever a session is established (login/refresh),
+ * removed whenever auth is cleared (logout, terminal error, refresh 401).
+ * Losing the marker while the cookie exists merely asks the user to sign in
+ * again — never a security change.
+ */
+const RT_MARKER = "veloraHasRefresh";
+function hasRefreshMarker(): boolean {
+  try {
+    return window.localStorage.getItem(RT_MARKER) === "1";
+  } catch {
+    return false;
+  }
+}
+function setRefreshMarker(on: boolean): void {
+  try {
+    if (on) window.localStorage.setItem(RT_MARKER, "1");
+    else window.localStorage.removeItem(RT_MARKER);
+  } catch {
+    /* storage unavailable — worst case we fall back to the old eager refresh */
+  }
+}
+
 function emitSession(): void {
   try {
     window.dispatchEvent(
@@ -140,6 +170,7 @@ export function setSession(tokens: TokenPayload | undefined | null): string {
     currentUser = { ...currentUser, id: String(currentUser.id) } as SessionUser;
   }
   sessionReady = Promise.resolve(currentUser);
+  setRefreshMarker(true); // server set the HttpOnly refresh cookie alongside
   emitSession();
   if (currentUser) emitUserLocale(currentUser);
   return accessToken;
@@ -157,6 +188,7 @@ export function clearAuth(): void {
   accessToken = "";
   currentUser = null;
   purgeLegacyAuthStorage();
+  setRefreshMarker(false);
   emitSession();
 }
 
@@ -178,6 +210,10 @@ function refreshAccessToken(): Promise<string> {
 
 export function ready(): Promise<SessionUser | null> {
   if (!sessionReady) {
+    if (!accessToken && !hasRefreshMarker()) {
+      // Nothing to restore: never POST /refresh without a plausible cookie.
+      return (sessionReady = Promise.resolve(null));
+    }
     sessionReady = refreshAccessToken()
       .then(() => currentUser)
       .catch((error: unknown) => {
@@ -276,7 +312,10 @@ export async function request<T = unknown>(path: string, options: RequestOptions
     options.refresh !== false &&
     options.retryAuth !== false &&
     !AUTH_BOOTSTRAP_EXCLUDED.includes(path) &&
-    REFRESHABLE.includes(code);
+    REFRESHABLE.includes(code) &&
+    // Only spend a refresh attempt when one can plausibly succeed (cookie may
+    // exist) — anonymous traffic must never burn auth:refresh budget.
+    (hasRefreshMarker() || accessToken !== "");
 
   if (canRefresh) {
     const newToken = await refreshAccessToken().catch((refreshError: unknown) => {
