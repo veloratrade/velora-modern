@@ -14,7 +14,8 @@
 | W3 dashboard/analytics | DONE (capability gap documented) | `60e40ec` |
 | W4 remaining pages | DONE (GAP shells honest) | `0c9fc49` |
 | W4b EN group fix + titles | DONE | `dda0f4f` |
-| W5 Dockerfile.web + compose + docs | DONE | (final commit, see `git log`) |
+| W5 Dockerfile.web + compose + docs | DONE | `2a0b142` |
+| Refresh-efficiency hardening | DONE | `8e66bbd` |
 
 ## Tests / gates (last run)
 
@@ -23,7 +24,7 @@
 - `npm run build --workspace=@velora/web` → 0 (35 ƒ routes)
 - `node tools/run-tests.mjs` → 804/804 ALL TEST FILES PASSED
 - `bash tools/secret-scan.sh` → PASS (0 findings)
-- Playwright final audit → 0 CSP violations; anon/protected redirects correct; lang/dir correct; no overflow @1440/1024/820/390/375; localStorage `{}`; refresh_token HttpOnly Lax
+- Playwright final audit (definitive, post-`8e66bbd`) → 0 CSP violations; anon/protected redirects correct; all fa/en titles+shell correct; lang/dir correct; no overflow @1440/1024/820/390/375; localStorage = marker only; refresh_token HttpOnly Lax; 1×refresh per authed load
 
 ## Live processes (dev evidence environment)
 
@@ -33,7 +34,7 @@
 
 ## Known environment quirks (not bugs)
 
-1. Dev memory rate limiter C-14: `login 8/5min`, `refresh 30/5min` shared per-IP — heavy Playwright runs exhaust it; 5-minute self-heal. R2 wiring is the owner-gated production fix.
+1. Dev memory rate limiter C-14: `login 8/5min`, `refresh 30/5min` shared per-IP. Mitigated by `8e66bbd` (anonymous boots no longer call refresh at all; authenticated loads = exactly 1 call). R2 wiring remains the owner-gated production fix.
 2. `/analytics/*`, credentials, metaapi answer 503 capabilityAbsent in dev (no PG / no secrets) — UI renders localized honest states.
 3. Full page loads cost one `auth:refresh` (memory-only access token by design); Sidebar uses client-side `<Link>` (no refresh cost).
 

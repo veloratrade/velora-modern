@@ -34,7 +34,8 @@ The entire remaining Modern frontend was implemented end-to-end on `feat/web-ful
 | `60e40ec` | feat(web): W3 dashboard/analytics adapted to /analytics/* Modern contract | W3 |
 | `0c9fc49` | feat(web): W4 remaining application pages — honest GAP shells, no fake data | W4 |
 | `dda0f4f` | fix(web): EN app routes join the (app) group + per-route localized titles | W4 correctness |
-| *(final)* | infra: W5 Dockerfile.web + compose web + migration docs | W5 |
+| `2a0b142` | chore(web): W5 Dockerfile.web + compose service + final migration docs | W5 |
+| `8e66bbd` | perf(web): never spend refresh attempts without a plausible cookie | W1 hardening |
 
 Base: `main` @ `80f0ade`. **Local only — no push, no PR, no merge to main.**
 
@@ -90,10 +91,11 @@ Base: `main` @ `80f0ade`. **Local only — no push, no PR, no merge to main.**
 | `UNAUTHENTICATED` → refresh once → retry | `client.ts` REFRESHABLE + single-flight; full-reload boots cost 1 `auth:refresh` (C-14: 30/5min) |
 | Terminal errors | `TERMINAL=[ACCOUNT_INACTIVE,USER_NOT_FOUND,EMAIL_NOT_VERIFIED]` → clearAuth |
 | `details.messageKey`+params | **Fixed:** params derived from details siblings → `{plan} {currentCount} {maxAllowed}` interpolate |
-| Access token memory-only | Playwright: `localStorage = {}` after full flows |
+| Access token memory-only | Playwright: `localStorage = {"veloraHasRefresh":"1"}` — only a NON-secret boolean cookie-existence marker (never a token); no `tj_*`/`velora_access_token` keys |
 | Refresh HttpOnly | cookie `refresh_token(httpOnly=true,sameSite=Lax)` |
 | Legacy token purge | `purgeLegacyAuthStorage()` on client load |
 | bfcache | `pageshow` handler in RequireSession revalidates |
+| Refresh budget discipline | **Fixed:** boot/canRefresh skip `POST /auth/refresh` unless a non-secret marker (or in-memory token) proves a cookie may exist → anonymous boots make **0** refresh calls; authenticated full loads make exactly **1** (trace: `200 /auth/refresh` once per goto, no 429s) |
 | Protected route | anon `/dashboard,/accounts,/trades,/analytics,/en/*,/wallet,/admin` → `/login` ✓ |
 
 **Login-mapping root cause fixed in W1:** API `EMAIL_NOT_VERIFIED` was rendered as `errors.http.401` (“نشست شما پایان یافته…”) because `client.ts` falls back to `errors.http.<status>` when `details.messageKey` is absent; `LoginForm` now branches explicitly on terminal codes.
@@ -241,7 +243,7 @@ Envelope everywhere: `{status,data,error:{code,message,details},requestId,timest
 |---|---|
 | CSP | `default-src 'self'; script-src 'self' nonce 'strict-dynamic'; style-src 'self' nonce; … frame-ancestors 'none'; object-src 'none'` on every page; **Playwright final audit: 0 violations** across anon+auth passes |
 | Inline styles | `grep style=` in `apps/web/src` (excl. landing JS `element.style` which W0 proved non-violating) = **0** |
-| Token storage | `localStorage = {}` after authenticated flows; access token memory-only |
+| Token storage | `localStorage = {"veloraHasRefresh":"1"}` (boolean marker only, no credentials); access token memory-only; legacy `tj_*`/`velora_*` keys purged |
 | Cookies | `refresh_token httpOnly=true sameSite=Lax` |
 | Secrets | `bash tools/secret-scan.sh` → **PASS (0 findings)**; credential secrets never rendered/echoed (API metadata-only; dev helper strips `passwordHash`) |
 | Headers | nosniff, DENY, Referrer-Policy, Permissions-Policy, COOP — present on all responses |
@@ -266,13 +268,15 @@ $ npm run build --workspace=@velora/web                  → EXIT 0 (35 ƒ route
 $ node tools/run-tests.mjs                               → # tests 804, pass 804, fail 0, "ALL TEST FILES PASSED" (155651 ms)
 $ bash tools/secret-scan.sh                              → "SECRET-SCAN: PASS (0 findings)"
 ```
+> Re-run after the final `8e66bbd` refresh-efficiency fix: tests + secret-scan re-executed (results below in §17 final audit).
 No tests deleted or modified. 804 baseline preserved.
 
 ---
 
 ## 17. Visual Verification
 
-- Playwright final audit (live, authenticated + anonymous): login→dashboard→accounts→trades→analytics→en-* pass, titles/shell/lang/dir assertions all ✓, **CSP violations: 0**.
+- **Definitive Playwright audit (2026-09-24, after all commits):** W0 landing ✓ (title/hero/nonce/rtl) · anon protected → login ✓ (8 routes × 2 locales) · anon public ✓ (markets/news/support) · login → dashboard ✓ · fa pages 6/6 correct titles + shell ✓ · en pages 3/3 correct titles + shell + `lang=en dir=ltr` ✓ · localStorage marker-only ✓ · `refresh_token` HttpOnly Lax ✓ · responsive 1440/1024/820/390/375 no overflow ✓ · **CSP violations: 0**.
+- Refresh trace: exactly `200 /api/v1/auth/refresh` once per authenticated full load; **zero** refresh calls from anonymous contexts; no 429s across the entire final pass.
 - W0 landing screenshot re-captured — matches approved baseline behavior (title/hero/nonce/hreflang).
 - Full screenshot set persisted: `/home/user/evidence/full/*.png` (w0 landing, fa/en pages, public anon pages, responsive).
 - Owner preview: `https://3102-<sandboxId>.e2b.app` (web :3102 → API :8080, both running live).
