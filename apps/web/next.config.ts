@@ -12,6 +12,15 @@ const nextConfig: NextConfig = {
   transpilePackages: ["@velora/contracts"],
   poweredByHeader: false,
   reactStrictMode: true,
+  // W1: API proxy for local dev and same-origin contract.
+  // In production Railway's reverse proxy handles TLS/HSTS and routes /api to the API service.
+  // In dev, Next rewrites /api to the API process (VELORA_API_ORIGIN or default 8080).
+  // This keeps the browser same-origin (no CORS) while allowing the web dev server
+  // to run separately from the API (ADR-010). No business-logic coupling.
+  async rewrites() {
+    const origin = process.env.VELORA_API_ORIGIN ?? "http://127.0.0.1:8080";
+    return [{ source: "/api/:path*", destination: `${origin}/api/:path*` }];
+  },
 };
 
 export default nextConfig;

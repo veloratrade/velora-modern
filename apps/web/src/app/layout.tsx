@@ -5,6 +5,8 @@ import { htmlLang } from "../i18n/registry";
 import { localeMeta } from "../i18n/registry";
 import "../features/landing/styles/fonts.css";
 import "../features/landing/styles/landing.css";
+import "../features/auth/styles/auth.css";
+import { SessionProvider } from "../lib/auth/session";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://veloratrade.ir"),
@@ -24,7 +26,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         {/* Preconnect for self-hosted fonts is not needed; keep minimal */}
         {nonce ? <meta property="csp-nonce" content={nonce} /> : null}
       </head>
-      <body>{children}</body>
+      <body>
+        <SessionProvider>{children}</SessionProvider>
+      </body>
     </html>
   );
 }
