@@ -257,6 +257,19 @@ export async function request<T = unknown>(path: string, options: RequestOptions
   // Propagate details.messageKey if present (Modern error.details may carry i18n key)
   const detailMessageKey = details && typeof details.messageKey === "string" ? String(details.messageKey) : undefined;
   const detailParams = details && typeof details.params === "object" ? (details.params as Record<string, unknown>) : undefined;
+  // The Modern envelope often carries interpolation values as SIBLINGS of
+  // messageKey (e.g. {messageKey, plan, currentCount, maxAllowed}). When no
+  // explicit params object exists, derive params from the remaining details —
+  // excluding messageKey/field bookkeeping keys used only for routing.
+  const derivedParams = (() => {
+    if (!details || detailParams) return undefined;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(details)) {
+      if (k === "messageKey" || k === "field") continue;
+      out[k] = v;
+    }
+    return Object.keys(out).length ? out : undefined;
+  })();
 
   const canRefresh =
     response.status === 401 &&
@@ -279,7 +292,7 @@ export async function request<T = unknown>(path: string, options: RequestOptions
     // Prefer detail messageKey if present, else error.messageKey, else http fallback
     const messageKey =
       detailMessageKey || (typeof error.messageKey === "string" ? String(error.messageKey) : undefined) || `errors.http.${response.status}`;
-    const params = (detailParams as Record<string, unknown>) || (error.params as Record<string, unknown>) || {};
+    const params = (detailParams as Record<string, unknown>) || (error.params as Record<string, unknown>) || derivedParams || {};
     const opts: ApiErrorOptions = {
       status: response.status,
       messageKey,

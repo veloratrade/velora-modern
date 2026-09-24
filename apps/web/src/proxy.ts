@@ -70,9 +70,11 @@ export function proxy(request: NextRequest) {
     requestHeaders.set("x-velora-locale", decision.localeHeader.value);
     requestHeaders.set("x-velora-cache", decision.cacheControl);
   } else {
-    // For passthrough, still set a locale hint from cookie/accept? For now leave absent;
-    // app routes will resolve via user.locale / cookie / Accept-Language on the client.
-    // Set Vary so caches know locale matters.
+    // Authenticated app routes are passthrough for cache/contract purposes, but
+    // the URL still owns the locale (ADR-009): /en/* → en, everything else → fa.
+    // Without this, /en/dashboard would SSR html lang="fa" (root layout fallback).
+    const appLocale = pathname === "/en" || pathname.startsWith("/en/") ? "en" : "fa";
+    requestHeaders.set("x-velora-locale", appLocale);
   }
 
   const response = NextResponse.next({
