@@ -2,7 +2,7 @@
 // Pure logic shared by the API (contract-tested) and, at Phase 2 framework
 // install, the Next.js middleware (the adapter will be a thin wrapper around
 // this kernel — framework wiring deliberately deferred, see ADR-011).
-import { resolvePublicRoute, CACHE_POLICY, LOCALE_HEADER, type Locale } from "@velora/contracts";
+import { resolvePublicRoute, CACHE_POLICY, LOCALE_HEADER, type Locale } from "./contracts";
 
 /** Normalization redirects — no silent alternative URL structures (D-14). */
 export const LOCALE_REDIRECTS: Readonly<Record<string, string>> = {
