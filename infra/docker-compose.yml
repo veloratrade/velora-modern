@@ -49,5 +49,21 @@ services:
       postgres:
         condition: service_healthy
 
+  # W5 frontend — next start behind the same compose network. The browser hits
+  # :3000 only; /api/* is rewritten to the api service (same-origin contract).
+  # OD-1 (staging origin) still gates any real staging topology — this service
+  # is DEV/STAGING-REPRODUCIBLE, not a production claim.
+  web:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.web
+    environment:
+      VELORA_API_ORIGIN: http://api:8080
+      NODE_ENV: production
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:3000:3000"
+
 volumes:
   pgdata:

@@ -1114,6 +1114,36 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
   // kernel's body readers, and the System Owner predicate. No route re-derives
   // identity, and no route reads ownership state directly.
   // ------------------------------------------------------------------------
+  // ---- Debug helper (development only): create a pre-verified user for UI E2E ----
+  // Gated on APP_ENV=development; never reachable in staging/production boot.
+  if (process.env.APP_ENV === "development" && method === "POST" && url.pathname === "/api/v1/debug/create-verified-user") {
+    try {
+      const body = await parseJsonBody(req);
+      const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+      const password = typeof body.password === "string" ? body.password : "";
+      const fullName = typeof body.fullName === "string" ? body.fullName : "Debug User";
+      const locale = body.locale === "en" ? "en" : "fa";
+      if (!email || !password) return { status: 400, body: fail("VALIDATION_FAILED", "email and password required", sec.requestId) };
+      const authAny: any = config.auth;
+      const store: any = authAny?.deps?.store;
+      if (!store) return { status: 503, body: fail("SERVICE_UNAVAILABLE", "user store unavailable", sec.requestId) };
+      let user = await store.findUserByEmail(email);
+      if (!user) {
+        const { VeloraHasher } = await import("../auth/hashing.js");
+        const hash = await new VeloraHasher().hash(password);
+        user = await store.createUser({ email, passwordHash: hash, fullName, timezone: "UTC", locale, now: new Date() });
+      }
+      await store.markEmailVerified(user.id, new Date());
+      if (store.deleteVerifications) await store.deleteVerifications(user.id).catch(() => undefined);
+      const updated = await store.findUserById(user.id);
+      // Never echo passwordHash (secret) even in dev.
+      const { passwordHash: _ignored, ...safe } = (updated ?? user) as Record<string, unknown>;
+      return { status: 201, body: ok({ user: safe }) };
+    } catch (e: any) {
+      return { status: 400, body: fail(e?.code || "DEBUG_FAILED", e?.message || "debug create failed", sec.requestId) };
+    }
+  }
+
   const extended = await dispatchExtendedRoutes({
     req,
     method,
