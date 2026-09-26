@@ -199,7 +199,7 @@
       "title": "Test suite covers the migrated surface and passes",
       "status": "PARTIAL",
       "priority": "P2",
-      "verification_state": "RECORDED_RUNTIME",
+      "verification_state": "CURRENT_RUNTIME_VERIFIED",
       "audit_refs": [
         "§19.1 gate 11",
         "§15"
@@ -209,7 +209,7 @@
         "tools/run-tests.mjs"
       ],
       "decisions": [],
-      "closure_criteria": "Coverage extends as capabilities land; re-run on current tree"
+      "closure_criteria": "Coverage extends as capabilities land; D1 smoke expectation fix (MG-OBS-6, owner-gated). Evidence: 804/804 local + next build exit 0 (AC-3/AC-5) + real-PG batteries 23 files x 2 orders, 0 fail/0 skipped on disposable PG 17.11 (AC-6)."
     },
     {
       "id": "MG-G12",
@@ -892,6 +892,20 @@
         "OD-M-PA-3"
       ],
       "closure_criteria": "Owner confirms the source-verified reading (OD-M-PA-3)"
+    },
+    {
+      "id": "MG-OBS-6",
+      "section": "E",
+      "title": "tools/pg-smoke.ts S1b asserts stale D1-era migration list [0001..0005] vs tree 0001..0022 — D1 smoke cannot pass on current tree (migrations themselves apply cleanly; batteries unaffected)",
+      "status": "OPEN",
+      "priority": "P3",
+      "verification_state": "STATIC",
+      "audit_refs": [],
+      "evidence": [
+        "tools/pg-smoke.ts"
+      ],
+      "decisions": [],
+      "closure_criteria": "Test-side expectation update (owner-gated)"
     }
   ],
   "owner_decisions": [

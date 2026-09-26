@@ -1,7 +1,7 @@
 # VELORA-MODERN — Current Project State (Canonical)
 
 **System:** Agent Context System (ADR-017) · **Schema version:** 1
-**Last updated:** 2026-09-26 (Asia/Tehran) — entries AC-1 (system introduced), AC-2 (documentation-defect closure), AC-3 (verified baseline `59047b8`, fresh battery), AC-4 (push + PR #8), AC-5 (build evidence refresh + MetaAPI assembly brief)
+**Last updated:** 2026-09-26 (Asia/Tehran) — entries AC-1…AC-6 (… AC-5: build refresh + MetaAPI brief; AC-6: real-PG battery evidence on disposable PG 17.11)
 **Machine-readable twin:** `docs/state/current-state.json` (read by `tools/agent-context.mjs`; the two must be updated in the same change)
 **Mode:** GOVERNANCE STATE RECORD — this file records *what is verified*, never what is hoped.
 
@@ -90,8 +90,8 @@ audit's own evidence has become stale *and* the delta cannot be curated through
 | Migration closure | **NOT CLOSED** (audit 2026-09-25; no application changes since → verdict still stands) | `STATIC` |
 | Open closure gates | 14 FAIL + 1 PARTIAL per audit score line (see gap register §A) | `STATIC` |
 | Open owner decisions | 9 (R1, R2, R8, R9, OD-1, ADR-004 sampling, RPO/RTO, subscription mapping, worker service definition) | `OWNER_DECISION_REQUIRED` |
-| Local test battery | **re-captured 2026-09-26 at `59047b8`/`d85a589`**: tsc 0 errors · 804/804 (0 fail/skip) · migrations 19/19 · secret-scan 0 findings (AC-3); **`next build` exit 0 at `d85a589`** (route table emitted; 34 app-side pages measured — prior closure report counted 35 ƒ incl. middleware) (AC-5) | `CURRENT_RUNTIME_VERIFIED` (decays per §3) |
-| Worker runtime, backups, restore, HSTS-at-edge, Stripe prices, real-PG batteries | No evidence | `NOT_VERIFIED` |
+| Local test battery | **re-captured 2026-09-26 at `59047b8`…`5140098`**: tsc 0 errors · 804/804 (0 fail/skip) · migrations 19/19 · secret-scan 0 findings (AC-3); `next build` exit 0 (AC-5); **real-PG batteries: 23 files × 2 orders, 0 fail / 0 skipped, anti-skip assertions satisfied, on disposable PostgreSQL 17.11 — version caveat: 17, not 16** (AC-6); migrations `0001…0022` applied + idempotent re-run | `CURRENT_RUNTIME_VERIFIED` (decays per §3) |
+| Worker runtime, backups, restore, HSTS-at-edge, Stripe prices | No evidence | `NOT_VERIFIED` |
 | Session-start verdict | Run `node tools/agent-context.mjs` — its output supersedes this snapshot | — |
 
 **Highest-priority open items** (full list: `MIGRATION_GAP_REGISTER.md`):

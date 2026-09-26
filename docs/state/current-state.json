@@ -94,10 +94,11 @@
     ]
   },
   "last_battery": {
-    "result": "804/804 pass, 0 fail, 0 skipped; migrations 19/19; tsc 0 errors; secret-scan PASS; next build exit 0 — route table emitted (34 page.tsx + 0 route.ts measured in apps/web/src/app; prior closure report counted 35 f-routes incl. middleware — measured app-side page count recorded as-is)",
-    "at_sha": "d85a589ed47f5321c36a8bbedf064929bc489e6b",
+    "result": "804/804 local (0 fail/0 skipped); migrations 19/19; tsc 0 errors; secret-scan PASS; next build exit 0; REAL-PG BATTERIES: 23 batteries x 2 orders (forward+reverse), 0 failures, 0 skipped, anti-skip assertions satisfied",
+    "at_sha": "51400982515e3e87ae0e9122ca409ed3ecdc27ae",
     "date": "2026-09-26",
-    "classification": "CURRENT_RUNTIME_VERIFIED (captured this session against the verified tree; decays to RECORDED_RUNTIME for later sessions per CURRENT_STATE.md §3)"
+    "classification": "CURRENT_RUNTIME_VERIFIED (captured this session against the verified tree; decays to RECORDED_RUNTIME for later sessions per CURRENT_STATE.md §3)",
+    "real_pg_caveats": "Disposable local PostgreSQL 17.11 (not 16); test-only creds mirroring postgres-evidence.yml; cluster destroyed after the run; D1 pg-smoke S1b fails on a stale [0001..0005] expectation (MG-OBS-6) — migrations 0001..0022 all applied, idempotent re-run applied 0"
   },
   "distribution": {
     "branch": "governance/agent-context",
