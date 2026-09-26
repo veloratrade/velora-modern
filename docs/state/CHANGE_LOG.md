@@ -1,0 +1,55 @@
+# VELORA-MODERN — Change / Evidence Log (since the 2026-09-25 audit baseline)
+
+**System:** Agent Context System (ADR-017) · **Format:** append-only, newest last.
+**Purpose:** every commit that advances either repository past its recorded
+baseline gets an entry: commit → migration impact → evidence status. Entries
+are agent-curated (the tool lists raw commits; impact classification is a
+judgment, recorded here so the next session does not re-derive it).
+**Baselines:** modern `ffcb0e976147c753493532188a598ecb5de8d06d` · legacy
+`edede313280f2f0e298f5ccbf5bbdd4d676c80bd` (audit 2026-09-25).
+
+---
+
+## AC-0 — 2026-09-25 · Audit event (no commits; both repos already at baseline)
+
+- **Repos:** modern `ffcb0e9` (unchanged) · legacy `edede31` (unchanged).
+- **Event:** Final two-repository migration reconciliation audit executed
+  read-only. Verdict: **NOT CLOSED** (0 PASS / 1 PARTIAL / 14 FAIL).
+- **Impact:** none on trees; establishes the historical baseline.
+- **Evidence:** `docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md`
+  (stored verbatim 2026-09-26, SHA-256
+  `643fa1b554753d4dc584699261bfe996e668e6dcd2876abde53dc77b090aea2f`).
+- **Gaps opened:** all §A/§B/§C rows of `MIGRATION_GAP_REGISTER.md` originate here.
+
+## AC-1 — 2026-09-26 · Governance: Agent Context System introduced (ADR-017)
+
+- **Commit:** this system's introducing commit on branch `governance/agent-context`
+  (self-referential — a commit cannot contain its own hash; identify with
+  `git log --format='%H %s' -- docs/state/CHANGE_LOG.md | tail -1`).
+  Subject: `governance: agent context system — historical audit baseline + persistent project state (ADR-017)`.
+- **Classification:** GOVERNANCE-ONLY (paths: `docs/audits/`, `docs/state/`,
+  `docs/adr/ADR-017`, `AGENTS.md`, `tools/agent-context.mjs`). No application,
+  schema, infra, or contract paths touched → does not invalidate any recorded
+  evidence (CURRENT_STATE.md §4 drift policy).
+- **Impact on migration state:** none. No gap opened or closed by code. One
+  documentation gap closed as a side effect: `MG-OBS-4` (AGENTS.md artifact-map
+  staleness).
+- **Evidence:**
+  - Audit stored verbatim: `cmp` identical; SHA-256 match recorded above and in
+    `current-state.json` (verified pre-commit and by the tool).
+  - `tools/agent-context.mjs` executed: verdict CURRENT at baseline (0 commits
+    since), and CURRENT (governance-only delta) after this commit.
+  - `bash tools/secret-scan.sh`: PASS, 0 findings (standing gate, D-06).
+  - Both JSON state files parse (validated).
+- **Owner authorization:** instruction of 2026-09-26 ("Store the COMPLETE audit
+  verbatim … continue the implementation … create one clean governance-only
+  commit"). Push/PR/merge: NOT authorized yet — branch only, `main` untouched.
+
+<!-- Append new entries below this line. Entry template:
+## AC-n — YYYY-MM-DD · <title>
+- Commit: <sha or locator> · Repo/branch
+- Classification: GOVERNANCE-ONLY | APPLICATION (paths touched)
+- Impact on migration state: <gaps opened/closed, evidence captured/decayed>
+- Evidence: <commands, artifacts, links>
+- Authorization: <owner instruction/decision reference>
+-->

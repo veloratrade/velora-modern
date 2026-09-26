@@ -1,0 +1,93 @@
+{
+  "$comment": "VELORA-MODERN machine-readable current project state — twin of docs/state/CURRENT_STATE.md (update both in the same change). Read and verified by tools/agent-context.mjs at every session start (ADR-017).",
+  "schema_version": 1,
+  "system": "velora-agent-context",
+  "last_updated": "2026-09-26",
+  "verification_states": [
+    "STATIC",
+    "RECORDED_RUNTIME",
+    "CURRENT_RUNTIME_VERIFIED",
+    "NOT_VERIFIED",
+    "OWNER_DECISION_REQUIRED"
+  ],
+  "historical_baseline": {
+    "audit": {
+      "path": "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+      "original_filename": "VELORA-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+      "audit_date": "2026-09-25",
+      "stored_verbatim": true,
+      "stored_date": "2026-09-26",
+      "sha256": "643fa1b554753d4dc584699261bfe996e668e6dcd2876abde53dc77b090aea2f",
+      "bytes": 88405,
+      "verdict": "NOT CLOSED — PARTIAL MIGRATION WITH MATERIAL BEHAVIOURAL DIVERGENCE AND BLOCKING OPERATIONAL GAPS",
+      "closure_gates": { "pass": 0, "partial": 1, "fail": 14 },
+      "closure_gates_note": "Audit's own score line (§19.1): 1 PARTIAL, 14 FAIL. The §19.1 table itself marks gates 8 and 11 as PARTIAL — recorded as-is; see MG-OBS-1 in the gap register."
+    },
+    "modern": {
+      "repo": "veloratrade/velora-modern",
+      "sha": "ffcb0e976147c753493532188a598ecb5de8d06d"
+    },
+    "legacy": {
+      "repo": "veloratrade/veloratrade",
+      "sha": "edede313280f2f0e298f5ccbf5bbdd4d676c80bd",
+      "role": "read-only reference — never modified by modernization work"
+    }
+  },
+  "current_verified": {
+    "modern_sha": "ffcb0e976147c753493532188a598ecb5de8d06d",
+    "legacy_sha": "edede313280f2f0e298f5ccbf5bbdd4d676c80bd",
+    "verified_at": "2026-09-26",
+    "verification": "STATIC",
+    "verified_by": "Agent session 2026-09-26: fresh clones, HEAD == audit baselines verified via git ls-remote before clone; governance-only introducing commit recorded in CHANGE_LOG AC-1",
+    "notes": "modern_sha advances only through CHANGE_LOG-logged, classified commits; the ADR-017 introducing commit is governance-only and self-records (a commit cannot contain its own hash)."
+  },
+  "artifacts": {
+    "current_state_md": "docs/state/CURRENT_STATE.md",
+    "gap_register_md": "docs/state/MIGRATION_GAP_REGISTER.md",
+    "gap_register_json": "docs/state/migration-gap-register.json",
+    "change_log": "docs/state/CHANGE_LOG.md",
+    "audits_dir": "docs/audits/",
+    "tool": "tools/agent-context.mjs",
+    "adr": "docs/adr/ADR-017-agent-context-system.md"
+  },
+  "drift_policy": {
+    "governance_only_paths": [
+      "docs/",
+      "AGENTS.md",
+      "README.md",
+      "MASTER_ROADMAP.md",
+      "tools/agent-context.mjs"
+    ],
+    "rule": "Commits touching only governance_only_paths do not invalidate recorded evidence (verdict: CURRENT with governance delta). Any commit touching other paths marks the repository DRIFTED until re-verified and CHANGE_LOG-logged.",
+    "require_change_log_entry": true
+  },
+  "legacy_checkout": {
+    "expected_path": "../veloratrade",
+    "override_env": "VELORA_LEGACY_PATH",
+    "missing_means": "legacy state NOT_VERIFIED this session (report, do not fail)"
+  },
+  "summary": {
+    "migration_closure": "NOT_CLOSED",
+    "open_owner_decisions": [
+      "R1 password policy at login",
+      "R2 trustedProxyCidrs wiring",
+      "R8 public vs protected routes (markets/news/support)",
+      "R9 strategy winRate/order/untagged semantics",
+      "OD-1 canonical staging origin",
+      "ADR-004 naive-datetime sampling",
+      "RPO/RTO targets",
+      "subscription status vocabulary mapping",
+      "worker service definition"
+    ],
+    "highest_priority_open_gaps": [
+      "MG-METAAPI-ASSEMBLY",
+      "MG-WORKER-DEPLOY",
+      "MG-SEC-COOKIE",
+      "MG-SEC-CSP",
+      "MG-SEC-EDGE-AUTHZ",
+      "MG-ADMIN",
+      "MG-AI-OCR",
+      "MG-BACKUP-RESTORE"
+    ]
+  }
+}

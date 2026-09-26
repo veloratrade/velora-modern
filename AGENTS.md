@@ -5,6 +5,18 @@ It is deliberately **governance-only**: it does not prescribe framework internal
 
 ## Project status
 
+> **CANONICAL CURRENT STATUS (2026-09-26, ADR-017):** read
+> `docs/state/CURRENT_STATE.md` (human) / `docs/state/current-state.json`
+> (machine) — validated by `node tools/agent-context.mjs`. The 2026-09-25
+> two-repository migration audit is the immutable historical baseline:
+> `docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md`
+> (verdict **NOT CLOSED**; closure gates 0 PASS / 1 PARTIAL / 14 FAIL). The
+> narrative paragraphs below are retained as the Phase-1-era governance
+> narrative; where they conflict with `docs/state/`, the state file governs
+> the present, and the conflict is recorded in
+> `docs/state/MIGRATION_GAP_REGISTER.md` §E (never resolved by editing
+> history).
+
 Phase 1 (Architecture Foundation) — **IN PROGRESS under D-10 (2026-08-31),
 dev/staging only**. Foundation implemented: contracts, pure domain (decimal/
 PnL/ledger), PostgreSQL migrations + roles, auth primitives (bcrypt `$2y$`
@@ -62,6 +74,16 @@ not Phase 1.
     environment↔origin map. Unknown environments and missing origins never
     receive implicit defaults; staging↔production cross-bindings are blocked
     (ADR-013, D-17).
+15. **Agent-context state discipline (ADR-017).** Never claim implementation
+    or runtime verification without captured evidence — the five verification
+    states (`STATIC`, `RECORDED_RUNTIME`, `CURRENT_RUNTIME_VERIFIED`,
+    `NOT_VERIFIED`, `OWNER_DECISION_REQUIRED`) govern every evidence claim,
+    and `CURRENT_RUNTIME_VERIFIED` may only be set by the session that
+    actually captured the runtime evidence. Any change that alters migration
+    state updates `docs/state/` (current state, gap register, change log) in
+    the same change. Audits under `docs/audits/` are immutable historical
+    evidence — never edited, never deleted. Session start requires running
+    `node tools/agent-context.mjs` and obeying its verdict.
 
 ## Evidence vocabulary
 
@@ -71,6 +93,18 @@ Every architectural claim must be tagged:
 - `ASSUMPTION` — plausible but unconfirmed; must be listed as an open question.
 - `DECISION` — a choice made (Proposed until the owner accepts).
 - `OPEN QUESTION` / `OWNER DECISION REQUIRED` — unresolved; blocks dependent work.
+
+**Verification states (ADR-017, binding for agent-context state files):**
+`STATIC` (proved from source/tree at a recorded commit) · `RECORDED_RUNTIME`
+(runtime evidence captured at a point in time, valid for the exact commit it
+was captured on) · `CURRENT_RUNTIME_VERIFIED` (runtime evidence re-captured
+against the current verified tree — never asserted without new captured
+evidence) · `NOT_VERIFIED` (no evidence either way) ·
+`OWNER_DECISION_REQUIRED` (blocked on an owner choice). Mapping:
+`STATIC` ⊂ `VERIFIED` (source-verified); `RECORDED_RUNTIME` = recorded run
+artifacts; `ASSUMPTION`/"NEEDS VERIFICATION" = `NOT_VERIFIED`; `OPEN QUESTION`
+= `OWNER_DECISION_REQUIRED`. These are orthogonal to delivery statuses
+(`COMPLETED`/`PLANNED`/…) and decision classes (`PORT`/`SKIP`/`DEFER`/`SYNCED`).
 
 ## Artifact map
 
@@ -106,13 +140,32 @@ Every architectural claim must be tagged:
 | `docs/phase-0-exit-criteria.md` | Phase 0 gates, decision ledger (D-01…D-17), and reconciliation decisions (OD-1…OD-10) |
 | `docs/reconciliation/RECONCILIATION_DECISIONS.md` | Owner-approved reconciliation gate record (2026-09-12) — Foundation-First Hybrid, scope + non-authorizations |
 | `docs/provenance/REMOTE_LINEAGE.md` | Remote lineage provenance manifest (pinned snapshot, annotated tag, verification evidence) |
+| `docs/audits/` | **Immutable historical audit records** (ADR-017) — verbatim, SHA-256-locked; never edited; current: 2026-09-25 Final Two-Repository Migration Reconciliation Audit (baselines modern `ffcb0e9` / legacy `edede31`) |
+| `docs/state/CURRENT_STATE.md` + `current-state.json` | **Canonical current project state** (ADR-017) — verification-state vocabulary, drift policy, verified snapshot; authoritative for the present |
+| `docs/state/MIGRATION_GAP_REGISTER.md` + `migration-gap-register.json` | **Migration gap register** (ADR-017) — every open gap (MG-*), closed gaps with evidence, owner decisions, recorded (unresolved) documentation contradictions |
+| `docs/state/CHANGE_LOG.md` | **Change/evidence log** (ADR-017) — append-only commit→impact→evidence ledger since the audit baseline |
+| `tools/agent-context.mjs` | **Session-start state verifier** (ADR-017) — audit integrity, baseline/HEAD drift classification (governance-only vs application), state-file validation; run before any work |
+| `docs/adr/ADR-017-agent-context-system.md` | Agent Context System decision record (2026-09-26) |
+| `MASTER_ROADMAP.md` | Architecture authority (root) — capability roadmap; ⚠ known stale/conflicting rows vs the 2026-09-25 audit tracked as `MG-DOC-3` (reconcile before trusting a single status label) |
+| `docs/FRONTEND_MIGRATION_FINAL_REPORT.md`, `docs/FRONTEND_CLOSURE_REPORT.md`, `docs/frontend-migration-progress.md` | Frontend migration evidence (W0–W5; closure 110/110; 804/804) — supersession markers pending (`MG-DOC-5`) |
+| `docs/reconciliation/METAAPI_OWNER_DECISIONS.md`, `docs/reconciliation/METAAPI_PROVISIONING_IMPLEMENTATION_REPORT.md` | MetaAPI owner decisions (OD-M*, D-1…D-7, OD-MP-*) and provisioning implementation record |
+| `docs/deployment-contract.md` | Deployment/redeploy contract |
+| `docs/ops/MAIN_RECONCILIATION_PLAN.md` | `main` vs `reconcile/foundation-first` reconciliation analysis (2026-09-17) |
 
 ## Session protocol (lean)
 
-1. Read this file, then the ADRs relevant to your mission.
+1. Read this file, then run **`node tools/agent-context.mjs`** (ADR-017). Its
+   verdict governs the session: `CURRENT` → proceed; `DRIFTED`/errors → first
+   curate `docs/state/` (change-log entries, evidence staleness, verified
+   SHAs) and do not treat recorded evidence as current until then. Then read
+   `docs/state/CURRENT_STATE.md` and the gap-register rows relevant to your
+   mission, then the ADRs relevant to your mission.
 2. Work only within the scope the owner stated.
 3. Report concise, evidence-tagged conclusions — no file dumps, no raw logs.
-4. Commit/push only after owner approval. The repository is intentionally PUBLIC
+4. If your work alters migration state (gap opened/closed, evidence captured,
+   runtime verified, owner decision recorded), update `docs/state/` (current
+   state + gap register + change log) **in the same change**.
+5. Commit/push only after owner approval. The repository is intentionally PUBLIC
    (owner decision D-06, revised 2026-08-29); visibility and secret safety are
    separate concerns — the standing pre-push secret-safety scan must be re-run
    with zero findings before every push.
