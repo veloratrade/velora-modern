@@ -1,5 +1,11 @@
 # VELORA — Frontend Closure Report
 
+> **Lineage note (2026-09-26, ADR-017):** closing verification (110/110, 0 CSP
+> violations) of `docs/FRONTEND_MIGRATION_FINAL_REPORT.md`, executed 2026-09-24
+> at `514da6a` / merge `ffcb0e9`. Retained as evidence; current project state
+> lives in `docs/state/CURRENT_STATE.md`. *(Supersession marker per audit
+> §16.3 D5 / MG-DOC-5 — content below unedited.)*
+
 **Execution:** Frontend closure + local preview verification (no backend expansion, no deployment)
 **Date:** 2026-09-24 (Asia/Tehran session; verification timestamps UTC)
 **Repository:** `veloratrade/velora-modern`

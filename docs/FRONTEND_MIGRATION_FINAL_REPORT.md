@@ -1,5 +1,12 @@
 # VELORA — Full Frontend Migration Final Report
 
+> **Lineage note (2026-09-26, ADR-017):** historical record of the W0–W5
+> frontend execution on branch `feat/web-full-frontend`; that branch merged to
+> `main` @ `ffcb0e9` (PR #7, 2026-09-24) and its verification is closed by
+> `docs/FRONTEND_CLOSURE_REPORT.md`. Current project state lives in
+> `docs/state/CURRENT_STATE.md`. *(Supersession marker per audit §16.3 D5 /
+> MG-DOC-5 — content below unedited.)*
+
 **Branch:** `feat/web-full-frontend` (local, NOT pushed)
 **Destination base:** `main` @ `80f0ade` → merge-baseline `ebb5ebe` (W0 landing approved) on this branch
 **Report date:** 2026-09-24 (Asia/Tehran)

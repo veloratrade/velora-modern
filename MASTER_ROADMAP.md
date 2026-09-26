@@ -1,5 +1,19 @@
 # VELORA — MASTER ROADMAP (Authoritative)
 
+> **⚠ RECONCILIATION NOTICE (2026-09-26, ADR-017).** This roadmap remains the
+> architecture authority, but it predates the 2026-09-25 two-repository
+> migration audit
+> (`docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md`) and is
+> known to conflict with it — e.g. ACCT-02 / AI-01 / ADMIN-01 are marked
+> `COMPLETED (backend)` here while the audit rules MetaAPI position assembly a
+> correctness blocker (§9.2), the AI layer a provider-boundary seam only
+> (§12.5), and the admin surface 93% absent (§4.2); §3 W-phase statuses
+> predate the `ffcb0e9` merge (2026-09-24). Per owner instruction the rows
+> below are left unedited; the contradictions are recorded in
+> `docs/state/MIGRATION_GAP_REGISTER.md` §E (MG-DOC-3) pending an
+> owner-reviewed reconciliation. For the present, trust
+> `docs/state/CURRENT_STATE.md` — validated by `node tools/agent-context.mjs`.
+
 **Authority:** This document is the single authoritative roadmap for `veloratrade/velora-modern`.  
 It reconciles the Legacy product roadmap (`veloratrade/veloratrade` → `docs/pdf/Roadmap.pdf` @ `edede31`, 17 pages, `Velora_Master_Roadmap_v0.1_v3.0`) with the actual Modern architecture on `main` @ `80f0ade` and the landing implementation on `feat/web-landing-parity` (2026-09-23).
 
