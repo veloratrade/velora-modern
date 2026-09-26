@@ -66,6 +66,15 @@ judgment, recorded here so the next session does not re-derive it).
   - `node tools/agent-context.mjs` → OVERALL CURRENT (this commit classified governance-only + logged)
 - **Authorization:** ADR-017 state discipline (the tool's DRIFTED instruction); owner "ادامه" 2026-09-26.
 
+## AC-4 — 2026-09-26 · Branch push + PR opened (distribution event)
+
+- **Commit:** this entry's commit — subject "state: record branch push + PR #8 (AC-4)" (self-referential, ADR-017 §Decision 7).
+- **Classification:** GOVERNANCE-ONLY (`docs/state/**`).
+- **Event:** owner provided push credentials (fine-grained PAT, transmitted in chat; used **transiently** — never written to any repository file, commit, or git config; the /tmp copy is deleted at session end; rotation recommended post-merge since it transited chat). Branch `governance/agent-context` pushed to `origin` (`2ad49df`, `59047b8`, `abbe93e` + this commit); **PR #8** opened for owner review: `https://github.com/veloratrade/velora-modern/pull/8`. Remote `main` verified still at `ffcb0e9` before push (no drift). Per OD-10: merge requires owner review; `main` untouched.
+- **Impact on migration state:** none to gap rows; distribution state recorded in `current-state.json` (`distribution`). MG-OBS-2 unchanged — the OD-2 provenance-tag decision remains open (now trivially executable once decided: the pinned commit `99e024c8` is reachable via the `backup/main-before-migration-promotion-99e024c8` branch in this clone).
+- **Evidence:** `git ls-remote` post-push (branch at pushed SHA, `main` at `ffcb0e9`); PR API response HTTP 201 (PR #8, state open); `bash tools/secret-scan.sh` re-run PASS (0 findings) before each push (D-06 standing gate).
+- **Authorization:** owner credential provision 2026-09-26, following the push/PR plan in the AC-3 session report.
+
 <!-- Append new entries below this line. Entry template:
 ## AC-n — YYYY-MM-DD · <title>
 - Commit: <sha or locator> · Repo/branch

@@ -98,5 +98,22 @@
     "at_sha": "59047b856e4794c1436ed6abfc01ab9a11c60c35",
     "date": "2026-09-26",
     "classification": "CURRENT_RUNTIME_VERIFIED (captured this session against the verified tree; decays to RECORDED_RUNTIME for later sessions per CURRENT_STATE.md §3)"
+  },
+  "distribution": {
+    "branch": "governance/agent-context",
+    "pushed": true,
+    "pushed_at": "2026-09-26",
+    "commits": [
+      "2ad49df01c0d2761f1734adf6ee44aa2153ccd0e",
+      "59047b856e4794c1436ed6abfc01ab9a11c60c35",
+      "abbe93eb39f72fe39140a7273e6884a973628e3a"
+    ],
+    "pull_request": {
+      "number": 8,
+      "url": "https://github.com/veloratrade/velora-modern/pull/8",
+      "state": "open",
+      "awaiting": "owner review (OD-10); merge NOT authorized"
+    },
+    "main_untouched": "ffcb0e976147c753493532188a598ecb5de8d06d"
   }
 }
