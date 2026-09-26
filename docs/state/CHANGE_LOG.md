@@ -45,6 +45,27 @@ judgment, recorded here so the next session does not re-derive it).
   verbatim … continue the implementation … create one clean governance-only
   commit"). Push/PR/merge: NOT authorized yet — branch only, `main` untouched.
 
+## AC-2 — 2026-09-26 · Documentation defect closure (audit §16.3 D1/D2/D4/D5 + roadmap banner + ADR index + inspection evidence)
+
+- **Commit:** `59047b856e4794c1436ed6abfc01ab9a11c60c35` — "docs: close audit documentation defects — README, roadmap banner, report lineage, ADR index, citation fix"
+- **Classification:** MIXED — governance docs **plus one application comment** (`apps/api/src/attachments/attachmentService.ts:11`, citation-only, no behavior). APP path per drift policy → curated by AC-3 below.
+- **Impact on migration state:** MG-DOC-1 → CLOSED (README rewritten); MG-DOC-2 → CLOSED (ADR count corrected + `docs/adr/README.md`); MG-DOC-4 → CLOSED (citation corrected); MG-DOC-5 → CLOSED (lineage banners on all three frontend reports, content unedited); MG-DOC-6 → CLOSED (ADR-015 gap documented in `docs/adr/README.md`); **MG-DOC-3 → PARTIAL** (visible reconciliation banner added to `MASTER_ROADMAP.md`; **rows intentionally left unedited per owner instruction** — full reconciliation remains owner-gated). MG-G12 remains OPEN (now blocked only by MG-DOC-3 rows + ADR-004/009 open sub-items). Inspection report of 2026-09-26 committed as `docs/evidence/AGENT-CONTEXT-INSPECTION-2026-09-26.md` (MG-OBS-3 pattern).
+- **Evidence:** `git show 59047b8` (8 files, +305/−12; the only `apps/**` change is the 6-line comment); verification battery at this commit recorded in AC-3.
+- **Authorization:** owner instruction "ادامه" (continue) 2026-09-26, following audit §19.2(g) "Correct README, MASTER_ROADMAP, ADR numbering and the `ScreenshotController` citation" and §16.3 D5.
+
+## AC-3 — 2026-09-26 · State curation — advance verified baseline past AC-2, record fresh battery
+
+- **Commit:** this curation commit — subject "state: curate AC-2 — advance verified baseline, record verification battery" (self-referential, ADR-017 §Decision 7).
+- **Classification:** GOVERNANCE-ONLY (`docs/state/**`).
+- **Impact on migration state:** `current_verified.modern_sha` advanced `2ad49df` → `59047b8` after verification. **Local battery re-captured fresh at `59047b8` (2026-09-26): `CURRENT_RUNTIME_VERIFIED`** — per CURRENT_STATE.md §3 this is valid for this session/tree and decays to `RECORDED_RUNTIME` for later sessions.
+- **Evidence (executed 2026-09-26 at `59047b8`, clean tree):**
+  - `npx tsc -b packages/contracts packages/domain apps/api apps/worker apps/web` → **0 errors**
+  - `node tools/run-tests.mjs` → **804/804 pass, 0 fail, 0 cancelled, 0 skipped, 0 todo** (ALL TEST FILES PASSED)
+  - `npm run test:migrations` → **19/19 pass, 0 fail**
+  - `bash tools/secret-scan.sh` → **PASS (0 findings)**
+  - `node tools/agent-context.mjs` → OVERALL CURRENT (this commit classified governance-only + logged)
+- **Authorization:** ADR-017 state discipline (the tool's DRIFTED instruction); owner "ادامه" 2026-09-26.
+
 <!-- Append new entries below this line. Entry template:
 ## AC-n — YYYY-MM-DD · <title>
 - Commit: <sha or locator> · Repo/branch

@@ -30,7 +30,7 @@
 | MG-G09 | Background/cron work deployed and proven | FAIL | OPEN | STATIC (absence) + NOT_VERIFIED (runtime) | MG-WORKER-DEPLOY closed with runtime evidence |
 | MG-G10 | Data migration rehearsed and validated end-to-end | FAIL | OPEN | NOT_VERIFIED | ADR-004 sampling decided + rehearsal executed |
 | MG-G11 | Test suite covers migrated surface and passes | PARTIAL | PARTIAL | RECORDED_RUNTIME (804/804 @ `ffcb0e9`, 2026-09-24) | Coverage extends as capabilities land; re-run on current tree |
-| MG-G12 | Documentation and ADRs current/complete/consistent | FAIL | OPEN | STATIC | MG-DOC-1…5 closed |
+| MG-G12 | Documentation and ADRs current/complete/consistent | FAIL | OPEN | STATIC | remaining: MG-DOC-3 row-level roadmap reconciliation (owner-reviewed) + ADR-004/009 open sub-items (MG-DOC-1/2/4/5/6 closed by AC-2) |
 | MG-G13 | Operational tooling, backup and restore proven | FAIL | OPEN | NOT_VERIFIED | MG-BACKUP-RESTORE closed (mechanism ≠ backup ≠ restore) |
 | MG-G14 | Deployment path complete for every runtime component | FAIL | OPEN | STATIC | Worker service defined; digests pinned; R2 wired; host exists |
 | MG-G15 | Every remaining gap closed or owner-accepted in writing | FAIL | OPEN | STATIC | The 9 decisions in §C resolved with recorded owner sign-off |
@@ -99,16 +99,16 @@ From audit §18 (`COMPLETE` ×31) and §19.2. Verification states reflect the au
 | Stripe billing | `MODERN-ONLY` roadmap v1.0 capability; signature verification present (prices NOT VERIFIED) | STATIC (§12.2) |
 | Queue mechanism | pg-boss v10, policies, outbox, DLQ (runtime NOT VERIFIED — worker undeployed) | STATIC (§12.4) |
 
-## §E — Documentation defects, contradictions and observations (recorded, NOT fixed here)
+## §E — Documentation defects, contradictions and observations (recorded; fixed only where authorized — see status column)
 
 | ID | Item | Source | Status |
 |---|---|---|---|
-| MG-DOC-1 | `README.md` claims "No application code exists" (267 TS files exist; merged 2026-09-24) | audit §16.3 D1 | OPEN |
-| MG-DOC-2 | `README.md` understates ADR count ("all ten" vs 15) | audit §16.3 D2 | OPEN |
-| MG-DOC-3 | `MASTER_ROADMAP.md` stale vs `main` (W1–W5 marked PLANNED, landed at `ffcb0e9`) **and** conflicts with the audit (ACCT-02/AI-01/ADMIN-01 marked `COMPLETED (backend)`; audit: MetaAPI assembly blocker, AI seam-only, admin 93% absent). Per owner instruction 2026-09-26: recorded for later reconciliation — the roadmap is NOT edited to hide this | audit §16.3 D3 + §4.2/§9.2/§12.5 | OPEN |
-| MG-DOC-4 | `attachmentService.ts:20` cites non-existent legacy `ScreenshotController.php` | audit §16.3 D4 | OPEN |
-| MG-DOC-5 | Three frontend reports coexist, none marked superseded | audit §16.3 D5 | OPEN |
-| MG-DOC-6 | ADR-015 numbering gap | audit §16.1 | OPEN |
+| MG-DOC-1 | `README.md` claims "No application code exists" (267 TS files exist; merged 2026-09-24) | audit §16.3 D1 | CLOSED · AC-2 (2026-09-26) — README rewritten |
+| MG-DOC-2 | `README.md` understates ADR count ("all ten" vs 15) | audit §16.3 D2 | CLOSED · AC-2 (2026-09-26) — ADR count corrected + `docs/adr/README.md` |
+| MG-DOC-3 | `MASTER_ROADMAP.md` stale vs `main` (W1–W5 marked PLANNED, landed at `ffcb0e9`) **and** conflicts with the audit (ACCT-02/AI-01/ADMIN-01 marked `COMPLETED (backend)`; audit: MetaAPI assembly blocker, AI seam-only, admin 93% absent). Per owner instruction 2026-09-26: recorded for later reconciliation — the roadmap is NOT edited to hide this | audit §16.3 D3 + §4.2/§9.2/§12.5 | PARTIAL · AC-2 (2026-09-26) — reconciliation banner added; **rows unedited per owner instruction**; row-level reconciliation owner-gated |
+| MG-DOC-4 | `attachmentService.ts:20` cites non-existent legacy `ScreenshotController.php` | audit §16.3 D4 | CLOSED · AC-2 (2026-09-26) — citation corrected; battery 804/804 at fix commit (AC-3) |
+| MG-DOC-5 | Three frontend reports coexist, none marked superseded | audit §16.3 D5 | CLOSED · AC-2 (2026-09-26) — lineage banners on all three; content unedited |
+| MG-DOC-6 | ADR-015 numbering gap | audit §16.1 | CLOSED · AC-2 (2026-09-26) — `docs/adr/README.md` documents ADR-015 as intentionally unassigned |
 | MG-OBS-1 | Audit-internal discrepancy: §19.1 table marks gates 8 **and** 11 PARTIAL while the §19.1 score line and §2 summary state "1 PARTIAL, 14 FAIL". The immutable audit is stored as-is; this register tracks gates per-row (13 FAIL + 2 PARTIAL rows) and the headline per the audit's own score line. If the split ever matters to a decision, the owner must rule which reading is authoritative | inspection 2026-09-26 | OWNER_DECISION_REQUIRED (only if the split becomes decision-relevant) |
 | MG-OBS-2 | Provenance tag `remote-snapshot-99e024c829db` (OD-2, `docs/provenance/REMOTE_LINEAGE.md`) was never pushed — remote has zero tags; pinned commit remains reachable via `backup/main-before-migration-promotion-99e024c8` branch | inspection 2026-09-26 | OPEN |
 | MG-OBS-3 | Older authoritative session artifacts (2026-09-12 Reconciliation Gate Report, 2026-09-15 MetaAPI Readiness Audit) are referenced by committed records but were never committed themselves. The 2026-09-25 audit is now preserved (`docs/audits/`); the older two remain absent — accepted historical limitation unless the owner orders recovery | inspection 2026-09-26 | OPEN (accept-or-recover decision) |

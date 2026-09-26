@@ -1,7 +1,7 @@
 # VELORA-MODERN — Current Project State (Canonical)
 
 **System:** Agent Context System (ADR-017) · **Schema version:** 1
-**Last updated:** 2026-09-26 (Asia/Tehran) — introducing commit (see `docs/state/CHANGE_LOG.md` entry AC-1)
+**Last updated:** 2026-09-26 (Asia/Tehran) — entries AC-1 (system introduced), AC-2 (documentation-defect closure), AC-3 (verified baseline advanced to `59047b8`, fresh battery)
 **Machine-readable twin:** `docs/state/current-state.json` (read by `tools/agent-context.mjs`; the two must be updated in the same change)
 **Mode:** GOVERNANCE STATE RECORD — this file records *what is verified*, never what is hoped.
 
@@ -85,12 +85,12 @@ audit's own evidence has become stale *and* the delta cannot be curated through
 
 | Item | Value | Verification |
 |---|---|---|
-| Modern repo HEAD (last verified) | `ffcb0e976147c753493532188a598ecb5de8d06d` — the audit baseline; the introducing commit of this system is governance-only (CHANGE_LOG AC-1) | `STATIC` (git, 2026-09-26) |
+| Modern repo HEAD (last verified) | `59047b856e4794c1436ed6abfc01ab9a11c60c35` — audit baseline `ffcb0e9` + `2ad49df` (ADR-017, governance-only, AC-1) + `59047b8` (documentation-defect closure, AC-2; the only `apps/**` change is a 6-line comment, curated by AC-3) | `STATIC` (git, 2026-09-26) |
 | Legacy repo HEAD (last verified) | `edede313280f2f0e298f5ccbf5bbdd4d676c80bd` — unchanged since audit; zero drift | `STATIC` (git, 2026-09-26) |
 | Migration closure | **NOT CLOSED** (audit 2026-09-25; no application changes since → verdict still stands) | `STATIC` |
 | Open closure gates | 14 FAIL + 1 PARTIAL per audit score line (see gap register §A) | `STATIC` |
 | Open owner decisions | 9 (R1, R2, R8, R9, OD-1, ADR-004 sampling, RPO/RTO, subscription mapping, worker service definition) | `OWNER_DECISION_REQUIRED` |
-| Local test battery | 804/804 + `next build` 35 routes + secret-scan 0 findings — recorded 2026-09-24 on `ffcb0e9` | `RECORDED_RUNTIME` (valid for `ffcb0e9`; not re-run since) |
+| Local test battery | **re-captured 2026-09-26 at `59047b8`**: tsc 0 errors · 804/804 (0 fail/skip) · migrations 19/19 · secret-scan 0 findings (CHANGE_LOG AC-3); `next build` 35 routes remains `RECORDED_RUNTIME` @ `ffcb0e9` (2026-09-24) | `CURRENT_RUNTIME_VERIFIED` @ `59047b8` (decays per §3) |
 | Worker runtime, backups, restore, HSTS-at-edge, Stripe prices, real-PG batteries | No evidence | `NOT_VERIFIED` |
 | Session-start verdict | Run `node tools/agent-context.mjs` — its output supersedes this snapshot | — |
 
@@ -110,8 +110,8 @@ register §E for the full list, including `MG-DOC-1`…`MG-DOC-5`:
   (§4.2). The audit is newer and baseline-equal; reconciliation of the roadmap
   is an open documentation gap (`MG-DOC-3`), **not** a reason to edit either
   document silently.
-- `README.md` still claims no application code exists (audit defect D1).
-- ADR-015 numbering gap (audit §16.1).
+- **Closed 2026-09-26 (CHANGE_LOG AC-2):** README defects D1/D2, `ScreenshotController` citation D4, report supersession D5, ADR-015 gap documentation.
+- **Still open:** `MG-DOC-3` — MASTER_ROADMAP row-level reconciliation (banner added; rows unedited per owner instruction; owner-reviewed change required).
 
 ## 7. Update obligations (who writes here, when)
 

@@ -20,7 +20,11 @@
       "sha256": "643fa1b554753d4dc584699261bfe996e668e6dcd2876abde53dc77b090aea2f",
       "bytes": 88405,
       "verdict": "NOT CLOSED — PARTIAL MIGRATION WITH MATERIAL BEHAVIOURAL DIVERGENCE AND BLOCKING OPERATIONAL GAPS",
-      "closure_gates": { "pass": 0, "partial": 1, "fail": 14 },
+      "closure_gates": {
+        "pass": 0,
+        "partial": 1,
+        "fail": 14
+      },
       "closure_gates_note": "Audit's own score line (§19.1): 1 PARTIAL, 14 FAIL. The §19.1 table itself marks gates 8 and 11 as PARTIAL — recorded as-is; see MG-OBS-1 in the gap register."
     },
     "modern": {
@@ -34,12 +38,11 @@
     }
   },
   "current_verified": {
-    "modern_sha": "ffcb0e976147c753493532188a598ecb5de8d06d",
+    "modern_sha": "59047b856e4794c1436ed6abfc01ab9a11c60c35",
     "legacy_sha": "edede313280f2f0e298f5ccbf5bbdd4d676c80bd",
     "verified_at": "2026-09-26",
-    "verification": "STATIC",
-    "verified_by": "Agent session 2026-09-26: fresh clones, HEAD == audit baselines verified via git ls-remote before clone; governance-only introducing commit recorded in CHANGE_LOG AC-1",
-    "notes": "modern_sha advances only through CHANGE_LOG-logged, classified commits; the ADR-017 introducing commit is governance-only and self-records (a commit cannot contain its own hash)."
+    "verification": "STATIC (git) + fresh runtime battery at 59047b8: tsc 0 errors, 804/804 tests, 19/19 migration tests, secret-scan 0 findings (CHANGE_LOG AC-3). The only apps/** change since the audit baseline is a 6-line comment (AC-2); curation commit is governance-only.",
+    "notes": "modern_sha advances only through CHANGE_LOG-logged, classified commits. 2ad49df = ADR-017 introducing commit (governance-only, AC-1); 59047b8 = documentation-defect closure (AC-2, one comment-only apps/ file, curated by AC-3); this curation commit self-records per ADR-017."
   },
   "artifacts": {
     "current_state_md": "docs/state/CURRENT_STATE.md",
@@ -89,5 +92,11 @@
       "MG-AI-OCR",
       "MG-BACKUP-RESTORE"
     ]
+  },
+  "last_battery": {
+    "result": "804/804 pass, 0 fail, 0 skipped; migrations 19/19; tsc 0 errors; secret-scan PASS",
+    "at_sha": "59047b856e4794c1436ed6abfc01ab9a11c60c35",
+    "date": "2026-09-26",
+    "classification": "CURRENT_RUNTIME_VERIFIED (captured this session against the verified tree; decays to RECORDED_RUNTIME for later sessions per CURRENT_STATE.md §3)"
   }
 }
