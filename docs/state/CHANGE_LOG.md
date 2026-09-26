@@ -83,3 +83,12 @@ judgment, recorded here so the next session does not re-derive it).
 - Evidence: <commands, artifacts, links>
 - Authorization: <owner instruction/decision reference>
 -->
+## AC-5 — 2026-09-26 · Build evidence refresh + MetaAPI assembly implementation brief
+
+- **Commit:** this entry's commit — subject "docs: MetaAPI position-assembly brief + build evidence refresh (AC-5)" (self-referential, ADR-017 §Decision 7).
+- **Classification:** GOVERNANCE-ONLY (`docs/reconciliation/`, `docs/state/`).
+- **Impact on migration state:** MG-METAAPI-ASSEMBLY unchanged (OPEN) — an implementation **brief** is now linked (design only, no code): `docs/reconciliation/METAAPI_POSITION_ASSEMBLY_BRIEF.md`, with owner decisions OD-M-PA-1 (repair of previously imported per-fill rows), OD-M-PA-2 (convergence model), OD-M-PA-3 (contract_size parity reading). New observation MG-OBS-5 recorded: legacy `MetaApiService.php` never sets `contract_size` (0 grep matches; schema default `1.00000000` at `schema.sql:232`) — audit §9.2's "contract size from the deal" is not what the code path does; modern's hardcoded 1 is parity on that field.
+- **Evidence (executed 2026-09-26 at `d85a589`, clean tree):**
+  - `npm run build --workspace=@velora/web` → **exit 0**, route table emitted (34 `page.tsx` measured app-side; 0 `route.ts`; no dynamic segments — prior closure-report figure was 35 ƒ incl. middleware; measured count recorded as-is).
+  - Sources read for the brief (both repos): `MetaApiDealAssembler.php` (complete), `MetaApiService.php` (reconcileAccount/processWebhook), `schema.sql:232`, `syncRepository.ts`, `normalizeDeal.ts`, `metaapiSync.ts`.
+- **Authorization:** owner "ادامه" 2026-09-26; brief-only scope respects the standing "do not fix migration gaps yet" instruction.

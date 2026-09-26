@@ -1,7 +1,7 @@
 # VELORA-MODERN — Current Project State (Canonical)
 
 **System:** Agent Context System (ADR-017) · **Schema version:** 1
-**Last updated:** 2026-09-26 (Asia/Tehran) — entries AC-1 (system introduced), AC-2 (documentation-defect closure), AC-3 (verified baseline advanced to `59047b8`, fresh battery)
+**Last updated:** 2026-09-26 (Asia/Tehran) — entries AC-1 (system introduced), AC-2 (documentation-defect closure), AC-3 (verified baseline `59047b8`, fresh battery), AC-4 (push + PR #8), AC-5 (build evidence refresh + MetaAPI assembly brief)
 **Machine-readable twin:** `docs/state/current-state.json` (read by `tools/agent-context.mjs`; the two must be updated in the same change)
 **Mode:** GOVERNANCE STATE RECORD — this file records *what is verified*, never what is hoped.
 
@@ -90,7 +90,7 @@ audit's own evidence has become stale *and* the delta cannot be curated through
 | Migration closure | **NOT CLOSED** (audit 2026-09-25; no application changes since → verdict still stands) | `STATIC` |
 | Open closure gates | 14 FAIL + 1 PARTIAL per audit score line (see gap register §A) | `STATIC` |
 | Open owner decisions | 9 (R1, R2, R8, R9, OD-1, ADR-004 sampling, RPO/RTO, subscription mapping, worker service definition) | `OWNER_DECISION_REQUIRED` |
-| Local test battery | **re-captured 2026-09-26 at `59047b8`**: tsc 0 errors · 804/804 (0 fail/skip) · migrations 19/19 · secret-scan 0 findings (CHANGE_LOG AC-3); `next build` 35 routes remains `RECORDED_RUNTIME` @ `ffcb0e9` (2026-09-24) | `CURRENT_RUNTIME_VERIFIED` @ `59047b8` (decays per §3) |
+| Local test battery | **re-captured 2026-09-26 at `59047b8`/`d85a589`**: tsc 0 errors · 804/804 (0 fail/skip) · migrations 19/19 · secret-scan 0 findings (AC-3); **`next build` exit 0 at `d85a589`** (route table emitted; 34 app-side pages measured — prior closure report counted 35 ƒ incl. middleware) (AC-5) | `CURRENT_RUNTIME_VERIFIED` (decays per §3) |
 | Worker runtime, backups, restore, HSTS-at-edge, Stripe prices, real-PG batteries | No evidence | `NOT_VERIFIED` |
 | Session-start verdict | Run `node tools/agent-context.mjs` — its output supersedes this snapshot | — |
 

@@ -301,7 +301,7 @@
     {
       "id": "MG-METAAPI-ASSEMBLY",
       "section": "B",
-      "title": "MetaAPI per-fill trade assembly (entry=exit price, volume=OUT fill, contract_size=1, single timestamp, DO NOTHING convergence)",
+      "title": "MetaAPI per-fill trade assembly (entry=exit price, volume=OUT fill, contract_size=1, single timestamp, DO NOTHING convergence) — implementation brief prepared 2026-09-26 (docs/reconciliation/METAAPI_POSITION_ASSEMBLY_BRIEF.md); owner decisions OD-M-PA-1…3 pending",
       "status": "OPEN",
       "priority": "P1",
       "verification_state": "STATIC",
@@ -310,9 +310,14 @@
       ],
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
-        "apps/worker/src/metaapi/syncRepository.ts"
+        "apps/worker/src/metaapi/syncRepository.ts",
+        "docs/reconciliation/METAAPI_POSITION_ASSEMBLY_BRIEF.md"
       ],
-      "decisions": [],
+      "decisions": [
+        "OD-M-PA-1",
+        "OD-M-PA-2",
+        "OD-M-PA-3"
+      ],
       "closure_criteria": "Position-level volume-weighted assembly + convergence path, verified"
     },
     {
@@ -869,6 +874,24 @@
       ],
       "decisions": [],
       "closure_criteria": "Fixed by the ADR-017 introducing commit (CHANGE_LOG AC-1)"
+    },
+    {
+      "id": "MG-OBS-5",
+      "section": "E",
+      "title": "Audit §9.2 contract_size claim vs source: legacy MetaApiService never sets contract_size (schema default 1); modern hardcoded 1 is parity on this field — awaiting owner confirmation (OD-M-PA-3)",
+      "status": "OPEN",
+      "priority": "P3",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§9.2"
+      ],
+      "evidence": [
+        "docs/reconciliation/METAAPI_POSITION_ASSEMBLY_BRIEF.md"
+      ],
+      "decisions": [
+        "OD-M-PA-3"
+      ],
+      "closure_criteria": "Owner confirms the source-verified reading (OD-M-PA-3)"
     }
   ],
   "owner_decisions": [
