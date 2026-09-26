@@ -104,3 +104,9 @@ judgment, recorded here so the next session does not re-derive it).
   - `tools/pg-smoke.ts` (D1 S1–S9): S1a PASS (real-server identity, `server_version = PostgreSQL 17.11`); **S1b FAILS on a stale expectation** — it asserts the D1-era migration list `[0001…0005]` while the tree carries `0001…0022`. Recorded as **MG-OBS-6** (test-side fix owner-gated; the batteries are unaffected).
 - **Impact on migration state:** MG-G11 evidence strengthened — the audit's "real-PG batteries NOT VERIFIED" item now has captured runtime evidence (`CURRENT_RUNTIME_VERIFIED` @ `5140098` on PG 17.11, disposable). Gate stays PARTIAL (missing capabilities remain untestable). New observation MG-OBS-6 opened. No other gap touched.
 - **Authorization:** owner "ادامه" 2026-09-26; verification-only (no code change, no owner decision, no production system — disposable, test-only, mirroring the repo's own `postgres-evidence.yml` path without using GitHub Actions, per the owner cost policy).
+
+## AC-6b — 2026-09-26 · Close the AC-6 curation loop + self-reference protocol note
+
+- **Commit:** this entry's commit — subject "state: record AC-6 curation SHA and close the loop (AC-6b)" (self-referential **by subject**; the curation commit `23aa83f` — full SHA `23aa83fe4ab5` — is now recorded by SHA above in this entry's edit of the AC-6 block). Governance-only (`docs/state/CHANGE_LOG.md`).
+- **Protocol lesson (binding for future entries):** a CHANGE_LOG entry must contain **the exact commit subject, ASCII-only, or the full SHA** — a single differing character (here `×` vs `x`) breaks `tools/agent-context.mjs` subject matching and cascades into extra curation commits. Self-referential entries terminate only when the entry carries its own commit's exact subject.
+- **Impact on migration state:** none beyond AC-6 bookkeeping.
