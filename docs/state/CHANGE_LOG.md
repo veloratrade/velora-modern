@@ -95,7 +95,7 @@ judgment, recorded here so the next session does not re-derive it).
 
 ## AC-6 — 2026-09-26 · Real-PostgreSQL battery evidence captured (disposable local cluster)
 
-- **Commit:** this entry's commit — subject "state: real-PG battery evidence — 23 batteries × 2 orders green (AC-6)" (self-referential, ADR-017 §Decision 7). Tree under test = `5140098` (unchanged; verification-only pass).
+- **Commit:** `3135da9` — full SHA `3135da9` *(completed by this curation commit: the original entry's subject line had `×` where the commit has `x`, which broke the tool's subject match; SHA now recorded for robust matching; the ×/x discrepancy is fixed in the entry text)*. Subject: `state: real-PG battery evidence — 23 batteries x 2 orders green (AC-6)`. Tree under test = `5140098` (unchanged; verification-only pass). Curation commit (this one) is governance-only and self-records per ADR-017 §Decision 7.
 - **Classification:** GOVERNANCE-ONLY (`docs/state/**`) — no application code touched.
 - **Environment:** disposable local PostgreSQL **17.11** (Debian; apt — PG 16 unavailable in this sandbox), cluster in `/tmp/pgdata`, TCP 127.0.0.1:55432, test-only credentials mirroring `postgres-evidence.yml` (`velora_test` / `velora-test-only` / `velora_test`); cluster destroyed after the run. **Version caveat: 17.11, not the GHA-proven 16.15 / compose-target 16 — evidence recorded with that label.**
 - **Evidence (executed 2026-09-26 against tree `5140098`):**
