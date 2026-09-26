@@ -108,5 +108,7 @@ judgment, recorded here so the next session does not re-derive it).
 ## AC-6b — 2026-09-26 · Close the AC-6 curation loop + self-reference protocol note
 
 - **Commit:** this entry's commit — subject "state: record AC-6 curation SHA and close the loop (AC-6b)" (self-referential **by subject**; the curation commit `23aa83f` — full SHA `23aa83fe4ab5` — is now recorded by SHA above in this entry's edit of the AC-6 block). Governance-only (`docs/state/CHANGE_LOG.md`).
+- **Curation-commit record (exact, injected from git):** `23aa83fe4ab54cfa9a3d54df2fb7a254588fc5c1` — subject: "state: curate AC-6 — record commit SHA (self-reference completion)".
+- **This entry's own commit:** subject "state: log the AC-6 curation commit subject (AC-6c)" (self-referential by exact ASCII subject).
 - **Protocol lesson (binding for future entries):** a CHANGE_LOG entry must contain **the exact commit subject, ASCII-only, or the full SHA** — a single differing character (here `×` vs `x`) breaks `tools/agent-context.mjs` subject matching and cascades into extra curation commits. Self-referential entries terminate only when the entry carries its own commit's exact subject.
 - **Impact on migration state:** none beyond AC-6 bookkeeping.
