@@ -1,5 +1,11 @@
 # Frontend Migration — Progress (machine-readable resume state)
 
+> **Lineage note (2026-09-26, ADR-017):** this terminal (`FINAL`) workstream
+> resume-state file is retained as the pattern precedent that
+> `docs/state/CURRENT_STATE.md` now generalizes project-wide. Do not update
+> this file; update `docs/state/` instead. *(Supersession marker per audit
+> §16.3 D5 / MG-DOC-5 — content below unedited.)*
+
 **Updated:** 2026-09-24 (Asia/Tehran)
 **Branch:** `feat/web-full-frontend`
 **Status:** FINAL — all phases W0..W5 executed; report: `docs/FRONTEND_MIGRATION_FINAL_REPORT.md`

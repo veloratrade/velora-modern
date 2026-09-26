@@ -1,0 +1,1073 @@
+{
+  "$comment": "VELORA-MODERN machine-readable migration gap register — twin of docs/state/MIGRATION_GAP_REGISTER.md (update both in the same change). Validated by tools/agent-context.mjs. Status: OPEN|PARTIAL|CLOSED. Verification states: STATIC|RECORDED_RUNTIME|CURRENT_RUNTIME_VERIFIED|NOT_VERIFIED|OWNER_DECISION_REQUIRED.",
+  "schema_version": 1,
+  "source_audit": {
+    "path": "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+    "audit_date": "2026-09-25",
+    "verdict": "NOT CLOSED — PARTIAL MIGRATION WITH MATERIAL BEHAVIOURAL DIVERGENCE AND BLOCKING OPERATIONAL GAPS"
+  },
+  "gaps": [
+    {
+      "id": "MG-G01",
+      "section": "A",
+      "title": "Every legacy capability ported or owner-approved drop",
+      "status": "OPEN",
+      "priority": "P2",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§19.1 gate 1",
+        "§4.2"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "76 missing routes ported or owner-dropped with recorded decisions"
+    },
+    {
+      "id": "MG-G02",
+      "section": "A",
+      "title": "API contracts match in method/path/status/semantics",
+      "status": "PARTIAL",
+      "priority": "P2",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§19.1 gate 2",
+        "§4.3"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [
+        "R1"
+      ],
+      "closure_criteria": "MG-API-CONTRACT-DIVERGENCE closed"
+    },
+    {
+      "id": "MG-G03",
+      "section": "A",
+      "title": "Data model covers every legacy table/column with explicit mapping",
+      "status": "PARTIAL",
+      "priority": "P2",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§19.1 gate 3",
+        "§8.1"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "db/migrations/0022_legacy_contract_parity.sql"
+      ],
+      "decisions": [
+        "OD-AC-SUBMAP"
+      ],
+      "closure_criteria": "MG-SCHEMA-MAPPING closed"
+    },
+    {
+      "id": "MG-G04",
+      "section": "A",
+      "title": "Financial calculations identical for identical inputs",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§19.1 gate 4",
+        "§9.1",
+        "§9.2"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "MG-METAAPI-ASSEMBLY + MG-RMULTIPLE-SCALE closed"
+    },
+    {
+      "id": "MG-G05",
+      "section": "A",
+      "title": "Frontend surfaces for every legacy user-facing route",
+      "status": "PARTIAL",
+      "priority": "P2",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§19.1 gate 5",
+        "§6"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "MG-FRONTEND-SURFACES closed"
+    },
+    {
+      "id": "MG-G06",
+      "section": "A",
+      "title": "Authorization boundaries reproduced incl. edge gating",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§19.1 gate 6",
+        "§10.2 S5"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "apps/web/src/proxy.ts"
+      ],
+      "decisions": [
+        "OD-AC-R8"
+      ],
+      "closure_criteria": "MG-SEC-EDGE-AUTHZ resolved + R8 decided"
+    },
+    {
+      "id": "MG-G07",
+      "section": "A",
+      "title": "Security posture at least equal to legacy on every control",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§19.1 gate 7",
+        "§10.2"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "S1/S2/S4 regressions resolved"
+    },
+    {
+      "id": "MG-G08",
+      "section": "A",
+      "title": "Integrations behave equivalently",
+      "status": "PARTIAL",
+      "priority": "P1",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§19.1 gate 8",
+        "§12"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "MetaAPI assembly + cadence; Resend email types"
+    },
+    {
+      "id": "MG-G09",
+      "section": "A",
+      "title": "Background/cron work deployed and proven to run",
+      "status": "OPEN",
+      "priority": "P1",
+      "verification_state": "NOT_VERIFIED",
+      "audit_refs": [
+        "§19.1 gate 9",
+        "§13.2"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "railway.json",
+        "apps/worker/src/index.ts"
+      ],
+      "decisions": [
+        "OD-AC-WORKER"
+      ],
+      "closure_criteria": "MG-WORKER-DEPLOY closed with runtime evidence"
+    },
+    {
+      "id": "MG-G10",
+      "section": "A",
+      "title": "Data migration path rehearsed and validated end-to-end",
+      "status": "OPEN",
+      "priority": "P1",
+      "verification_state": "NOT_VERIFIED",
+      "audit_refs": [
+        "§19.1 gate 10",
+        "§14"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "docs/migration-strategy.md"
+      ],
+      "decisions": [
+        "OD-AC-ADR004"
+      ],
+      "closure_criteria": "ADR-004 sampling decided + rehearsal executed"
+    },
+    {
+      "id": "MG-G11",
+      "section": "A",
+      "title": "Test suite covers the migrated surface and passes",
+      "status": "PARTIAL",
+      "priority": "P2",
+      "verification_state": "CURRENT_RUNTIME_VERIFIED",
+      "audit_refs": [
+        "§19.1 gate 11",
+        "§15"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "tools/run-tests.mjs"
+      ],
+      "decisions": [],
+      "closure_criteria": "Coverage extends as capabilities land; D1 smoke expectation fix (MG-OBS-6, owner-gated). Evidence: 804/804 local + next build exit 0 (AC-3/AC-5) + real-PG batteries 23 files x 2 orders, 0 fail/0 skipped on disposable PG 17.11 (AC-6)."
+    },
+    {
+      "id": "MG-G12",
+      "section": "A",
+      "title": "Documentation and ADRs current, complete, consistent",
+      "status": "OPEN",
+      "priority": "P2",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§19.1 gate 12",
+        "§16.3"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "remaining: MG-DOC-3 row-level roadmap reconciliation (owner-reviewed) + ADR-004/009 open sub-items (MG-DOC-1/2/4/5/6 closed by AC-2)"
+    },
+    {
+      "id": "MG-G13",
+      "section": "A",
+      "title": "Operational tooling, backup and restore proven",
+      "status": "OPEN",
+      "priority": "P1",
+      "verification_state": "NOT_VERIFIED",
+      "audit_refs": [
+        "§19.1 gate 13",
+        "§17.2"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "infra/backup/DR-RUNBOOK.md",
+        "ops/backup/backup_gate.py"
+      ],
+      "decisions": [
+        "OD-AC-RPORTO"
+      ],
+      "closure_criteria": "MG-BACKUP-RESTORE closed"
+    },
+    {
+      "id": "MG-G14",
+      "section": "A",
+      "title": "Deployment path complete for every runtime component",
+      "status": "OPEN",
+      "priority": "P1",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§19.1 gate 14",
+        "§17.3"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "railway.json",
+        "infra/docker-compose.yml"
+      ],
+      "decisions": [
+        "OD-AC-R2",
+        "OD-AC-WORKER",
+        "OD-AC-OD1"
+      ],
+      "closure_criteria": "Worker service defined; digests pinned; R2 wired; production host exists"
+    },
+    {
+      "id": "MG-G15",
+      "section": "A",
+      "title": "Every remaining gap closed or owner-accepted in writing",
+      "status": "OPEN",
+      "priority": "P1",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§19.1 gate 15"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [
+        "OD-AC-R1",
+        "OD-AC-R2",
+        "OD-AC-R8",
+        "OD-AC-R9",
+        "OD-AC-OD1",
+        "OD-AC-ADR004",
+        "OD-AC-RPORTO",
+        "OD-AC-SUBMAP",
+        "OD-AC-WORKER"
+      ],
+      "closure_criteria": "All §C decisions resolved with recorded owner sign-off"
+    },
+    {
+      "id": "MG-METAAPI-ASSEMBLY",
+      "section": "B",
+      "title": "MetaAPI per-fill trade assembly (entry=exit price, volume=OUT fill, contract_size=1, single timestamp, DO NOTHING convergence) — implementation brief prepared 2026-09-26 (docs/reconciliation/METAAPI_POSITION_ASSEMBLY_BRIEF.md); owner decisions OD-M-PA-1…3 pending",
+      "status": "OPEN",
+      "priority": "P1",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§9.2"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "apps/worker/src/metaapi/syncRepository.ts",
+        "docs/reconciliation/METAAPI_POSITION_ASSEMBLY_BRIEF.md"
+      ],
+      "decisions": [
+        "OD-M-PA-1",
+        "OD-M-PA-2",
+        "OD-M-PA-3"
+      ],
+      "closure_criteria": "Position-level volume-weighted assembly + convergence path, verified"
+    },
+    {
+      "id": "MG-WORKER-DEPLOY",
+      "section": "B",
+      "title": "Worker not deployed (no service definition; no scheduled job ever run)",
+      "status": "OPEN",
+      "priority": "P1",
+      "verification_state": "NOT_VERIFIED",
+      "audit_refs": [
+        "§13.2"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "railway.json",
+        "apps/worker/src/index.ts",
+        "infra/docker-compose.yml"
+      ],
+      "decisions": [
+        "OD-AC-WORKER"
+      ],
+      "closure_criteria": "Worker service defined + one tick of each scheduler proven in a real environment"
+    },
+    {
+      "id": "MG-SEC-COOKIE",
+      "section": "B",
+      "title": "Refresh cookie: __Host- prefix lost, SameSite Strict→Lax, body acceptance (S1)",
+      "status": "OPEN",
+      "priority": "P1",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§10.2 S1"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "apps/api/src/kernel/server.ts"
+      ],
+      "decisions": [],
+      "closure_criteria": "__Host- prefix + SameSite=Strict restored; body acceptance removed; regression tests"
+    },
+    {
+      "id": "MG-SEC-CSP",
+      "section": "B",
+      "title": "CSP release pinning/manifest lost; Math.random() nonce fallback (S2)",
+      "status": "OPEN",
+      "priority": "P1",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§10.2 S2"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "apps/web/src/proxy.ts"
+      ],
+      "decisions": [],
+      "closure_criteria": "Pinning model decided and implemented; weak-entropy fallback removed"
+    },
+    {
+      "id": "MG-SEC-HSTS",
+      "section": "B",
+      "title": "HSTS absent from proxy; must be confirmed at the edge (S4)",
+      "status": "OPEN",
+      "priority": "P2",
+      "verification_state": "NOT_VERIFIED",
+      "audit_refs": [
+        "§10.2 S4"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "HSTS verified at the deployed edge"
+    },
+    {
+      "id": "MG-SEC-EDGE-AUTHZ",
+      "section": "B",
+      "title": "No edge authorization boundary for 11 legacy-protected HTML routes (S5)",
+      "status": "OPEN",
+      "priority": "P1",
+      "verification_state": "NOT_VERIFIED",
+      "audit_refs": [
+        "§10.2 S5"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "apps/web/src/proxy.ts"
+      ],
+      "decisions": [
+        "OD-AC-R8"
+      ],
+      "closure_criteria": "Edge boundary reproduced or owner accepts client-side gating in writing"
+    },
+    {
+      "id": "MG-ADMIN",
+      "section": "B",
+      "title": "Admin console 93% absent (59/62 endpoints, 38 modules)",
+      "status": "OPEN",
+      "priority": "P1",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§4.2",
+        "§6.2"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "apps/api/src/kernel/adminUserRoutes.test.ts",
+        "apps/web/src/app/(app)/admin"
+      ],
+      "decisions": [],
+      "closure_criteria": "Admin surface ported or owner-scoped"
+    },
+    {
+      "id": "MG-AI-OCR",
+      "section": "B",
+      "title": "AI layer is a provider boundary only (no live provider, OCR, extraction, quota, retention, audit)",
+      "status": "OPEN",
+      "priority": "P1",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§12.5",
+        "§4.2",
+        "§8.1"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "apps/api/src/aicoach"
+      ],
+      "decisions": [],
+      "closure_criteria": "AI/OCR capability implemented or owner-scoped"
+    },
+    {
+      "id": "MG-BACKUP-RESTORE",
+      "section": "B",
+      "title": "No real backup taken; no restore drill run",
+      "status": "OPEN",
+      "priority": "P1",
+      "verification_state": "NOT_VERIFIED",
+      "audit_refs": [
+        "§17.2"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "infra/backup/DR-RUNBOOK.md"
+      ],
+      "decisions": [
+        "OD-AC-RPORTO"
+      ],
+      "closure_criteria": "One real backup + one restore drill, evidence captured"
+    },
+    {
+      "id": "MG-API-MISSING-ROUTES",
+      "section": "B",
+      "title": "76 of 103 legacy routes have no modern counterpart",
+      "status": "OPEN",
+      "priority": "P2",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§4.2"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "Routes ported or owner-dropped"
+    },
+    {
+      "id": "MG-API-CONTRACT-DIVERGENCE",
+      "section": "B",
+      "title": "Shared-route divergences (method changes, filter semantics, default sort, PUT 403, r_multiple scale)",
+      "status": "PARTIAL",
+      "priority": "P2",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§4.3",
+        "§9.1"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [
+        "R1"
+      ],
+      "closure_criteria": "Each divergence reconciled or owner-accepted"
+    },
+    {
+      "id": "MG-SCHEMA-MAPPING",
+      "section": "B",
+      "title": "8+ legacy tables and several users columns without modern target; subscription vocabulary differs",
+      "status": "PARTIAL",
+      "priority": "P2",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§8.1",
+        "§14"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "db/migrations/0022_legacy_contract_parity.sql"
+      ],
+      "decisions": [
+        "OD-AC-SUBMAP"
+      ],
+      "closure_criteria": "Explicit mapping decision per table/column"
+    },
+    {
+      "id": "MG-FRONTEND-SURFACES",
+      "section": "B",
+      "title": "Missing surfaces: dashboard (product), performance, wallet, intelligence, support, admin, blog, privacy, terms, checkout",
+      "status": "PARTIAL",
+      "priority": "P2",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§6"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [
+        "OD-AC-R8"
+      ],
+      "closure_criteria": "Surfaces implemented or owner-scoped"
+    },
+    {
+      "id": "MG-I18N-COVERAGE",
+      "section": "B",
+      "title": "697 of 1,765 i18n keys migrated (39.5%)",
+      "status": "PARTIAL",
+      "priority": "P2",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§7.1"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "apps/web/messages/fa/common.json"
+      ],
+      "decisions": [],
+      "closure_criteria": "Missing chunks migrate with their surfaces"
+    },
+    {
+      "id": "MG-EMAIL-TYPES",
+      "section": "B",
+      "title": "2 of 10 transactional email types; no templates/CID/locale-aware copy/delivery log",
+      "status": "PARTIAL",
+      "priority": "P2",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§12.3"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "Email types ported or owner-scoped"
+    },
+    {
+      "id": "MG-RBAC-VOCAB",
+      "section": "B",
+      "title": "6 of 24 legacy RBAC permissions enforced (18 have no enforcement point)",
+      "status": "PARTIAL",
+      "priority": "P2",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§11.3"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "packages/contracts/src/rbac.ts"
+      ],
+      "decisions": [],
+      "closure_criteria": "Permissions land with their admin operations"
+    },
+    {
+      "id": "MG-AUTH-EVENTS",
+      "section": "B",
+      "title": "No auth_events/login-history recording",
+      "status": "OPEN",
+      "priority": "P2",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§11.5"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "Event recording + admin data source"
+    },
+    {
+      "id": "MG-METAAPI-CADENCE",
+      "section": "B",
+      "title": "Hourly vs per-minute sync safety net; manual sync trigger missing",
+      "status": "PARTIAL",
+      "priority": "P2",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§12.1",
+        "§4.2"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "Cadence decided + manual trigger or owner-acceptance"
+    },
+    {
+      "id": "MG-RMULTIPLE-SCALE",
+      "section": "B",
+      "title": "r_multiple scale 4 (legacy) vs 8 (modern)",
+      "status": "OPEN",
+      "priority": "P2",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§9.1"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "Scale decision recorded + migration mapping"
+    },
+    {
+      "id": "MG-RANGE-GUARD",
+      "section": "B",
+      "title": "No runtime PnL range guard (assertFits equivalent)",
+      "status": "OPEN",
+      "priority": "P3",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§9.1"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "Guard implemented or owner-waived"
+    },
+    {
+      "id": "MG-DOMAIN-LEGACY-ONLY",
+      "section": "B",
+      "title": "JalaliCalendar, TradingSessionEngine, achievements engine: no modern counterpart",
+      "status": "OPEN",
+      "priority": "P3",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§9.3"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "Ported or owner-dropped"
+    },
+    {
+      "id": "MG-OPS-TOOLING",
+      "section": "B",
+      "title": "Legacy ops probe/monitoring toolset has no modern counterpart",
+      "status": "OPEN",
+      "priority": "P3",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§17.1"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "Modern equivalent or owner-dropped"
+    },
+    {
+      "id": "MG-DATA-MIGRATION",
+      "section": "B",
+      "title": "ADR-004 sampling blocked; no cutover rehearsal; unmapped tables = data loss risk",
+      "status": "OPEN",
+      "priority": "P1",
+      "verification_state": "NOT_VERIFIED",
+      "audit_refs": [
+        "§14"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "docs/migration-strategy.md"
+      ],
+      "decisions": [
+        "OD-AC-ADR004",
+        "OD-AC-SUBMAP"
+      ],
+      "closure_criteria": "Sampling decided; rehearsal executed with full validation gates"
+    },
+    {
+      "id": "MG-DOC-1",
+      "section": "E",
+      "title": "README.md claims no application code exists",
+      "status": "CLOSED",
+      "priority": "P3",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§16.3 D1"
+      ],
+      "evidence": [
+        "README.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "README status corrected",
+      "closure_note": "README rewritten (CHANGE_LOG AC-2, commit 59047b8)"
+    },
+    {
+      "id": "MG-DOC-2",
+      "section": "E",
+      "title": "README.md understates ADR count",
+      "status": "CLOSED",
+      "priority": "P3",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§16.3 D2"
+      ],
+      "evidence": [
+        "README.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "README corrected",
+      "closure_note": "ADR count corrected + docs/adr/README.md (AC-2, 59047b8)"
+    },
+    {
+      "id": "MG-DOC-3",
+      "section": "E",
+      "title": "MASTER_ROADMAP.md stale vs main AND conflicts with the 2026-09-25 audit (ACCT-02/AI-01/ADMIN-01 marked COMPLETED (backend)); recorded for later reconciliation — NOT edited to hide contradictions (owner instruction 2026-09-26)",
+      "status": "PARTIAL",
+      "priority": "P2",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§16.3 D3",
+        "§4.2",
+        "§9.2",
+        "§12.5"
+      ],
+      "evidence": [
+        "MASTER_ROADMAP.md",
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "Roadmap reconciled with audit + main in an owner-reviewed docs change",
+      "closure_note": "Reconciliation banner added; rows unedited per owner instruction; row-level reconciliation owner-gated (AC-2, 59047b8)"
+    },
+    {
+      "id": "MG-DOC-4",
+      "section": "E",
+      "title": "attachmentService.ts cites non-existent legacy ScreenshotController.php",
+      "status": "CLOSED",
+      "priority": "P3",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§16.3 D4"
+      ],
+      "evidence": [
+        "apps/api/src/attachments/attachmentService.ts"
+      ],
+      "decisions": [],
+      "closure_criteria": "Citation corrected",
+      "closure_note": "Citation corrected in attachmentService.ts; battery 804/804 + migrations 19/19 at fix commit (AC-2/AC-3, 59047b8)"
+    },
+    {
+      "id": "MG-DOC-5",
+      "section": "E",
+      "title": "Three frontend reports coexist, none marked superseded",
+      "status": "CLOSED",
+      "priority": "P3",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§16.3 D5"
+      ],
+      "evidence": [
+        "docs/FRONTEND_MIGRATION_FINAL_REPORT.md",
+        "docs/FRONTEND_CLOSURE_REPORT.md",
+        "docs/frontend-migration-progress.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "Supersession markers added",
+      "closure_note": "Lineage banners on all three reports; content unedited (AC-2, 59047b8)"
+    },
+    {
+      "id": "MG-DOC-6",
+      "section": "E",
+      "title": "ADR-015 numbering gap",
+      "status": "CLOSED",
+      "priority": "P3",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§16.1"
+      ],
+      "evidence": [
+        "docs/adr/ADR-016-credential-encryption-key-management.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "Gap explained or ADR-015 created",
+      "closure_note": "docs/adr/README.md documents ADR-015 as intentionally unassigned (AC-2, 59047b8)"
+    },
+    {
+      "id": "MG-OBS-1",
+      "section": "E",
+      "title": "Audit-internal gate-score discrepancy: §19.1 table has 2 PARTIAL rows (gates 8, 11) while the score line says 1 PARTIAL / 14 FAIL; stored immutable as-is",
+      "status": "OPEN",
+      "priority": "P3",
+      "verification_state": "OWNER_DECISION_REQUIRED",
+      "audit_refs": [
+        "§19.1",
+        "§2"
+      ],
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "Owner rules which reading is authoritative IF the split ever becomes decision-relevant"
+    },
+    {
+      "id": "MG-OBS-2",
+      "section": "E",
+      "title": "Provenance tag remote-snapshot-99e024c829db (OD-2) never pushed; remote has zero tags; recovery via backup branch",
+      "status": "OPEN",
+      "priority": "P3",
+      "verification_state": "STATIC",
+      "audit_refs": [],
+      "evidence": [
+        "docs/provenance/REMOTE_LINEAGE.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "Tag pushed or REMOTE_LINEAGE.md amended by owner decision"
+    },
+    {
+      "id": "MG-OBS-3",
+      "section": "E",
+      "title": "Older authoritative session artifacts (2026-09-12 gate report, 2026-09-15 MetaAPI readiness audit) referenced but never committed; 2026-09-25 audit is now preserved",
+      "status": "OPEN",
+      "priority": "P3",
+      "verification_state": "NOT_VERIFIED",
+      "audit_refs": [],
+      "evidence": [
+        "docs/reconciliation/RECONCILIATION_DECISIONS.md",
+        "docs/reconciliation/METAAPI_OWNER_DECISIONS.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "Owner accepts absence or orders recovery"
+    },
+    {
+      "id": "MG-OBS-4",
+      "section": "E",
+      "title": "AGENTS.md artifact map was missing MASTER_ROADMAP.md and 2026-09-16+ evidence",
+      "status": "CLOSED",
+      "priority": "P3",
+      "verification_state": "STATIC",
+      "audit_refs": [],
+      "evidence": [
+        "AGENTS.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "Fixed by the ADR-017 introducing commit (CHANGE_LOG AC-1)"
+    },
+    {
+      "id": "MG-OBS-5",
+      "section": "E",
+      "title": "Audit §9.2 contract_size claim vs source: legacy MetaApiService never sets contract_size (schema default 1); modern hardcoded 1 is parity on this field — awaiting owner confirmation (OD-M-PA-3)",
+      "status": "OPEN",
+      "priority": "P3",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§9.2"
+      ],
+      "evidence": [
+        "docs/reconciliation/METAAPI_POSITION_ASSEMBLY_BRIEF.md"
+      ],
+      "decisions": [
+        "OD-M-PA-3"
+      ],
+      "closure_criteria": "Owner confirms the source-verified reading (OD-M-PA-3)"
+    },
+    {
+      "id": "MG-OBS-6",
+      "section": "E",
+      "title": "tools/pg-smoke.ts S1b asserts stale D1-era migration list [0001..0005] vs tree 0001..0022 — D1 smoke cannot pass on current tree (migrations themselves apply cleanly; batteries unaffected)",
+      "status": "OPEN",
+      "priority": "P3",
+      "verification_state": "STATIC",
+      "audit_refs": [],
+      "evidence": [
+        "tools/pg-smoke.ts"
+      ],
+      "decisions": [],
+      "closure_criteria": "Test-side expectation update (owner-gated)"
+    }
+  ],
+  "owner_decisions": [
+    {
+      "id": "OD-AC-R1",
+      "original_id": "R1",
+      "subject": "Password policy at login (8–9-char legacy users rejected)",
+      "audit_ref": "§11.4"
+    },
+    {
+      "id": "OD-AC-R2",
+      "original_id": "R2",
+      "subject": "trustedProxyCidrs wiring",
+      "audit_ref": "§10.2 S12"
+    },
+    {
+      "id": "OD-AC-R8",
+      "original_id": "R8",
+      "subject": "public vs protected routes (markets/news/support)",
+      "audit_ref": "§10.2 S6"
+    },
+    {
+      "id": "OD-AC-R9",
+      "original_id": "R9",
+      "subject": "strategy winRate/order/untagged semantics",
+      "audit_ref": "§9.3"
+    },
+    {
+      "id": "OD-AC-OD1",
+      "original_id": "OD-1",
+      "subject": "canonical staging origin ratification (ADR-013)",
+      "audit_ref": "§18"
+    },
+    {
+      "id": "OD-AC-ADR004",
+      "original_id": "ADR-004",
+      "subject": "naive datetime sampling procedure (legacy TZ)",
+      "audit_ref": "§14"
+    },
+    {
+      "id": "OD-AC-RPORTO",
+      "original_id": "RPO/RTO",
+      "subject": "RPO/RTO targets",
+      "audit_ref": "§17.2"
+    },
+    {
+      "id": "OD-AC-SUBMAP",
+      "original_id": "subscription mapping",
+      "subject": "subscription status vocabulary mapping (grace/expired)",
+      "audit_ref": "§8.1"
+    },
+    {
+      "id": "OD-AC-WORKER",
+      "original_id": "worker service",
+      "subject": "worker service definition in railway.json",
+      "audit_ref": "§13.2"
+    }
+  ],
+  "verified_complete": [
+    {
+      "area": "Money math (ADR-001)",
+      "claim": "Decimal-exact, typed scales, no float path",
+      "verification_state": "STATIC",
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ]
+    },
+    {
+      "area": "Trade ledger (ADR-002)",
+      "claim": "Append-only, version CAS, tombstones, allocation guard",
+      "verification_state": "STATIC",
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ]
+    },
+    {
+      "area": "Auth/session",
+      "claim": "Full journey; session store + atomic rotation; C-14 rate limits exact",
+      "verification_state": "RECORDED_RUNTIME",
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ]
+    },
+    {
+      "area": "Credentials (ADR-016)",
+      "claim": "AES-256-GCM envelope, fail-closed key management, 3-step connect",
+      "verification_state": "STATIC",
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ]
+    },
+    {
+      "area": "Webhooks",
+      "claim": "HMAC verified, durable raw archive + dedupe (0008)",
+      "verification_state": "STATIC",
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ]
+    },
+    {
+      "area": "DB roles",
+      "claim": "velora_owner/velora_migrator/app_readwrite, append-only REVOKEs",
+      "verification_state": "STATIC",
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ]
+    },
+    {
+      "area": "Security headers/CORS",
+      "claim": "nosniff/DENY/Referrer/Permissions/COOP; CORS stricter (modulo S2/S4)",
+      "verification_state": "STATIC",
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ]
+    },
+    {
+      "area": "Landing page",
+      "claim": "Catalogs byte-identical; Playwright pixel-equivalence 1440/390; 110/110 checks; 0 CSP violations",
+      "verification_state": "RECORDED_RUNTIME",
+      "evidence": [
+        "docs/FRONTEND_CLOSURE_REPORT.md"
+      ]
+    },
+    {
+      "area": "i18n migrated set",
+      "claim": "fa↔en parity perfect for migrated chunks; locale mechanics complete",
+      "verification_state": "STATIC",
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ]
+    },
+    {
+      "area": "Local battery",
+      "claim": "804/804, next build 35 routes, secret-scan 0 findings @ ffcb0e9 (2026-09-24)",
+      "verification_state": "RECORDED_RUNTIME",
+      "evidence": [
+        "docs/frontend-migration-progress.md"
+      ]
+    },
+    {
+      "area": "Backup-gate law (ADR-012)",
+      "claim": "Adopted verbatim + extended (mechanism only — not backup-exists)",
+      "verification_state": "STATIC",
+      "evidence": [
+        "ops/backup/backup_gate.py"
+      ]
+    },
+    {
+      "area": "Stripe billing",
+      "claim": "MODERN-ONLY v1.0 capability; signature verification present (prices NOT VERIFIED)",
+      "verification_state": "STATIC",
+      "evidence": [
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+      ]
+    },
+    {
+      "area": "Queue mechanism",
+      "claim": "pg-boss v10, policies, outbox, DLQ (runtime NOT VERIFIED — worker undeployed)",
+      "verification_state": "STATIC",
+      "evidence": [
+        "apps/worker/src/index.ts"
+      ]
+    }
+  ]
+}

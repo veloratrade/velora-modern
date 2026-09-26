@@ -8,7 +8,11 @@
 // part is the BYTES, not the metadata.
 //
 // ============================================================
-// RULES (Legacy `api/src/Trades/ScreenshotController.php` + roadmap v0.5)
+// RULES (roadmap v0.5 — `docs/pdf/Roadmap.pdf` @ legacy `edede31`; legacy
+// extraction lives in `api/src/Trades/ScreenshotExtractController.php` +
+// `api/src/AI/Extraction/ScreenshotExtractor.php`. Citation corrected
+// 2026-09-26: the previously cited `ScreenshotController.php` does not exist
+// in the legacy repository — audit §5 / §16.3 D4 / MG-DOC-4.)
 // ============================================================
 //   - accepted MIME: image/jpeg, image/png, image/webp  (hard whitelist)
 //   - maximum size: 5 242 880 bytes (5 MiB), zero-byte uploads refused
