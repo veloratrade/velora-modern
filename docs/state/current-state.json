@@ -38,11 +38,11 @@
     }
   },
   "current_verified": {
-    "modern_sha": "59047b856e4794c1436ed6abfc01ab9a11c60c35",
+    "modern_sha": "ab0eed790fa8ffc160bc53e34264a61b02ffaedb",
     "legacy_sha": "edede313280f2f0e298f5ccbf5bbdd4d676c80bd",
     "verified_at": "2026-09-26",
-    "verification": "STATIC (git) + fresh runtime battery at 59047b8: tsc 0 errors, 804/804 tests, 19/19 migration tests, secret-scan 0 findings (CHANGE_LOG AC-3). The only apps/** change since the audit baseline is a 6-line comment (AC-2); curation commit is governance-only.",
-    "notes": "modern_sha advances only through CHANGE_LOG-logged, classified commits. 2ad49df = ADR-017 introducing commit (governance-only, AC-1); 59047b8 = documentation-defect closure (AC-2, one comment-only apps/ file, curated by AC-3); this curation commit self-records per ADR-017."
+    "verification": "STATIC (git). PR #8 merged to main via merge commit ab0eed7 (parents ffcb0e9 + 75ddf5c); branch history preserved. Intervening commits since 59047b8 are governance-only + merge bookkeeping (AC-4..AC-8) — no application-path change except the reviewed comment-only citation fix (MG-DOC-4) already carried by the merged branch.",
+    "notes": "modern_sha advances only through CHANGE_LOG-logged, classified commits. Chain: 59047b8 (AC-2) -> d85a589 (AC-4) -> 5140098 (AC-5) -> 3135da9/23aa83f/9d26aa0/1819397 (AC-6 curation) -> 75ddf5c (AC-7) -> ab0eed7 (PR #8 merge) -> this AC-8 curation commit (self-records)."
   },
   "artifacts": {
     "current_state_md": "docs/state/CURRENT_STATE.md",

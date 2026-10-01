@@ -1,7 +1,7 @@
 # VELORA-MODERN — Current Project State (Canonical)
 
 **System:** Agent Context System (ADR-017) · **Schema version:** 1
-**Last updated:** 2026-09-26 (Asia/Tehran) — entries AC-1…AC-6 (… AC-5: build refresh + MetaAPI brief; AC-6: real-PG battery evidence on disposable PG 17.11)
+**Last updated:** 2026-09-26 (Asia/Tehran) — entries AC-1…AC-8 (… AC-7: Markdown/JSON sync; AC-8: PR #8 merged to main, verified baseline `ab0eed7`)
 **Machine-readable twin:** `docs/state/current-state.json` (read by `tools/agent-context.mjs`; the two must be updated in the same change)
 **Mode:** GOVERNANCE STATE RECORD — this file records *what is verified*, never what is hoped.
 
@@ -85,7 +85,7 @@ audit's own evidence has become stale *and* the delta cannot be curated through
 
 | Item | Value | Verification |
 |---|---|---|
-| Modern repo HEAD (last verified) | `59047b856e4794c1436ed6abfc01ab9a11c60c35` — audit baseline `ffcb0e9` + `2ad49df` (ADR-017, governance-only, AC-1) + `59047b8` (documentation-defect closure, AC-2; the only `apps/**` change is a 6-line comment, curated by AC-3) | `STATIC` (git, 2026-09-26) |
+| Modern repo HEAD (last verified) | `ab0eed790fa8ffc160bc53e34264a61b02ffaedb` — **PR #8 merged to `main`** (merge commit, parents `ffcb0e9` + `75ddf5c`; AC-8). Chain since the audit baseline: ADR-017 system (AC-1) → documentation closure incl. the only `apps/**` change, a 6-line comment (AC-2/AC-3) → push/PR (AC-4) → brief + build evidence (AC-5) → real-PG battery evidence (AC-6) → MD/JSON sync (AC-7) — all governance-only, no application behavior change | `STATIC` (git, 2026-09-26) |
 | Legacy repo HEAD (last verified) | `edede313280f2f0e298f5ccbf5bbdd4d676c80bd` — unchanged since audit; zero drift | `STATIC` (git, 2026-09-26) |
 | Migration closure | **NOT CLOSED** (audit 2026-09-25; no application changes since → verdict still stands) | `STATIC` |
 | Open closure gates | 14 FAIL + 1 PARTIAL per audit score line (see gap register §A) | `STATIC` |
