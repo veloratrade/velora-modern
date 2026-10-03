@@ -123,10 +123,15 @@ export function safeFailureEvent(input: {
  * ADR-007 already requires "DLQ contents are redacted"; this makes that
  * mechanical rather than a reviewer's responsibility.
  */
-export function safeDlqReason(code: WorkerErrorCode, jobClass: string): string {
+export function safeDlqReason(code: WorkerErrorCode, jobClass: string | undefined): string {
   // jobClass is a registered, developer-authored identifier, never user or
   // provider input — but it is still length-bounded here so a pathological
   // value cannot bloat a durable row.
-  const cls = jobClass.slice(0, 64);
+  //
+  // MG-OBS-7: a job whose data is not a descriptor (a foreign or malformed
+  // producer writing into a queue) has NO jobClass. Dead-lettering such a job
+  // must not take the worker process down, so the reason falls back to a fixed
+  // token instead of dereferencing undefined.
+  const cls = (jobClass ?? "unknown").slice(0, 64);
   return `${code}:${cls}`;
 }

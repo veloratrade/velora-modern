@@ -158,7 +158,7 @@
       "title": "Background/cron work deployed and proven to run",
       "status": "OPEN",
       "priority": "P1",
-      "verification_state": "NOT_VERIFIED",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§19.1 gate 9",
         "§13.2"
@@ -166,12 +166,13 @@
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
         "railway.json",
-        "apps/worker/src/index.ts"
+        "apps/worker/src/index.ts",
+        "docs/evidence/WORKER-ONE-TICK-RUNTIME-PROOF-2026-10-03.md"
       ],
       "decisions": [
         "OD-AC-WORKER"
       ],
-      "closure_criteria": "MG-WORKER-DEPLOY closed with runtime evidence"
+      "closure_criteria": "MG-WORKER-DEPLOY closed with runtime evidence. Local progress 2026-10-03 (AC-10): analytics one-tick chain proven end-to-end on real PG 17.11 + real pg-boss timekeeper (cron fire -> due user -> recompute -> user_analytics_daily row); MG-OBS-7 crash fixed. Still OPEN: no deployment (OD-AC-WORKER); FX/MetaAPI/copy ticks not executed (external-call / token / transport gates)."
     },
     {
       "id": "MG-G10",
@@ -326,7 +327,7 @@
       "title": "Worker not deployed (no service definition; no scheduled job ever run)",
       "status": "OPEN",
       "priority": "P1",
-      "verification_state": "NOT_VERIFIED",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§13.2"
       ],
@@ -334,12 +335,13 @@
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
         "railway.json",
         "apps/worker/src/index.ts",
-        "infra/docker-compose.yml"
+        "infra/docker-compose.yml",
+        "docs/evidence/WORKER-ONE-TICK-RUNTIME-PROOF-2026-10-03.md"
       ],
       "decisions": [
         "OD-AC-WORKER"
       ],
-      "closure_criteria": "Worker service defined + one tick of each scheduler proven in a real environment"
+      "closure_criteria": "Worker service defined + one tick of each scheduler proven in a real environment. Local progress 2026-10-03 (AC-10): analytics tick proven on real PG 17.11 (see evidence record); MG-OBS-7 first-cron crash fixed + regression-tested. Remaining: service definition (OD-AC-WORKER) and deployed-runtime ticks; FX tick not fired (live ECB call, charter-excluded locally); MetaAPI tick token-gated; copy tick no transport."
     },
     {
       "id": "MG-SEC-COOKIE",
@@ -907,6 +909,25 @@
       "decisions": [],
       "closure_criteria": "Test-side expectation update (owner-gated)",
       "closure_note": "Fixed by AC-9 (2026-10-03, charter-authorized): S1b now derives its expectation from db/migrations (sorted .sql files, floor >= 22). Evidence: fixed smoke on fresh disposable PostgreSQL 17.11 - PASS S1a..S9 ALL CHECKS PASSED, 22 migrations applied, idempotency re-confirmed. Branch feat/mg-obs-6-pg-smoke-expectation. PG 17.11 caveat (not PG16)."
+    },
+    {
+      "id": "MG-OBS-7",
+      "section": "E",
+      "title": "Worker died on its first cron-fired tick: schedules were registered without job data, so fired ticks carried no JobDescriptor (handler lookup on undefined -> safeDlqReason(undefined) TypeError -> unhandled rejection -> process exit); any descriptor-less job in a polled queue killed the process the same way. Found by the charter Wave-1 Task 2 local one-tick proof, 2026-10-03.",
+      "status": "CLOSED",
+      "priority": "P2",
+      "verification_state": "RECORDED_RUNTIME",
+      "audit_refs": [],
+      "evidence": [
+        "docs/evidence/WORKER-ONE-TICK-RUNTIME-PROOF-2026-10-03.md",
+        "apps/worker/src/queue/pgBossAdapter.ts",
+        "apps/worker/src/runner.ts",
+        "apps/worker/src/observability/safeError.ts",
+        "db/tests/pgBossAdapter.pg.test.ts"
+      ],
+      "decisions": [],
+      "closure_criteria": "Schedule() carries a full descriptor; malformed jobs DLQ instead of crashing",
+      "closure_note": "Fixed by AC-10 (2026-10-03, charter Wave-1 Task 2): pgBossAdapter.schedule() now passes a complete maintenance-policy JobDescriptor as the schedule data (pg-boss timekeeper copies it verbatim into fired jobs); runner + safeDlqReason dead-letter descriptor-less jobs with reason NO_HANDLER:unknown instead of crashing. Evidence: pre-fix crash reproduced (process exit 1); post-fix, a malformed job is DLQed with the process alive AND the real timekeeper fired the analytics tick end-to-end on disposable PG 17.11 (scheduler.analytics_tick count=1 -> job.done analytics.recompute-tick -> analytics.recomputed count=1 -> job.done analytics.recompute-daily; user_analytics_daily row materialized). Gates: unit battery ALL PASS; pgBossAdapter.pg.test.ts 16/16 on real PG (3 new subtests); typecheck 0 errors; secret-scan 0 findings. Branch feat/mg-obs-7-worker-tick-descriptor (unmerged; no PR merge authorization). PG 17.11 caveat: not PG16. Deployment itself remains MG-WORKER-DEPLOY (OPEN)."
     }
   ],
   "owner_decisions": [

@@ -91,3 +91,17 @@ test("unknown job class → immediate DLQ with reason (no silent drops)", async 
   assert.equal(await r.processOnce(), "no-handler");
   assert.equal(await q.dlqSize(), 1);
 });
+
+test("MG-OBS-7: a malformed job (data is not a descriptor) DLQs instead of crashing the worker", async () => {
+  const q = new MemoryQueue(clock, () => 0);
+  // What a foreign or cron-fired job without a descriptor looks like after
+  // claim(): the adapter casts whatever `data` holds to JobDescriptor. The
+  // cast is deliberate — the runtime value genuinely lacks the field, which is
+  // exactly the pre-fix shape that killed the process via safeDlqReason().
+  await q.enqueue({ ...job(), jobClass: undefined as unknown as string });
+  const r = new WorkerRunner(q, new Map());
+  assert.equal(await r.processOnce(), "no-handler");
+  assert.equal(await q.dlqSize(), 1);
+  const dlq = await q.dlqEntries();
+  assert.equal(dlq[0]!.reason, "NO_HANDLER:unknown", "bounded reason, no undefined dereference");
+});

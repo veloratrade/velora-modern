@@ -34,6 +34,7 @@
 // (`retryLimit`/`retryDelay`/`retryBackoff` per job). `fail()` transitions the
 // job to `retry` until `retryCount === retryLimit`, then to `failed`. The
 // runner must not also schedule retries, or attempts would be double-counted.
+import { DEFAULT_JOB_POLICIES } from "@velora/contracts";
 import type { JobDescriptor } from "@velora/contracts";
 import type { QueuePort, QueuedJob } from "./QueuePort.js";
 
@@ -170,9 +171,28 @@ export async function createPgBossQueue(
      * The timekeeper drives this through its internal `__pgboss__send-it`
      * queue using `singletonKey: name, singletonSeconds: 60`, so a duplicate
      * tick inside the same minute is debounced by the library itself.
+     *
+     * MG-OBS-7 (found by the local one-tick runtime proof, 2026-10-03): the
+     * timekeeper copies the schedule's `data` column VERBATIM into every fired
+     * job, and `claim()` types that data as the JobDescriptor the runner
+     * dispatches on. A schedule registered without data therefore fires jobs
+     * whose descriptor is empty: the runner looks up a handler for
+     * `undefined`, and the no-handler path crashed the whole process on
+     * `safeDlqReason(..., undefined)` — the worker died on its FIRST real
+     * cron fire. Ticks are maintenance producers, so the schedule carries a
+     * complete maintenance-policy descriptor; per-fire cadence and debouncing
+     * stay owned by pg-boss (the descriptor's idempotencyKey identifies the
+     * SCHEDULE, not the fire, and is only used for logging).
      */
     async schedule(jobClass: string, cron: string): Promise<void> {
-      await boss.schedule(jobClass, cron);
+      const descriptor: JobDescriptor = {
+        jobClass,
+        priorityClass: "maintenance",
+        idempotencyKey: `tick:${jobClass}`,
+        payload: {},
+        ...DEFAULT_JOB_POLICIES.maintenance,
+      };
+      await boss.schedule(jobClass, cron, descriptor);
     },
 
     async size() {

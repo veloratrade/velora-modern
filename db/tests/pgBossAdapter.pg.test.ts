@@ -190,6 +190,96 @@ test("pgBossAdapter on real pg-boss", { skip: URL ? false : "DATABASE_URL not se
     });
   });
 
+  await t.test("MG-OBS-7: schedule() stores a complete descriptor the timekeeper copies into fired jobs", async () => {
+    await resetSchema();
+    await withQueue(async (q) => {
+      await q.schedule(SYNC, "*/5 * * * *");
+      const pool = new Pool({ connectionString: URL });
+      try {
+        const { rows } = await pool.query<{ data: JobDescriptor }>(
+          "SELECT data FROM pgboss.schedule WHERE name = $1",
+          [SYNC],
+        );
+        assert.equal(rows.length, 1, "the schedule row exists");
+        const d = rows[0]!.data;
+        // Without these the runner cannot dispatch the fired job: jobClass
+        // selects the handler and timeoutMs arms the hard timeout (undefined
+        // coerces to a 1ms timeout, which would fail every tick instantly).
+        assert.equal(d.jobClass, SYNC);
+        assert.equal(d.priorityClass, "maintenance");
+        assert.equal(typeof d.timeoutMs, "number");
+        assert.ok(d.timeoutMs > 0, "timeoutMs must be a real duration");
+        assert.ok(d.idempotencyKey.length > 0);
+      } finally {
+        await pool.end();
+      }
+    });
+  });
+
+  await t.test("MG-OBS-7: a timekeeper-shaped job (data = the schedule's descriptor) runs end to end", async () => {
+    await resetSchema();
+    await withQueue(async (q) => {
+      await q.schedule(SYNC, "*/5 * * * *");
+      const pool = new Pool({ connectionString: URL });
+      let fired: JobDescriptor | null = null;
+      try {
+        const { rows } = await pool.query<{ data: JobDescriptor }>(
+          "SELECT data FROM pgboss.schedule WHERE name = $1",
+          [SYNC],
+        );
+        fired = rows[0]!.data;
+      } finally {
+        await pool.end();
+      }
+      assert.ok(fired, "the schedule carries a descriptor");
+      // This is exactly what pg-boss's timekeeper does on a cron fire: it
+      // inserts a job into the queue whose data is the schedule's `data`
+      // column (timekeeper.js: `insert(jobs.map(i => i.data))`). Reusing
+      // enqueue() sends that same payload shape through a normal send.
+      await q.enqueue(fired!);
+      let ran = 0;
+      const runner = new WorkerRunner(q, new Map([[SYNC, async () => { ran++; }]]));
+      assert.equal(await runner.processOnce(), "done");
+      assert.equal(ran, 1, "the fired tick is dispatched to its handler");
+      assert.equal(await q.size(), 0);
+    });
+  });
+
+  await t.test("MG-OBS-7: a malformed job (empty data) is failed with a bounded reason, not a process crash", async () => {
+    await resetSchema();
+    await withQueue(async (q) => {
+      // A foreign producer writing directly into pgboss.job with no data —
+      // the exact shape that killed the worker process before the fix
+      // (`safeDlqReason("NO_HANDLER", undefined)` → TypeError). A raw row has
+      // no dead_letter target (pg-boss sets that from the queue config at
+      // send() time), so the assertion is the terminal failure itself: state
+      // 'failed' with the classified reason persisted in `output`, and never
+      // redelivered. retry_limit 0 because there is nothing to retry — no
+      // handler can ever dispatch this job. Physical DLQ routing for
+      // send()-enqueued jobs is pinned by the "exhausted jobs land on the
+      // dead-letter queue" test above.
+      const pool = new Pool({ connectionString: URL });
+      try {
+        await pool.query(
+          "INSERT INTO pgboss.job (name, data, retry_limit) VALUES ($1, '{}'::jsonb, 0)",
+          [SYNC],
+        );
+        const runner = new WorkerRunner(q, new Map([[SYNC, async () => {}]]));
+        assert.equal(await runner.processOnce(), "no-handler", "must not throw");
+        const { rows } = await pool.query<{ state: string; output: { reason?: string } }>(
+          "SELECT state, output FROM pgboss.job WHERE name = $1",
+          [SYNC],
+        );
+        assert.equal(rows.length, 1);
+        assert.equal(rows[0]!.state, "failed", "terminally failed, never redelivered");
+        assert.equal(rows[0]!.output?.reason, "NO_HANDLER:unknown");
+        assert.equal(await q.claim(), null, "the malformed job is not runnable again");
+      } finally {
+        await pool.end();
+      }
+    });
+  });
+
   await t.test("idempotent enqueue: the same key does not create a second job", async () => {
     await resetSchema();
     await withQueue(async (q) => {

@@ -24,10 +24,15 @@ export class WorkerRunner {
   async processOnce(): Promise<"idle" | "done" | "failed" | "timeout" | "no-handler"> {
     const job = await this.queue.claim();
     if (!job) return "idle";
-    const handler = this.handlers.get(job.descriptor.jobClass);
+    // MG-OBS-7: a job whose data is not a JobDescriptor (a foreign or
+    // malformed producer) must land in the DLQ, not kill the process. This is
+    // the exact path that crashed the worker on the first cron-fired tick
+    // (2026-10-03 local runtime proof) before schedule() carried descriptors.
+    const jobClass = job.descriptor?.jobClass;
+    const handler = jobClass === undefined ? undefined : this.handlers.get(jobClass);
     if (!handler) {
-      await this.queue.deadLetter(job.id, safeDlqReason("NO_HANDLER", job.descriptor.jobClass));
-      this.log({ level: "error", event: "job.no_handler", jobClass: job.descriptor.jobClass });
+      await this.queue.deadLetter(job.id, safeDlqReason("NO_HANDLER", jobClass));
+      this.log({ level: "error", event: "job.no_handler", jobClass: jobClass ?? "unknown" });
       return "no-handler";
     }
     const started = Date.now();
