@@ -11,7 +11,7 @@
 // proves only the gate, never PostgreSQL behavior.
 //
 // Checks (each prints "PASS <label>" so the Actions log is self-describing):
-//   S1  server_version + migrations 0001–0005 apply on real PG (+ re-run no-op)
+//   S1  server_version + the full db/migrations set applies on real PG (+ re-run no-op)
 //   S2  NUMERIC(20,8)/(20,2) round-trip as EXACT strings with scale padding (ADR-001)
 //   S3  BIGINT (int8) and COUNT(*) arrive as strings
 //   S4  TIMESTAMPTZ round-trips as Date with exact epoch milliseconds
@@ -22,6 +22,7 @@
 //   S8  unique violation surfaces as PostgreSQL error code 23505; JSONB payload
 //       round-trips as a parsed object
 //   S9  single-statement ON CONFLICT upsert is atomic and returns BIGINT as string
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { createEngine, migrate, type MigrationEngine } from "../db/migrate.ts";
@@ -68,19 +69,26 @@ async function main(): Promise<void> {
     console.log(`PASS S1a server_version = PostgreSQL ${version} (real server, not PGlite)`);
 
     const migrationsDir = join(import.meta.dirname, "..", "db", "migrations");
+    // S1b expectation is DERIVED from the migrations directory itself so this
+    // smoke can never drift behind the tree again (MG-OBS-6: the D1-era
+    // hard-coded [0001..0005] list kept failing once the tree carried
+    // 0001..0022). The floor guards against a trivially-empty expectation.
+    const expected = readdirSync(migrationsDir)
+      .filter((f) => f.endsWith(".sql"))
+      .sort();
+    assert.ok(
+      expected.length >= 22,
+      `expected the full migration set (>=22 files), found ${expected.length}`,
+    );
     const ran = await migrate(engine, migrationsDir);
     assert.deepEqual(
       ran,
-      [
-        "0001_core.sql",
-        "0002_identity_capability.sql",
-        "0003_email_preferences.sql",
-        "0004_trading_accounts.sql",
-        "0005_trades_api_contract.sql",
-      ],
-      "migrations 0001–0005 must apply on real PostgreSQL in order",
+      expected,
+      "every migration in db/migrations must apply on real PostgreSQL, in order",
     );
-    console.log("PASS S1b migrations 0001–0005 applied (schema_migrations tracking)");
+    console.log(
+      `PASS S1b migrations ${expected[0]}…${expected[expected.length - 1]} applied (${expected.length} files, schema_migrations tracking)`,
+    );
     const reran = await migrate(engine, migrationsDir);
     assert.deepEqual(reran, [], "second migrate() run must be a no-op");
     console.log("PASS S1c migrate() re-run no-op (idempotency)");

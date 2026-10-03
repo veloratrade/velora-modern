@@ -897,7 +897,7 @@
       "id": "MG-OBS-6",
       "section": "E",
       "title": "tools/pg-smoke.ts S1b asserts stale D1-era migration list [0001..0005] vs tree 0001..0022 — D1 smoke cannot pass on current tree (migrations themselves apply cleanly; batteries unaffected)",
-      "status": "OPEN",
+      "status": "CLOSED",
       "priority": "P3",
       "verification_state": "STATIC",
       "audit_refs": [],
@@ -905,7 +905,8 @@
         "tools/pg-smoke.ts"
       ],
       "decisions": [],
-      "closure_criteria": "Test-side expectation update (owner-gated)"
+      "closure_criteria": "Test-side expectation update (owner-gated)",
+      "closure_note": "Fixed by AC-9 (2026-10-03, charter-authorized): S1b now derives its expectation from db/migrations (sorted .sql files, floor >= 22). Evidence: fixed smoke on fresh disposable PostgreSQL 17.11 - PASS S1a..S9 ALL CHECKS PASSED, 22 migrations applied, idempotency re-confirmed. Branch feat/mg-obs-6-pg-smoke-expectation. PG 17.11 caveat (not PG16)."
     }
   ],
   "owner_decisions": [
