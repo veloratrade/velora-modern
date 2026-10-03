@@ -235,7 +235,7 @@
       "title": "Operational tooling, backup and restore proven",
       "status": "OPEN",
       "priority": "P1",
-      "verification_state": "NOT_VERIFIED",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§19.1 gate 13",
         "§17.2"
@@ -243,7 +243,8 @@
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
         "infra/backup/DR-RUNBOOK.md",
-        "ops/backup/backup_gate.py"
+        "ops/backup/backup_gate.py",
+        "docs/evidence/BACKUP-RESTORE-LOCAL-DRILL-2026-10-03.md"
       ],
       "decisions": [
         "OD-AC-RPORTO"
@@ -454,20 +455,21 @@
       "id": "MG-BACKUP-RESTORE",
       "section": "B",
       "title": "No real backup taken; no restore drill run",
-      "status": "OPEN",
+      "status": "PARTIAL",
       "priority": "P1",
-      "verification_state": "NOT_VERIFIED",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§17.2"
       ],
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
-        "infra/backup/DR-RUNBOOK.md"
+        "infra/backup/DR-RUNBOOK.md",
+        "docs/evidence/BACKUP-RESTORE-LOCAL-DRILL-2026-10-03.md"
       ],
       "decisions": [
         "OD-AC-RPORTO"
       ],
-      "closure_criteria": "One real backup + one restore drill, evidence captured"
+      "closure_criteria": "Real backup taken from the real staging/production database, stored in veloratrade/velora-backups (STORAGE_VERIFIED), and a restore drill run with application-level recovery verified. LOCAL PROGRESS 2026-10-03 (AC-11): first real backup + restore drill executed on a disposable local PG 17.11 - real producer (pg_dump custom+gzip, sha256, INTEGRITY_VERIFIED), gate correctly BLOCKED on un-stored evidence (exit 1, fail-closed proven against real output), pg_restore exit 0, per-table content hashes all MATCH (see evidence record). Remaining: staging/production backup, official storage + storage verification, API-level health check, RPO/RTO decision, ADR-012 A.6 deploy wiring."
     },
     {
       "id": "MG-API-MISSING-ROUTES",
