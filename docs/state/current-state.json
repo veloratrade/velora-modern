@@ -71,7 +71,7 @@
     "missing_means": "legacy state NOT_VERIFIED this session (report, do not fail)"
   },
   "summary": {
-    "migration_closure": "NOT_CLOSED",
+    "migration_closure": "NOT_CLOSED (phases 6-9 pending)",
     "open_owner_decisions": [
       "R1 password policy at login",
       "R2 trustedProxyCidrs wiring",
@@ -89,50 +89,26 @@
       "MG-SEC-COOKIE",
       "MG-SEC-CSP",
       "MG-SEC-EDGE-AUTHZ",
-      "MG-ADMIN",
       "MG-AI-OCR",
-      "MG-BACKUP-RESTORE"
+      "MG-BACKUP-RESTORE",
+      "MG-ADMIN (phase 6)"
+    ],
+    "closed_this_phase": [
+      "Support user + admin surfaces implemented and verified (Phase 5); MG-FRONTEND-SURFACES annotated"
     ]
   },
   "branch_work": {
-    "entry": "AC-10",
+    "entry": "AC-14 (Phase 5 — support)",
     "branch": "feat/telegram-journal-client",
     "base": "0e9c4d7e6e1f984287490ce02f5681c208e35c7a (main)",
-    "head": "1c21b571c1056efbc99d5fa21012f872b66b849b (AC-10 tip: UX, security, test/docs) — pushed and PR-opened",
-    "commits": "9 on the branch: the 7 recorded by AC-9, then 3dbd72d (web/UX), 6b08c62 (security), and the AC-10 test/docs commit",
-    "capability": "Telegram journal client (ADR-018) — first-class client: same users, same PostgreSQL schema, same journal domain (TradeService / ADR-002 ledger), same AI boundary (AiProvider + ai_coaching_logs)",
+    "head": "phase-5 commits on this branch (tip recorded in the push-verification commit that follows AC-14)",
+    "commits": "phase 5: migration 0026 + support service/routes + wiring + tests + web surface + QA harness",
+    "capability": "Support — the ticket center (SUP-01/SUP-02): two server-derived axes, derived counters, first_reply_at sentinel, real-PG-enforced lifecycle, super_admin-only internal notes that move nothing",
     "pushed": true,
-    "pushed_at": "2026-10-04",
-    "remote_branch": "refs/heads/feat/telegram-journal-client @ 1c21b571c1056efbc99d5fa21012f872b66b849b (verified with git ls-remote; equals local HEAD)",
-    "pr": "#9 — open, base main, 10 commits, 66 files (verified via the GitHub API)",
-    "pr_url": "https://github.com/veloratrade/velora-modern/pull/9",
-    "merged": false,
-    "deployed": false,
-    "tool_verdict": "DRIFTED while this branch is checked out — expected and correct: tools/agent-context.mjs compares HEAD against the verified main SHA, and this work is deliberately not on main.",
-    "gaps_opened": [
-      "MG-TG-1",
-      "MG-TG-2",
-      "MG-TG-3"
-    ],
-    "gaps_closed_by_ac10": [
-      "MG-OBS-6 (the D1 smoke's stale migration expectation — it failed on every database since the 6th migration and blocked step one of the postgres-evidence workflow, i.e. the route to real-PG evidence; the owner's pushed fix feat/mg-obs-6-pg-smoke-expectation @ 9d59bca is carried here BYTE-IDENTICAL rather than re-implemented)",
-      "MG-TG-4 (audit round two: two declared-but-unenforced rate limits, an unbounded media pre-check, a 1 MiB webhook ingress)"
-    ],
-    "ux_decision": "ONE canonical Telegram surface: /settings, titled as the account page, with Telegram under a 'Connected accounts' heading; the sidebar nav item is labelled after the page rather than the feature, and the signed-in user card links to it. No existing user capability was removed.",
-    "report": "docs/telegram/FINALIZATION-REPORT.md (AC-10, A–G); earlier phase report: docs/telegram/PHASE-J-FINAL-REPORT.md"
+    "pushed_at": "2026-10-04 (recorded in the push-verification commit, read back with git fetch + git rev-parse — never assumed)"
   },
   "last_battery": {
-    "result": "957/957 local (0 fail / 0 cancelled / 0 skipped, ~187 s) INCLUDING the Telegram batteries; tsc 0 errors (exit 0, 5 projects); secret-scan PASS (0 findings); next build exit 0 with /settings + /en/settings in the route table; REAL-PG 70 tests: telegramConcurrency 9/9, trade-concurrency 14/14, store/capability batteries 47/47, plus D1 smoke S1–S9 (23/23 migrations on a fresh database) — all on PostgreSQL 16.15",
-    "at_sha": "6b08c62 (security commit; the AC-10 test/docs commit is docs+verify only)",
-    "branch": "feat/telegram-journal-client (AC-10 — NOT pushed, NOT merged)",
-    "date": "2026-10-04",
-    "previous": {
-      "result": "804/804 local; REAL-PG BATTERIES 23 x 2 orders, 0 failures",
-      "at_sha": "51400982515e3e87ae0e9122ca409ed3ecdc27ae",
-      "date": "2026-09-26"
-    },
-    "classification": "RECORDED_RUNTIME (captured this session on the branch HEAD above; does NOT advance current_verified.modern_sha, which records main)",
-    "real_pg_caveats": "AC-10 SUPERSEDES the AC-9 caveat for this branch: the concurrency evidence now comes from PostgreSQL 16.15 (PGDG build for Debian 13, disposable cluster created with initdb, trust auth, DATABASE_URL only, destroyed after the run) — the version the project's evidence history used on the postgres-evidence workflow, NOT the 17.11 of the older AC-6 run. MG-OBS-6 is fixed and CLOSED. PGlite is still never described as concurrency evidence. Still NOT verified anywhere: live Telegram, live Gemini, a webhook delivered to a deployed host, staging."
+    "result": "1127/1127 local (1064 general + 63 PGlite, 0 fail / 0 cancelled / 0 skipped, EXIT=0); tsc 0 errors (5 projects); secret-scan PASS (0 findings); next build exit 0 with /support + /en/support real; REAL-PG batteries 29 files / 58 runs / 0 failures incl. supportTickets 14/14; support service 15/15; support routes 10/10; throttle guard 18/18; browser QA 29/29 (docs/audits/phase5-ui/)."
   },
   "distribution": {
     "branch": "governance/agent-context",

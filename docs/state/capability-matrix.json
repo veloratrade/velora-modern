@@ -3,7 +3,7 @@
   "generated_at": "2026-10-04",
   "source_audit": "docs/audits/2026-10-04-CAPABILITY-AUDIT-legacy-to-modern.md",
   "git": {
-    "modern_head": "e0bfc2a",
+    "modern_head": "1f6c4bb (phase-5 branch work pending its own commits)",
     "modern_branch": "feat/telegram-journal-client",
     "legacy_ref": "edede31"
   },
@@ -19,9 +19,9 @@
   ],
   "counts": {
     "VERIFIED": 10,
-    "IMPLEMENTED": 7,
+    "IMPLEMENTED": 9,
     "PARTIAL": 12,
-    "MISSING": 16,
+    "MISSING": 14,
     "UI_ONLY": 2,
     "LEGACY_ONLY": 2,
     "INTENTIONALLY_NOT_MIGRATED": 2,
@@ -329,19 +329,19 @@
       "id": "SUP-01",
       "area": "support",
       "capability": "User support tickets",
-      "status": "MISSING",
-      "legacy_evidence": "6 routes incl. messages/read/reopen; support_conversations/messages",
-      "modern_evidence": "/support shell, no API",
-      "next_action": "Support slice (own domain)"
+      "status": "IMPLEMENTED",
+      "legacy_evidence": "6 routes incl. messages/read/reopen; support_conversations/messages (v1.8) → modern support_tickets/support_messages; two server-derived axes (status + waiting_for), derived counters, first_reply_at sentinel; internal notes are super_admin-only and move NOTHING (a Legacy defect deliberately not reproduced)",
+      "modern_evidence": "0026_support_tickets.sql (2 tables, 3 functions, 5 CHECKs); SupportService + PgSupportStore/MemorySupportStore; user routes GET/POST /support/tickets[/{id}[/messages|/read|/reopen]]; RBAC support.tickets.view/manage (Legacy P_COMM_VIEW/P_COMM_REPLY → admin+super_admin); throttle support:write 20/300; page apps/web/src/app/(app)/support/page.tsx with the Legacy catalog copy; service 15/15, routes 10/10, real-PG 14/14, browser QA 29/29",
+      "next_action": "None for the user surface. The ADMIN half is phase 6 (admin console), and /translate + /copilot are phase 7 (AI, fail-closed)."
     },
     {
       "id": "SUP-02",
       "area": "support",
       "capability": "Admin communication centre",
-      "status": "MISSING",
+      "status": "IMPLEMENTED",
       "legacy_evidence": "7 admin routes + translations + copilot draft",
-      "modern_evidence": "—",
-      "next_action": "Admin slice; depends on SUP-01"
+      "modern_evidence": "GET /api/v1/admin/communications/tickets (+?status&waiting_for&unread&q&page), GET /{id}, POST /{id}/messages {message, internal}, POST /{id}/status {action}; RBAC-gated support.tickets.view/manage; queue counters; real-PG battery covers filters, ILIKE escaping and CAS conflicts. The two AI routes (/translate, /copilot) are NOT wired here — phase 7 owns them and they must never be a stub.",
+      "next_action": "Translations + copilot draft land with the AI phase (they call a provider; a stub would fabricate output)."
     },
     {
       "id": "ADM-01",
@@ -385,7 +385,7 @@
       "capability": "PostgreSQL single source of truth",
       "status": "VERIFIED",
       "legacy_evidence": "MySQL 46 tables",
-      "modern_evidence": "25 migrations, pg driver, PG stores; db/tests 32 files; 70 real-PG tests at HEAD",
+      "modern_evidence": "26 migrations, pg driver, PG stores; db/tests 33 files; 74 real-PG tests at HEAD",
       "next_action": "none"
     },
     {
@@ -484,8 +484,8 @@
       "capability": "The eight badged shells become real",
       "status": "MISSING",
       "legacy_evidence": "n/a",
-      "modern_evidence": "/profile /support /admin /intelligence /markets /news /performance /wallet",
-      "next_action": "Sequence per S15"
+      "modern_evidence": "/profile /settings /trades /dashboard real; /support real (Phase 5); /admin /intelligence /markets /news /performance /wallet still shells",
+      "next_action": "Admin console is phase 6; the rest per S15"
     },
     {
       "id": "PLT-13",

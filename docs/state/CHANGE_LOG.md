@@ -132,9 +132,9 @@ judgment, recorded here so the next session does not re-derive it).
 - **Evidence:** `node tools/agent-context.mjs` pre-curation → DRIFTED (sole cause: unlogged merge commit `ab0eed7`, classified gov); post-curation → CURRENT. `bash tools/secret-scan.sh` → PASS (0 findings). Audit SHA-256 integrity OK (tool-verified). Working tree clean; legacy at `edede31`.
 - **Authorization:** owner instruction 2026-09-26 (AC-8 state-curation-only task; single authorized commit).
 
-## AC-9 — 2026-10-04 · Telegram journal client implemented on a branch (ADR-018) — NOT pushed, NOT merged
+## AC-9 — 2026-10-04 · Telegram journal client implemented on a branch (ADR-018) — later pushed, not merged
 
-- **Branch:** `feat/telegram-journal-client`, created from `main` @ `0e9c4d7e6e1f984287490ce02f5681c208e35c7a` (verified baseline `ab0eed7` + the AC-8 curation commit). **Not pushed. Not merged. No PR opened.** `current_verified.modern_sha` is therefore **deliberately NOT advanced**: it records what is verified on `main`, and nothing here is on `main`. Running `tools/agent-context.mjs` on this branch correctly reports `DRIFTED` (application-path commits since `ab0eed7`) — that verdict is the tool doing its job, not a state defect.
+- **Branch:** `feat/telegram-journal-client`, created from `main` @ `0e9c4d7e6e1f984287490ce02f5681c208e35c7a` (verified baseline `ab0eed7` + the AC-8 curation commit). **Pushed 2026-10-04 with the later phases (the branch tip is read back with `git fetch` + `git rev-parse` in AC-15); not merged** — PR #9 is open against `main`. `current_verified.modern_sha` is therefore **deliberately NOT advanced**: it records what is verified on `main`, and nothing here is on `main`. Running `tools/agent-context.mjs` on this branch correctly reports `DRIFTED` (application-path commits since `ab0eed7`) — that verdict is the tool doing its job, not a state defect.
 - **Commits on the branch (5):**
   - `e0887afc59a7dd9ad38d78fc47e0e644510bf04c` — `feat(telegram): decision record, migration 0023 and the domain foundation`
   - `55ac1e4512b08481e033115247a437df810dc1e8` — `feat(telegram): bot, update pipeline, linking service, HTTP surface and AI seam`
@@ -158,7 +158,7 @@ judgment, recorded here so the next session does not re-derive it).
 
 ## AC-10 — 2026-10-04 · Telegram finalization: audit round two, real-PostgreSQL concurrency, one canonical web surface
 
-- **Branch:** `feat/telegram-journal-client` (unchanged base `main` @ `0e9c4d7e6e1f984287490ce02f5681c208e35c7a`). **Still NOT pushed, NOT merged, no PR** — this entry records work done BEFORE the push gates were evaluated. `current_verified.modern_sha` remains `ab0eed7` for the same reason as AC-9: nothing here is on `main`.
+- **Branch:** `feat/telegram-journal-client` (unchanged base `main` @ `0e9c4d7e6e1f984287490ce02f5681c208e35c7a`). **Later pushed 2026-10-04; not merged, PR #9 open.** This entry records work done BEFORE the push gates were evaluated (AC-15 records the push itself). `current_verified.modern_sha` remains `ab0eed7` for the same reason as AC-9: nothing here is on `main`.
 - **Commits added by this round (three, in the order the directive prescribed):**
   - `3dbd72d` — `web(telegram): one canonical Telegram surface inside the account page` (UX)
   - `6b08c62` — `fix(telegram): enforce the declared limits and bound every input` (security)
@@ -178,7 +178,7 @@ judgment, recorded here so the next session does not re-derive it).
 
 ## AC-11 — 2026-10-04 · Phases 1 and 2 landed on the branch: account surface, auth/security, RBAC map
 
-- **Branch:** `feat/telegram-journal-client` (base `main` @ `0e9c4d7e`). **NOT pushed, NOT merged** — the same standing instruction as AC-9/AC-10: the user inspects every push himself, and a push needs a fresh single-use PAT.
+- **Branch:** `feat/telegram-journal-client` (base `main` @ `0e9c4d7e`). **Later pushed 2026-10-04; not merged** (PR #9 open). The "not pushed" wording in AC-9…AC-13 was correct when written — each push then needed a fresh single-use PAT — and is corrected here to the state verified in AC-15; the branch is still not merged into `main`.
 - **Why this entry exists:** the phase work below landed as APP commits while the ledger stopped at AC-10, so `tools/agent-context.mjs` reported them UNLOGGED. Recording them here is the repository's own rule (ADR-017), not a formality: an unlogged APP commit is evidence nobody can date.
 - **Phase 1 — account / profile / settings (commits `2f60753`, `e5f84a0`, `a3bd138`):**
   - `2f60753` — locale **provenance** is now recorded (`users.locale_source`, `users.locale_updated_at`), so "why is this user in fa?" is answerable from the database instead of guessed from the current value.
@@ -196,7 +196,7 @@ judgment, recorded here so the next session does not re-derive it).
 
 ## AC-12 — 2026-10-04 · TRD-06 user-triggered sync (implemented on one shared window rule) + phase-3 web surfaces
 
-- **Branch:** `feat/telegram-journal-client` (base `main` @ `0e9c4d7e`). **Not pushed** — the push gate needs a fresh single-use PAT, as with every push moment so far; the user inspects the push himself.
+- **Branch:** `feat/telegram-journal-client` (base `main` @ `0e9c4d7e`). **Later pushed 2026-10-04** with the later phases (AC-15); `main` untouched.
 - **Commits this round:** `24733fa` (TRD-04: the trade list contract aligned with Legacy — page/limit/filters/ordering), `f3d1bdc` (test runner: the PGlite batch is serialized so the suite cannot fake-fail), `5724045` (web builds on webpack so it can bundle workspace TS sources), `050d881` (dashboard + trade journal on the real analytics API), `c703b88` (web guards, incl. the date-formatter crash), `73cc8b6` (TRD-06 backend), `9a34a9f` (TRD-06 tests incl. the real-PG battery), `ddfb01c` (test runner: re-run OS-killed files instead of reporting a red suite), `e0bfc2a` (web sync control + Persian-digit fix).
 - **TRD-06 — what was missing and why it mattered:** Modern could REPORT sync state but had no way to ASK for one; only the hourly tick and a MetaAPI webhook could produce a sync job. `POST /accounts/{id}/sync` now exists: ownership-scoped (foreign and missing are the same non-disclosing 404), 202 `{status:"queued", dispatched, deduplicated, window}` on acceptance, 200 `up-to-date` when the cursor is already at/after now (no job invented for an empty window), 422 `METAAPI_REQUIRED` for an account with no provider link, 401 anonymous, 503 when the capability is unwired, and Legacy's dispatch-level throttle (20/300) — which had been documented as an unowned gap precisely because no route existed to bound.
 - **The real defect the work uncovered (fixed):** the webhook ingress asked for a **24-hour** window while the scheduled tick asked for **12 months** for the same account, under the SAME idempotency key shape `sync:{accountId}:{from}` — a key that can only deduplicate jobs that agree on their window. "How much history do we import" therefore depended on which trigger fired. The window rule now lives once in `@velora/contracts` (`syncWindow`), used by all three producers; the pg-boss trigger is constructed once in the composition root and injected into both API-side producers; the durable `CONNECTING` marker exists once (`accounts/syncPending.ts`) instead of twice.
@@ -204,7 +204,7 @@ judgment, recorded here so the next session does not re-derive it).
 - **Defects found by inspection this round and fixed:** (1) the web dashboard and journal were fed by an INVENTED analytics contract hidden behind `??` fallbacks (zeros + a flat equity line instead of an error); (2) `fmtDateLong` merged caller components onto `dateStyle:"long"`, which Intl forbids — it threw inside a render and took `/trades` down to "This page couldn't load"; (3) the accounts page rendered Persian digits ("۱۴۰۵/۷/۱۲") against the Latin-digit product rule; (4) the trade form's controls had no `name`, so nothing could address them but their visible Persian labels.
 - **Also fixed (harness):** `tools/run-tests.mjs` re-runs a test FILE that died by SIGKILL once, alone — the container OOM-killing an in-process WASM PostgreSQL is not a test result, and assertion failures are still never retried.
 - **Gaps:** `MG-METAAPI-CADENCE` narrows to the cadence decision alone (manual trigger closed); `MG-WORKER-DEPLOY` gains runtime evidence that the queue path works and has no production consumer; `MG-AI-OCR` gains the TRD-03 recon result (the endpoint's deterministic half needs a real OCR engine — fail-closed, not stubbed).
-- **What is NOT claimed:** nothing pushed, nothing deployed, no live MetaAPI call (no platform token), no OCR engine (none on this host), no Telegram verification.
+- **What is NOT claimed:** no merge, no deployment, no live MetaAPI call (no platform token), no OCR engine (none on this host), no Telegram verification.
 
 ## AC-13 — Phase 4: data integrity & migration (2026-10-04)
 
@@ -260,8 +260,102 @@ fixture + evidence) · docs commit.
 **Nothing was removed.** No legacy table, column or row was dropped, rewritten or
 archived; no user capability was taken away.
 
-**Push status:** these commits are LOCAL. `git ls-remote` reads the public remote
-anonymously (it confirmed `main` = `0e9c4d7e`), but pushing needs a token and none is
-stored anywhere (the previous PATs were used inline once and discarded). The remote
-branch tip is therefore still `e2849ac`, and no delivery state above COMMITTED is
-claimed for AC-13. A fresh PAT pushes the backlog in one command.
+**Push status:** pushed 2026-10-04 under the phase-by-phase push directive, together
+with the phase-5 delivery; the remote tip is read back with `git fetch` +
+`git rev-parse` and recorded in **AC-15**, the push-verification commit that follows
+AC-14. The tokens are still never stored anywhere: each is used inline for one push.
+Delivery state for AC-13: **PUSHED** — and nothing above it (no merge, no deploy).
+
+## AC-14 — Phase 5: support (2026-10-04)
+
+**Commit(s):** this delivery's commits on `feat/telegram-journal-client` (phase start
+`1f6c4bb`).
+
+**What this delivery establishes**
+
+1. **The support capability is real, not a shell (GAP-SUP → IMPLEMENTED, TESTED).**
+   Legacy's ticket center (`support/index.html` + `api/src/Support/*` +
+   `v1.8_support_tickets.sql`) is migrated by capability: `db/migrations/0026_support_tickets.sql`
+   (two tables, three functions, four indexes, five CHECK constraints),
+   `apps/api/src/support/supportService.ts` (service + `PgSupportStore` +
+   `MemorySupportStore`), `apps/api/src/support/supportRoutes.ts` (the user surface
+   and `/admin/communications/tickets`), the kernel slot + `support:write` throttle
+   (20/300), and `support.tickets.view` / `support.tickets.manage` on admin AND
+   super_admin (Legacy `P_COMM_VIEW` / `P_COMM_REPLY`).
+2. **Two axes, both SERVER-DERIVED.** `status` (open|pending|closed|archived) and
+   `waiting_for` (admin|user|none) are consequences of the event — create / user
+   reply / admin text reply / close / reopen — never values a client sends. A forged
+   body carrying `status: "closed"` is ignored (route test). The counters and
+   `first_reply_at` (an idempotency sentinel, not a display timestamp) are derived in
+   the same statement as the message.
+3. **Two Legacy defects were found and are NOT reproduced.**
+   (a) An admin INTERNAL NOTE moved the ticket (status→pending, waiting_for→user,
+   `unread_user_count+1`, `first_reply_at` stamped, `last_message_at` moved —
+   `SupportRepository::addMessage`, admin branch). It runs unconditionally there,
+   notes included, so a message the user cannot read told the user "we replied",
+   raised a badge for something they cannot open and reordered their list. Modern
+   derives state from the message's TYPE: a note moves nothing, and the DB's own
+   test pins status, both axes, both counters, the sentinel and the ordering key.
+   (b) Legacy granted an internal note to super_admin only, but an ADMIN asking for
+   one silently got a USER-VISIBLE reply instead (the controller computed
+   `!empty($body['internal']) && $role === SUPER_ADMIN`) — a privilege check whose
+   failure mode LEAKED the note. Modern refuses the request outright (403).
+4. **The persistence guarantees live in PostgreSQL, and a real battery proves them**
+   (`db/tests/supportTickets.pg.test.ts`, 14 tests, 29 files / 58 runs in the full
+   battery sweep): `require_live` refuses a reply into a closed ticket and inserts
+   NOTHING; the transition function is a compare-and-set and the API maps a lost
+   race to 409; two concurrent replies both count (no lost increment); the CHECKs
+   refuse an axis combination that contradicts the status and a system note with an
+   author; deleting a user takes their tickets while a deleted ADMIN's replies
+   survive unattributed.
+5. **A bug in the migration was found by the battery and fixed at the source.**
+   `ON DELETE SET NULL` on `support_messages.sender_user_id` (Legacy's own FK action)
+   contradicted a strict "non-system messages always have an author" CHECK — and
+   because PostgreSQL does not order RI triggers, `SET NULL` could fire before the
+   ticket cascade, so **`DELETE FROM users` FAILED** (reproduced: 23514). The
+   constraint now enforces the half that carries meaning and cannot be broken by a
+   deletion (a system note has no author); the authorless residue of a deleted
+   author is allowed and documented, and the application never writes one.
+6. **The web surface is Legacy's ticket center on the Modern design system.**
+   `apps/web/src/app/(app)/support/page.tsx` (the PLANNED shell is gone): three KPIs,
+   the create form (subject ≤ 200 / message ≤ 5000), the open/closed split list with
+   status + whose-turn + unread badges, the thread with `?ticket=<id>` deep linking,
+   the reply box HIDDEN while closed, reopen, and the toasts/empty/error copy Legacy
+   already had. **34 of the 38 catalog keys are byte copies from Legacy
+   `public/locales/{fa,en}.json` @edede31** (`pages.support.*`); the four authored
+   keys are letter-prefixed `support.*`; `errors.support.*` were already in the
+   `errors` chunk and the page maps API error CODES onto them.
+7. **Visual QA defect found and fixed BEFORE commit (Phase 5 = 29/29 in a real
+   browser, `tools/visual-qa/phase5-support.mjs`, screenshots in
+   `docs/audits/phase5-ui/`).** Three real defects were caught by the loop, not by
+   the build: (a) `style={{…}}` is blocked by the production CSP
+   (`style-src 'self' 'nonce-…'`), so the page rendered degraded while tsc/webpack
+   stayed green — removed, and a source guard now forbids it; (b) reading
+   `window.location.pathname` during render made the server paint Persian and the
+   client repaint English on `/en/support` (React hydration error #418) — the
+   locale now comes from `usePathname()`, the shell's own rule; (c) `.v-latn-num`
+   carries `direction:ltr`, which is right for a raw ISO stamp but reorders a
+   FORMATTED Jalali date around its comma (measured in the browser by character
+   position) — formatted timestamps now use a `.ts-mixed` class that keeps the
+   digits Latin without imposing direction.
+8. **Gates:** `npm run typecheck` clean · `npm test` **1064 + 63 = 1127 pass, 0 fail,
+   0 skip, EXIT=0** · real-PG batteries **29 files / 58 runs / 0 failures** ·
+   support service 15/15 · support routes 10/10 · support real-PG 14/14 · throttle
+   guard 18/18 (extended for the support writes) · web build 38 routes ·
+   secret-scan PASS · visual QA 29/29.
+
+**Evidence files:** `docs/audits/2026-10-04-PHASE5-STATUS.md`,
+`docs/audits/phase5-ui/` (14 screenshots + `visual-qa-results.json`),
+`tools/visual-qa/phase5-support.mjs`, `db/tests/supportTickets.pg.test.ts`,
+`apps/api/src/support/*.test.ts`, `apps/web/src/i18n/supportSurface.test.ts`.
+
+**Nothing was removed.** No existing capability, route, table or string was taken
+away; `/support` went from a PLANNED shell to the real capability, and the rest of
+the app is untouched (the only cross-cutting changes are the throttle table, the
+RBAC permission list and the kernel slot).
+
+**Push status:** committed and pushed to `feat/telegram-journal-client` in the same
+delivery. A commit cannot contain the result of its own push, so the VERIFIED remote
+tip (read back with `git fetch` + `git rev-parse`) is recorded in the small
+push-verification commit that follows this one — until that commit exists, no state
+above COMMITTED is claimed for AC-14.

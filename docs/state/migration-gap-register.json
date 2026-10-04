@@ -550,12 +550,19 @@
         "§6"
       ],
       "evidence": [
-        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+        "apps/api/src/support/supportRoutes.test.ts",
+        "db/migrations/0026_support_tickets.sql",
+        "db/tests/supportTickets.pg.test.ts",
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "docs/audits/2026-10-04-PHASE5-STATUS.md",
+        "docs/audits/phase5-ui/visual-qa-results.json"
       ],
       "decisions": [
         "OD-AC-R8"
       ],
-      "closure_criteria": "Surfaces implemented or owner-scoped"
+      "closure_criteria": "Surfaces implemented or owner-scoped",
+      "closure_note": "PARTIAL 2026-10-04 (Phase 5). `/support` is no longer a PLANNED shell: the ticket center is implemented end to end (0026 + SupportService/SupportRoutes + the page), verified by a real-PG battery, an HTTP route battery and a 29/29 browser QA run (docs/audits/phase5-ui/). Still open in this row: performance, wallet, intelligence, blog, privacy, terms, checkout (R8 / MG-FRONTEND-SURFACES), and the admin console, which is phase 6.",
+      "last_updated": "2026-10-04"
     },
     {
       "id": "MG-I18N-COVERAGE",
