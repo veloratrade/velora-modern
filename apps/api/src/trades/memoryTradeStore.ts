@@ -91,15 +91,18 @@ export class MemoryTradeStore implements TradeStore {
       (t) => t.userId === filter.userId && t.deletedAt === null,
     );
     if (filter.symbol !== undefined && filter.symbol !== "") {
+      // TRD-04: case-insensitive EQUALITY (Legacy `symbol = :x` under MySQL's
+      // case-insensitive collation) — the memory double mirrors the pg store.
       const needle = filter.symbol.toUpperCase();
-      list = list.filter((t) => t.symbol.includes(needle));
+      list = list.filter((t) => t.symbol.toUpperCase() === needle);
     }
     if (filter.direction !== undefined && filter.direction !== "") {
       list = list.filter((t) => t.direction === filter.direction);
     }
     if (filter.from !== undefined) {
       const from = Date.parse(filter.from);
-      list = list.filter((t) => Date.parse(t.openAtUtc) >= from);
+      // Both bounds are close-time bounds (Legacy semantics, see pgTradeStore).
+      list = list.filter((t) => Date.parse(t.closeAtUtc) >= from);
     }
     if (filter.to !== undefined) {
       const to = Date.parse(filter.to);

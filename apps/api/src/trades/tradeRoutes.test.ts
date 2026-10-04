@@ -185,7 +185,8 @@ test("TRADES HTTP: owner journey — create (vector A), read, search, symbols", 
     assert.equal(get.status, 200);
     assert.equal(((await get.json()) as Envelope<{ id: string }>).data.id, id);
 
-    const search = await fetch(`${base}/api/v1/trades?symbol=eur&direction=buy&limit=10`, { headers: { Authorization: `Bearer ${ownerToken}` } });
+    // TRD-04: `symbol` is Legacy's equality filter; `q` is the contains search.
+    const search = await fetch(`${base}/api/v1/trades?symbol=EURUSD&direction=buy&limit=10`, { headers: { Authorization: `Bearer ${ownerToken}` } });
     assert.equal(search.status, 200);
     const sb = ((await search.json()) as Envelope<{ items: unknown[]; pagination: Record<string, number> }>).data;
     assert.equal(sb.items.length, 1);
@@ -421,7 +422,7 @@ test("JOURNAL HTTP: q journal search + order whitelist over real HTTP", async ()
     const byPnl = await fetch(`${base}/api/v1/trades?order=profit_loss`, { headers: { Authorization: `Bearer ${ownerToken}` } });
     const pnlItems = ((await byPnl.json()) as Envelope<{ items: Array<{ symbol: string }> }>).data.items;
     assert.equal(pnlItems[0]!.symbol, "XAUUSD");
-    // unknown order falls back to the default (open_time) — no error, no echo
+    // unknown order falls back to the default (close_time, Legacy's controller default) — no error, no echo
     const bogus = await fetch(`${base}/api/v1/trades?order=total_bogus`, { headers: { Authorization: `Bearer ${ownerToken}` } });
     assert.equal(bogus.status, 200);
     assert.equal(((await bogus.json()) as Envelope<{ items: unknown[] }>).data.items.length, 2);

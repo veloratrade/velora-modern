@@ -308,16 +308,29 @@ test("PG: searchTrades — filters, journal q, sort whitelist, pagination total"
     const all = await h.store.searchTrades({ userId: searcher }, 1, 50);
     assert.equal(all.total, 3);
 
-    const sym = await h.store.searchTrades({ userId: searcher, symbol: "eur" }, 1, 50); // contains, case-insensitive
-    assert.equal(sym.total, 2);
-    assert.deepEqual(sym.items.map((t) => t.symbol), ["EURJPY", "EURUSD"]); // default sort: open_time DESC
+    // TRD-04: `symbol` = Legacy's EQUALITY filter (case-insensitive), `q` = the
+    // contains search. Both are asserted here so the two cannot be confused again.
+    const sym = await h.store.searchTrades({ userId: searcher, symbol: "eurusd" }, 1, 50);
+    assert.equal(sym.total, 1, "case-insensitive EQUALITY");
+    assert.equal(sym.items[0]!.symbol, "EURUSD");
+    const symPartial = await h.store.searchTrades({ userId: searcher, symbol: "eur" }, 1, 50);
+    assert.equal(symPartial.total, 0, "a partial symbol is not an equality match");
 
     const q = await h.store.searchTrades({ userId: searcher, q: "pound" }, 1, 50); // journal contains
     assert.equal(q.total, 1);
     assert.equal(q.items[0]!.symbol, "GBPUSD");
+    const qSymbolPrefix = await h.store.searchTrades({ userId: searcher, q: "euro" }, 1, 50);
+    assert.equal(qSymbolPrefix.total, 1);
 
+    // from/to are BOTH close-time bounds (Legacy): the fixture closes on the same
+    // day it opens, so this window is the close-time window, not an open-time one.
     const range = await h.store.searchTrades({ userId: searcher, from: "2026-09-02T00:00:00.000Z", to: "2026-09-10T23:59:59.000Z" }, 1, 50);
-    assert.equal(range.total, 2, "from/to window on open/close instants");
+    assert.equal(range.total, 3, "from/to window on close instants (inclusive)");
+
+    // Default order is Legacy's close_time DESC (newest close first).
+    const defaultOrder = await h.store.searchTrades({ userId: searcher }, 1, 50);
+    const closes = defaultOrder.items.map((t) => t.closeAtUtc);
+    assert.deepEqual(closes, [...closes].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0)), "default sort = close_time DESC");
 
     const byPnl = await h.store.searchTrades({ userId: searcher, sort: "profit_loss" }, 1, 50);
     assert.equal(byPnl.total, 3); // whitelist sort executes on the real planner

@@ -351,11 +351,17 @@ test("search: filters, ordering, pagination (q/order covered in dedicated tests)
 
   const all = (await svc.searchTrades(OWNER, {})) as { items: Array<Record<string, unknown>>; pagination: Record<string, number> };
   assert.equal(all.items.length, 2);
-  assert.deepEqual(all.items.map((x) => x.id), [b.id, a.id]); // newest open first
+  assert.deepEqual(all.items.map((x) => x.id), [b.id, a.id]); // newest CLOSE first (Legacy default)
   assert.deepEqual(all.pagination, { page: 1, limit: 20, total: 2, totalPages: 1 });
 
-  const sym = (await svc.searchTrades(OWNER, { symbol: "gbp" })) as { items: unknown[] }; // contains, case-insensitive
-  assert.equal(sym.items.length, 1);
+  // TRD-04: `symbol` is Legacy's EQUALITY filter (case-insensitive, MySQL
+  // collation); the contains behaviour belongs to `q`, asserted below.
+  const sym = (await svc.searchTrades(OWNER, { symbol: "gbpusd" })) as { items: unknown[] };
+  assert.equal(sym.items.length, 1, "case-insensitive equality still matches");
+  const symPartial = (await svc.searchTrades(OWNER, { symbol: "gbp" })) as { items: unknown[] };
+  assert.equal(symPartial.items.length, 0, "a partial symbol is NOT the symbol filter's job");
+  const symText = (await svc.searchTrades(OWNER, { q: "gbp" })) as { items: unknown[] };
+  assert.equal(symText.items.length, 1, "the contains search is `q`, Legacy's own parameter");
   const dir = (await svc.searchTrades(OWNER, { direction: "sell" })) as { items: unknown[] };
   assert.equal(dir.items.length, 1);
   const ranged = (await svc.searchTrades(OWNER, { from: "2026-09-09T00:00:00Z", to: "2026-09-11T00:00:00Z" })) as { items: unknown[] };
@@ -395,7 +401,7 @@ test("journal search q (PHP evidence): contains across symbol | strategy | notes
   assert.equal(byEmotion.items.length, 0);
 });
 
-test("search order: PHP whitelist open_time|close_time|profit_loss; default/unknown → open_time", async () => {
+test("search order: PHP whitelist open_time|close_time|profit_loss; default/unknown → close_time (Legacy)", async () => {
   const { svc } = makeService();
   // trade a: opens first, loses; trade b: opens later, wins
   const a = (await svc.createTrade(OWNER, {
@@ -409,7 +415,7 @@ test("search order: PHP whitelist open_time|close_time|profit_loss; default/unkn
   })) as Record<string, unknown>; // net = +100.00, opens later, closes EARLIER than a closes? no: closes 11:00 on the 10th
 
   const open = (await svc.searchTrades(OWNER, {})) as { items: Array<Record<string, unknown>> };
-  assert.deepEqual(open.items.map((x) => x.id), [b.id, a.id]); // default open_time DESC (Remote lineage)
+  assert.deepEqual(open.items.map((x) => x.id), [b.id, a.id]); // default close_time DESC (Legacy controller)
   const explicitOpen = (await svc.searchTrades(OWNER, { order: "open_time" })) as { items: Array<Record<string, unknown>> };
   assert.deepEqual(explicitOpen.items.map((x) => x.id), [b.id, a.id]);
   const byClose = (await svc.searchTrades(OWNER, { order: "close_time" })) as { items: Array<Record<string, unknown>> };
@@ -417,7 +423,27 @@ test("search order: PHP whitelist open_time|close_time|profit_loss; default/unkn
   const byPnl = (await svc.searchTrades(OWNER, { order: "profit_loss" })) as { items: Array<Record<string, unknown>> };
   assert.deepEqual(byPnl.items.map((x) => x.id), [b.id, a.id]); // +100 before -254
   const unknown = (await svc.searchTrades(OWNER, { order: "total_bogus" })) as { items: Array<Record<string, unknown>> };
-  assert.deepEqual(unknown.items.map((x) => x.id), [b.id, a.id]); // unknown → default open_time (PHP: default branch)
+  assert.deepEqual(unknown.items.map((x) => x.id), [b.id, a.id]); // unknown → default branch = close_time (PHP)
+});
+
+test("search window: BOTH bounds are close-time bounds, inclusive (Legacy TradeRepository)", async () => {
+  const { svc } = makeService();
+  // a closes Sep 8; b OPENS Sep 10 but closes Sep 8 too (a same-day close after a
+  // later open) — the case that separates an open-time bound from a close-time one.
+  await svc.createTrade(OWNER, { ...VECTOR_A, symbol: "EURUSD", openTime: "2026-09-08 10:00:00", closeTime: "2026-09-08 12:00:00" });
+  await svc.createTrade(OWNER, { ...VECTOR_A, symbol: "GBPUSD", openTime: "2026-09-10 10:00:00", closeTime: "2026-09-10 12:00:00" });
+
+  const window = (await svc.searchTrades(OWNER, { from: "2026-09-08T00:00:00Z", to: "2026-09-08T23:59:59Z" })) as {
+    items: Array<Record<string, unknown>>;
+  };
+  assert.equal(window.items.length, 1, "only the trade CLOSED in the window is returned");
+  assert.equal(window.items[0]!.symbol, "EURUSD");
+
+  // Inclusive at both ends, like PHP's `>= from` / `<= to`.
+  const exact = (await svc.searchTrades(OWNER, { from: "2026-09-08T12:00:00Z", to: "2026-09-08T12:00:00Z" })) as {
+    items: unknown[];
+  };
+  assert.equal(exact.items.length, 1, "the bounds are inclusive");
 });
 
 test("journal field ownership: every FINANCIAL_IMMUTABLE field is 403; SYSTEM_DERIVED rejected on create", async () => {

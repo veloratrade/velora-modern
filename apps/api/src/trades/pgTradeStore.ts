@@ -154,11 +154,18 @@ function mapExit(r: ExitRow, fallbackPnl: string): TradeExitRecord {
   };
 }
 
-/** PHP-evidenced order whitelist -> SQL column (default open_time, Remote lineage). */
+/**
+ * PHP-evidenced order whitelist -> SQL column.
+ *
+ * TRD-04: Legacy's DEFAULT is `close_time DESC` (`$request->query['order'] ??
+ * 'close_time'`); the previous Modern default was open_time (a Remote-lineage
+ * habit). The default is user-visible — it decides what the journal shows first —
+ * so it follows Legacy. The whitelist itself is unchanged.
+ */
 function sortColumn(sort: TradeSearchFilter["sort"]): string {
-  if (sort === "close_time") return "occurred_close_at_utc";
+  if (sort === "open_time") return "occurred_open_at_utc";
   if (sort === "profit_loss") return "net_pnl";
-  return "occurred_open_at_utc";
+  return "occurred_close_at_utc";
 }
 
 /**
@@ -270,16 +277,26 @@ export class PgTradeStore implements TradeStore {
     const where: string[] = ["user_id = $1", "deleted_at IS NULL"];
     const params: unknown[] = [filter.userId];
     if (filter.symbol !== undefined) {
-      params.push(filter.symbol.toUpperCase().replace(/([%_\\])/g, "\\$1"));
-      where.push(`UPPER(symbol) LIKE '%' || $${params.length} || '%' ESCAPE '\\'`);
+      // TRD-04 / MG-API-CONTRACT-DIVERGENCE, resolved: Legacy filters by EQUALITY
+      // (`t.symbol = :symbol` in TradeRepository::search). On MySQL that equality
+      // is case-insensitive because of the column collation, so the faithful
+      // Modern form is a case-insensitive equality — NOT the contains-match this
+      // used to run. Free-text contains search is Legacy's own `q` parameter,
+      // which covers the "type a few letters" case without overloading `symbol`.
+      params.push(filter.symbol.toUpperCase());
+      where.push(`UPPER(symbol) = $${params.length}`);
     }
     if (filter.direction !== undefined) {
       params.push(filter.direction);
       where.push(`direction = $${params.length}`);
     }
+    // TRD-04: BOTH bounds are close-time bounds, exactly as Legacy applies them
+    // (`t.close_time >= :from` / `t.close_time <= :to`, both inclusive). The list
+    // answers "trades closed between these instants"; bounding `from` on the OPEN
+    // time answered a different question and silently returned other rows.
     if (filter.from !== undefined) {
       params.push(filter.from);
-      where.push(`occurred_open_at_utc >= $${params.length}`);
+      where.push(`occurred_close_at_utc >= $${params.length}`);
     }
     if (filter.to !== undefined) {
       params.push(filter.to);
