@@ -98,6 +98,20 @@ code into Telegram, and would be suspicious if it did — the copy says so.
 
 ---
 
+## 5a. Input bounds (what a caller cannot make the process do)
+
+| Surface | Bound | Behaviour at the bound |
+|---|---|---|
+| Webhook body | 256 KiB (`TELEGRAM_WEBHOOK_MAX_BODY_BYTES`) | 400 `VALIDATION_FAILED` before the pipeline; the update is never claimed |
+| Downloaded media | 5 MiB, checked twice (`telegramApi.ts`) | refused, never truncated; the source file's DECLARED size is refused before the download starts |
+| JSON bodies generally | 1 MiB (kernel default; unchanged) | 400 `VALIDATION_FAILED` |
+| Provider calls | one attempt per feature + bounded retries (`aiProvider.ts`) | honest failure copy; no fabricated result |
+
+A Telegram update carries a message, a caption and file **references** — never file
+bytes — so 256 KiB is ~50x the largest plausible delivery.
+
+---
+
 ## 6. Secrets
 
 | Secret | Handling |
@@ -121,6 +135,23 @@ client IP): link-start 5/h, updates 60/min, journal 20/h, analysis 8/h, channel
 replica answered. Exceeding a limit answers `429` with `Retry-After`; the bot tells
 the user to wait rather than silently dropping the message.
 
+**Where each key is enforced** — every row has a call site, and each call site is
+asserted by a test that fails if the wiring is removed:
+
+| Key | Enforced at | Checked BEFORE |
+|---|---|---|
+| `telegram:update` | `telegramBot.ts` `dispatch()` (every update) | any parsing or work |
+| `telegram:link-start` | `telegramRoutes.ts` (authenticated route) | minting a token |
+| `telegram:channel` | `telegramRoutes.ts` (authenticated route) | binding the channel |
+| `telegram:journal` | `telegramBot.ts` `withinJournalBudget()` | the media download AND the provider call |
+| `telegram:analyze` | `telegramBot.ts` `withinAnalyzeBudget()` | the "working…" message and the model call |
+
+Audit note (2026-10-04): `telegram:journal` and `telegram:analyze` were previously
+**declared in the contract and described here while being enforced nowhere**. That
+gap is closed; the contract values were not changed, and nothing was loosened to
+make a test pass. A limit that exists only in a table is a claim — this table
+exists so the claim can be checked against the code.
+
 ---
 
 ## 8. Error handling (no information disclosure)
@@ -136,8 +167,19 @@ nothing is answered `200` to make a failure look like a success.
 
 ## 9. Not verified here
 
-Live Telegram and live Gemini round trips, a webhook delivery to a deployed host,
-and real-PostgreSQL concurrency (two sessions racing the atomic statements) are
-**NOT VERIFIED** — see `docs/telegram/DEPLOYMENT.md` §7. The atomicity claims rest
-on single-statement SQL plus PGlite (single-session) evidence, not on a race
-observed against a real server.
+**NOW VERIFIED (2026-10-04):** the atomic statements, raced by two callers on a real
+server. `db/tests/telegramConcurrency.pg.test.ts` runs 9 tests on PostgreSQL **16.15**
+(disposable, `postgres:16` lineage): the linking token is spent exactly once (two
+identities, one token, one winner — including a variant that FORCES the interleaving
+by holding the row lock in a third session), an update is claimed once, a draft is
+confirmed once, a channel post is enqueued once, and the audit trail carries one
+success with no phantom failure. In the same environment the D1 smoke (S1–S9) passed
+on a fresh database with all 23 migrations and 70 further real-PG tests were
+re-confirmed. Wired into `.github/workflows/postgres-evidence.yml` with anti-SKIP
+assertions. No production statement was weakened, and PGlite's single session is
+still never claimed as concurrency evidence.
+
+**NOT VERIFIED (unchanged, and the reason is always the same: no credential or
+host in scope):** live Telegram Bot API round trips, live Gemini calls, a webhook
+delivery from Telegram's servers to a deployed origin, and anything on staging — see
+`docs/telegram/DEPLOYMENT.md` §7.

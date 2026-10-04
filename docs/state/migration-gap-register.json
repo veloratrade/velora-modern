@@ -896,16 +896,44 @@
     {
       "id": "MG-OBS-6",
       "section": "E",
-      "title": "tools/pg-smoke.ts S1b asserts stale D1-era migration list [0001..0005] vs tree 0001..0022 — D1 smoke cannot pass on current tree (migrations themselves apply cleanly; batteries unaffected)",
-      "status": "OPEN",
+      "title": "tools/pg-smoke.ts S1b asserts stale D1-era migration list [0001..0005] vs tree 0001..0023 — D1 smoke could not pass on current tree (migrations themselves apply cleanly; batteries unaffected)",
+      "status": "CLOSED",
       "priority": "P3",
-      "verification_state": "STATIC",
-      "audit_refs": [],
-      "evidence": [
-        "tools/pg-smoke.ts"
+      "verification_state": "CURRENT_RUNTIME_VERIFIED",
+      "audit_refs": [
+        "AC-10"
       ],
-      "decisions": [],
-      "closure_criteria": "Test-side expectation update (owner-gated)"
+      "evidence": [
+        "tools/pg-smoke.ts (expected migration set now discovered from db/migrations/)",
+        "npx tsx tools/pg-smoke.ts → S1–S9 ALL PASSED on fresh PostgreSQL 16.15, 23/23 migrations, re-run no-op (2026-10-04)"
+      ],
+      "decisions": [
+        "The owner's own fix is pushed as feat/mg-obs-6-pg-smoke-expectation (9d59bca, not merged); this branch carries that file's EXACT content (byte-identical, verified) so the two branches cannot conflict. The change is test-only and reversible."
+      ],
+      "closure_criteria": "MET 2026-10-04 (AC-10)"
+    },
+    {
+      "id": "MG-TG-4",
+      "section": "E",
+      "title": "Audit round two (AC-10): telegram:journal and telegram:analyze were declared in the contract and SECURITY.md but enforced nowhere; the media path ignored getFile's declared file_size before downloading; the webhook ingress was bounded at the kernel's 1 MiB JSON default",
+      "status": "CLOSED",
+      "priority": "P2",
+      "verification_state": "CURRENT_RUNTIME_VERIFIED",
+      "audit_refs": [
+        "AC-10"
+      ],
+      "evidence": [
+        "apps/api/src/telegram/telegramBot.ts (withinJournalBudget / withinAnalyzeBudget, checked BEFORE the download and the model call)",
+        "apps/api/src/telegram/telegramBot.ts fetchBytes (declared-size pre-check, 5 MiB) + telegramApi.ts downloadFile (post-check retained)",
+        "apps/api/src/telegram/telegramRoutes.ts TELEGRAM_WEBHOOK_MAX_BODY_BYTES = 256 KiB → 400 VALIDATION_FAILED",
+        "tests: 6 new bot-wiring tests + 1 webhook bound assertion; each fails without its fix",
+        "SECURITY.md §7 key→call-site table; ADR-018 Amendment 1"
+      ],
+      "decisions": [
+        "Contract rate-limit VALUES unchanged — nothing loosened to make a test pass.",
+        "No new error code invented for the webhook bound; the kernel's existing oversized-body contract is reused."
+      ],
+      "closure_criteria": "MET 2026-10-04 (AC-10)"
     },
     {
       "id": "MG-TG-1",

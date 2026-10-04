@@ -96,5 +96,53 @@ client of the existing journal domain** — never as a parallel product.
 | Telegram Bot API live call (sendMessage/getFile/…) | `NOT_VERIFIED` — no bot token in scope; exercised against an injected stub |
 | Webhook delivery from Telegram's servers | `NOT_VERIFIED` — requires a deployed public origin + `setWebhook` |
 | Voice transcription / image interpretation against a provider | `NOT_VERIFIED` — no provider credential in scope |
-| Real-PostgreSQL concurrency battery for the link-token race | `NOT_VERIFIED` locally (PGlite covers semantics; a `.pg.test.ts` battery is added for the workflow) |
+| Real-PostgreSQL concurrency battery for the link-token race | `VERIFIED` 2026-10-04 — `db/tests/telegramConcurrency.pg.test.ts`, 9/9 on PostgreSQL **16.15** (one test FORCES the interleaving by holding the row lock in a third session) |
+| Real-PostgreSQL batteries re-confirmed in the same run | `VERIFIED` — D1 smoke S1–S9 (fresh database, 23/23 migrations) and 70 further real-PG tests (trade concurrency 14/14; store/capability batteries 47/47) on 16.15 |
 | Worker-based async processing | `NOT_IMPLEMENTED BY DECISION` (worker not deployed — see Decision 5) |
+
+## Amendment 1 — 2026-10-04: audit round two (enforcement, input bounds, one canonical surface)
+
+`IMPLEMENTED`/`TESTED`/`COMMITTED` were already true when this amendment was
+written; what follows changes the strength of three CLAIMS and one UI decision,
+with evidence, and nothing about the architecture.
+
+1. **Two advertised rate limits were not enforced.** `telegram:journal` (20/h) and
+   `telegram:analyze` (8/h) were declared in `packages/contracts/src/auth.ts` and
+   described in `docs/telegram/SECURITY.md` §7, but no call site consulted them —
+   only `telegram:update`, `telegram:link-start` and `telegram:channel` were
+   wired. A limit that exists only in a table and a document is a claim, not a
+   control. Both are now enforced BEFORE the work they bound (media download and
+   provider call), so a throttled user spends nothing. Contract values unchanged;
+   no limit was loosened.
+2. **The media pre-check was missing.** `getFile`'s declared `file_size` was
+   ignored, so an oversized voice note or screenshot was downloaded in full before
+   the API layer's own cap could refuse it. The declared size is now checked first
+   (5 MiB, the same constant the download enforces); the post-download measurement
+   remains, because the declaration is a claim rather than a guarantee. The doc
+   comment in `telegramApi.ts` that claimed a pre-check it cannot perform was
+   corrected rather than left standing.
+3. **The webhook ingress was bounded at the kernel's 1 MiB JSON default.** A
+   Telegram update carries file REFERENCES, never file bytes, so the cap is now
+   256 KiB and an oversized body is refused with the platform's existing
+   oversized-body contract (400 `VALIDATION_FAILED`) before the pipeline is
+   reached. No new error code was invented for one route.
+4. **One canonical web surface, framed as an account.** The linking screen stays at
+   `/settings`; it is now titled as the account page (`Settings`/`تنظیمات`) with
+   Telegram under an explicit "Connected accounts" heading, and the sidebar nav
+   item that opens it is labelled with the page's own name rather than the
+   feature's. The signed-in user card became a link to the same surface (it was
+   plain `div`s — there was no path from the account chrome to the account
+   screen). Nothing was removed and no second Telegram surface exists: a grep of
+   `apps/web/src` finds exactly two consumers of the telegram catalog (the sidebar
+   label and the settings page).
+5. **Verification apparatus defect found and fixed.** `tools/pg-smoke.ts` asserted
+   a hard-coded `0001–0005` migration list, so it failed on every database since
+   the sixth migration and would have blocked the whole `postgres-evidence`
+   workflow at step one — before the new Telegram battery could run. The expected
+   set is now discovered from `db/migrations/`. The Telegram battery is wired into
+   that workflow as its own step (anti-SKIP: `# skipped 0`, `# fail 0`, executed
+   count ≥ declared count).
+
+Scope guard: no `journal_entries` table, no second journal aggregate, no new
+queue/worker, no n8n relay, no polling in production, and no change to the single
+`claim*`-statement atomicity that the database provides.

@@ -135,6 +135,25 @@ jobs:
           run_battery fxRatesIngestion
         env:
           DATABASE_URL: postgres://${{ env.PGTEST_USER }}:${{ env.PGTEST_PASSWORD }}@${{ env.PGTEST_HOST }}:${{ env.PGTEST_PORT }}/${{ env.PGTEST_DB }}
+      - name: Telegram atomicity battery (ADR-018 one-time token + claim races)
+        # The Telegram client's four safety claims are single-statement guards:
+        # a linking token is spent once, an update is claimed once, a draft is
+        # confirmed once, a channel post is enqueued once. PGlite runs ONE
+        # session and therefore cannot falsify any of them, so this battery runs
+        # here — real server, two store instances over one pool, and one test
+        # that FORCES the interleaving by holding the row lock in a third
+        # session (scheduling luck removed from the proof).
+        run: |
+          set -uo pipefail
+          file=db/tests/telegramConcurrency.pg.test.ts
+          expected=$(grep -cE '^test\(' "$file")
+          npx tsx --test "$file" > /tmp/telegram-concurrency.log 2>&1 || true
+          tail -n 8 /tmp/telegram-concurrency.log
+          awk -v n="$expected" '/^# tests /{ if (($3+0) < n) exit 1 }' /tmp/telegram-concurrency.log
+          grep -q "^# skipped 0$" /tmp/telegram-concurrency.log
+          grep -q "^# fail 0$" /tmp/telegram-concurrency.log
+        env:
+          DATABASE_URL: postgres://${{ env.PGTEST_USER }}:${{ env.PGTEST_PASSWORD }}@${{ env.PGTEST_HOST }}:${{ env.PGTEST_PORT }}/${{ env.PGTEST_DB }}
       - name: D4 real-PostgreSQL trade-concurrency battery (service-level races)
         # D4 (owner authorization 2026-09-13): mixed-operation races through
         # the real TradeService over the real PgTradeStore — two independent
