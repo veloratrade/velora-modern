@@ -337,8 +337,8 @@ test("CHANNEL RACE: one trade is enqueued to a channel once, even when two publi
       [userId],
     );
     const trade = await h.pool.query<{ id: string }>(
-      `INSERT INTO trades (user_id, account_id, symbol, direction, entry_price, volume, occurred_at)
-       VALUES ($1::bigint, $2::bigint, 'XAUUSD', 'buy', 2650, 0.5, $3::timestamptz) RETURNING id::text AS id`,
+      `INSERT INTO trades (user_id, account_id, symbol, direction, status, entry_price, volume, occurred_at)
+       VALUES ($1::bigint, $2::bigint, 'XAUUSD', 'buy', 'OPEN', 2650, 0.5, $3::timestamptz) RETURNING id::text AS id`,
       [userId, account.rows[0]!.id, T0.toISOString()],
     );
     const tradeId = trade.rows[0]!.id;

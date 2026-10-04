@@ -34,8 +34,11 @@ async function seedUser(engine: MigrationEngine, email: string): Promise<string>
 
 async function seedTrade(engine: MigrationEngine, userId: string, symbol = "XAUUSD"): Promise<string> {
   const { rows } = await engine.query(
-    `INSERT INTO trades(user_id, symbol, direction, entry_price, exit_price, volume, occurred_at)
-     VALUES ($1,$2,'buy',2650,2660,0.5, now()) RETURNING id`,
+    // A complete CLOSED trade (0025): exit price, realized PnL and a close instant.
+    // 2650 → 2660 on 0.5 lots with contract size 1 = +5.00.
+    `INSERT INTO trades(user_id, symbol, direction, status, entry_price, exit_price, volume,
+                        net_pnl, occurred_at, occurred_close_at_utc)
+     VALUES ($1,$2,'buy','CLOSED',2650,2660,0.5,5.00, now(), now()) RETURNING id`,
     [userId, symbol],
   );
   return String(rows[0]!["id"]);

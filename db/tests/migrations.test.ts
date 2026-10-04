@@ -62,14 +62,16 @@ test("trades: timestamptz + ADR-001 scales + external-id idempotency (ADR-002)",
     const a = (await engine.query(
       "INSERT INTO trading_accounts(user_id, external_account_id) VALUES($1,$2) RETURNING id",
       [u.id, "ACC-1"])).rows[0]!;
+    // OPEN: this fixture proves the idempotency key, not financial completeness
+    // (0025_trade_financial_guards refuses a CLOSED row with no exit/PnL/close).
     await engine.query(`INSERT INTO trades(user_id, account_id, external_deal_id, symbol,
-        direction, entry_price, volume, occurred_at)
-      VALUES($1,$2,'D-1','XAUUSD','buy',$3,$4, now())`, [u.id, a.id, "2350.50000000", "1.00000000"]);
+        direction, status, entry_price, volume, occurred_at)
+      VALUES($1,$2,'D-1','XAUUSD','buy','OPEN',$3,$4, now())`, [u.id, a.id, "2350.50000000", "1.00000000"]);
     // duplicate (account, external_deal_id) converges instead of double-counting
     await assert.rejects(
       engine.query(`INSERT INTO trades(user_id, account_id, external_deal_id, symbol,
-          direction, entry_price, volume, occurred_at)
-        VALUES($1,$2,'D-1','XAUUSD','buy',$3,$4, now())`, [u.id, a.id, "2350.00000000", "1.00000000"]),
+          direction, status, entry_price, volume, occurred_at)
+        VALUES($1,$2,'D-1','XAUUSD','buy','OPEN',$3,$4, now())`, [u.id, a.id, "2350.00000000", "1.00000000"]),
       /duplicate key|unique/i,
     );
   } finally { await engine.close(); }
@@ -80,8 +82,8 @@ test("exit over-allocation is rejected at the DB level (ADR-002)", async () => {
   try {
     await migrate(engine, MIGRATIONS);
     const u = (await engine.query("INSERT INTO users(email,password_hash) VALUES($1,$2) RETURNING id", ["a@a.ir","x"])).rows[0]!;
-    const t = (await engine.query(`INSERT INTO trades(user_id, symbol, direction, entry_price,
-        volume, occurred_at) VALUES($1,'EURUSD','buy',$2,$3, now()) RETURNING id`,
+    const t = (await engine.query(`INSERT INTO trades(user_id, symbol, direction, status, entry_price,
+        volume, occurred_at) VALUES($1,'EURUSD','buy','OPEN',$2,$3, now()) RETURNING id`,
       [u.id, "1.08500000", "2.00000000"])).rows[0]!;
     await engine.query("INSERT INTO trade_exits(trade_id, volume, price) VALUES($1,$2,$3)",
       [t.id, "1.50000000", "1.08800000"]);

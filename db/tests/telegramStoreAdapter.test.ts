@@ -192,8 +192,10 @@ test("a draft is claimed once for confirmation, and only from an actionable stat
     const alice = await h.user("draft@example.com");
     // A confirmed draft must point at a REAL trade (FK), so the test creates one.
     const { rows: tradeRows } = await h.engine.query(
-      `INSERT INTO trades(user_id, symbol, direction, entry_price, exit_price, volume, occurred_at)
-       VALUES ($1::bigint,'XAUUSD','buy',2650,2660,0.5, now()) RETURNING id::text AS id`,
+      // complete CLOSED shape (0025): 2650 → 2660 on 0.5 lots with contract size 1 = +5.00
+      `INSERT INTO trades(user_id, symbol, direction, status, entry_price, exit_price, volume,
+                          net_pnl, occurred_at, occurred_close_at_utc)
+       VALUES ($1::bigint,'XAUUSD','buy','CLOSED',2650,2660,0.5,5.00, now(), now()) RETURNING id::text AS id`,
       [alice],
     );
     const tradeId = String(tradeRows[0]!["id"]);
@@ -268,14 +270,16 @@ test("the channel mirror is bound per owner+chat and can post a given trade only
     const alice = await h.user("channel@example.com");
     const bob = await h.user("channel-bob@example.com");
     const { rows: tradeRows } = await h.engine.query(
-      `INSERT INTO trades(user_id, symbol, direction, entry_price, exit_price, volume, occurred_at)
-       VALUES ($1::bigint,'XAUUSD','buy',2650,2660,0.5, now()) RETURNING id::text AS id`,
+      `INSERT INTO trades(user_id, symbol, direction, status, entry_price, exit_price, volume,
+                          net_pnl, occurred_at, occurred_close_at_utc)
+       VALUES ($1::bigint,'XAUUSD','buy','CLOSED',2650,2660,0.5,5.00, now(), now()) RETURNING id::text AS id`,
       [alice],
     );
     const tradeId = String(tradeRows[0]!["id"]);
     const { rows: bobTradeRows } = await h.engine.query(
-      `INSERT INTO trades(user_id, symbol, direction, entry_price, exit_price, volume, occurred_at)
-       VALUES ($1::bigint,'EURUSD','sell',1.1,1.09,0.1, now()) RETURNING id::text AS id`,
+      `INSERT INTO trades(user_id, symbol, direction, status, entry_price, exit_price, volume,
+                          net_pnl, occurred_at, occurred_close_at_utc)
+       VALUES ($1::bigint,'EURUSD','sell','CLOSED',1.1,1.09,0.1,0.00, now(), now()) RETURNING id::text AS id`,
       [bob],
     );
     const bobTradeId = String(bobTradeRows[0]!["id"]);

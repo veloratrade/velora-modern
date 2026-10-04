@@ -86,10 +86,16 @@ async function harness(label: string): Promise<Ctx> {
   };
 }
 
+// A CLOSED trade is financially complete by contract (0025_trade_financial_guards):
+// exit price, realized PnL and a close instant. The aggregates under test read the
+// STORED net_pnl / r_multiple — they never recompute either from prices (that is the
+// golden-vector battery's job) — so the fixture supplies the full closed SHAPE:
+// same instant for open and close (a zero-duration fill), exit price = entry price.
 async function insertTrade(ctx: Ctx, input: { symbol: string; netPnl: string | null; r: string | null; occurredAt: string }): Promise<string> {
   const rows = await ctx.q(
-    `INSERT INTO trades (user_id, account_id, symbol, direction, entry_price, volume, occurred_at, net_pnl, r_multiple, source)
-     VALUES ($1, $2, $3, 'buy', 1.10000000, 0.10000000, $4::timestamptz, $5, $6, 'manual')
+    `INSERT INTO trades (user_id, account_id, symbol, direction, status, entry_price, exit_price,
+                         volume, occurred_at, occurred_close_at_utc, net_pnl, r_multiple, source)
+     VALUES ($1, $2, $3, 'buy', 'CLOSED', 1.10000000, 1.10000000, 0.10000000, $4::timestamptz, $4::timestamptz, $5, $6, 'manual')
      RETURNING id`,
     [ctx.userId, ctx.accountId, input.symbol, input.occurredAt, input.netPnl, input.r],
   );

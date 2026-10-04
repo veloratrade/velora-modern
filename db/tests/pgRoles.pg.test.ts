@@ -153,8 +153,10 @@ async function seed(pool: Pool): Promise<{ userId: string; tradeId: string }> {
   );
   const userId = String(u.rows[0].id);
   const t = await pool.query(
-    `INSERT INTO trades (user_id, symbol, direction, entry_price, volume, occurred_at)
-     VALUES ($1,'EURUSD','buy','1.10000000','1.00000000', now()) RETURNING id`,
+    // OPEN: these fixtures exercise GRANTS and the exit trigger, not financial
+    // completeness. 0025 refuses a CLOSED row that carries no exit/PnL/close.
+    `INSERT INTO trades (user_id, symbol, direction, status, entry_price, volume, occurred_at)
+     VALUES ($1,'EURUSD','buy','OPEN','1.10000000','1.00000000', now()) RETURNING id`,
     [userId],
   );
   return { userId, tradeId: String(t.rows[0].id) };
@@ -259,8 +261,8 @@ test("PG D5 P9: app_readwrite retains full DML on ordinary application tables", 
     const { userId } = await seed(pool);
     await asRole(pool, "app_readwrite", async (c) => {
       const t = await c.query(
-        `INSERT INTO trades (user_id, symbol, direction, entry_price, volume, occurred_at)
-         VALUES ($1,'GBPUSD','sell','1.25000000','2.00000000', now()) RETURNING id`,
+        `INSERT INTO trades (user_id, symbol, direction, status, entry_price, volume, occurred_at)
+         VALUES ($1,'GBPUSD','sell','OPEN','1.25000000','2.00000000', now()) RETURNING id`,
         [userId],
       );
       const id = String(t.rows[0].id);
@@ -292,8 +294,8 @@ test("PG D5 P11: velora_readonly CANNOT INSERT/UPDATE/DELETE → 42501", { skip:
   try {
     const { userId } = await seed(pool);
     await assertDenied(pool, "velora_readonly",
-      `INSERT INTO trades (user_id, symbol, direction, entry_price, volume, occurred_at)
-       VALUES ($1,'EURUSD','buy','1.0','1.0', now())`, [userId]);
+      `INSERT INTO trades (user_id, symbol, direction, status, entry_price, volume, occurred_at)
+       VALUES ($1,'EURUSD','buy','OPEN','1.0','1.0', now())`, [userId]);
     await assertDenied(pool, "velora_readonly", "UPDATE trades SET notes = 'x'");
     await assertDenied(pool, "velora_readonly", "DELETE FROM trades");
     await assertDenied(pool, "velora_readonly", "INSERT INTO webhook_events (source,event_id,payload) VALUES ('s','e','{}'::jsonb)");

@@ -294,8 +294,8 @@ test("D-6 sync substrate", { skip: URL ? false : "DATABASE_URL not set" }, async
   await t.test("QUARANTINE: the flag persists and defaults to false", async () => {
     const { userId, accountId } = await seed(pool);
     const t1 = await pool.query<{ id: string }>(
-      `INSERT INTO trades (user_id, account_id, symbol, direction, entry_price, volume, occurred_at)
-       VALUES ($1,$2,'EURUSD','buy',1.1,1.0, now()) RETURNING id`, [userId, accountId]);
+      `INSERT INTO trades (user_id, account_id, symbol, direction, status, entry_price, volume, occurred_at)
+       VALUES ($1,$2,'EURUSD','buy','OPEN',1.1,1.0, now()) RETURNING id`, [userId, accountId]);
     const id = t1.rows[0]!.id;
     const before = await pool.query<{ quarantined: boolean }>(
       `SELECT quarantined FROM trades WHERE id=$1`, [id]);
@@ -310,8 +310,8 @@ test("D-6 sync substrate", { skip: URL ? false : "DATABASE_URL not set" }, async
   await t.test("A-1: TRADE_IMPORTED with actor 'sync' is accepted by the DB (no migration needed)", async () => {
     const { userId, accountId } = await seed(pool);
     const t1 = await pool.query<{ id: string }>(
-      `INSERT INTO trades (user_id, account_id, symbol, direction, entry_price, volume, occurred_at)
-       VALUES ($1,$2,'EURUSD','buy',1.1,1.0, now()) RETURNING id`, [userId, accountId]);
+      `INSERT INTO trades (user_id, account_id, symbol, direction, status, entry_price, volume, occurred_at)
+       VALUES ($1,$2,'EURUSD','buy','OPEN',1.1,1.0, now()) RETURNING id`, [userId, accountId]);
     await pool.query(
       `INSERT INTO trade_events (event_uid, trade_id, type, actor, expected_version, payload)
        VALUES ($1,$2,'TRADE_IMPORTED','sync',0,'{}'::jsonb)`,
