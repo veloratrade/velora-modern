@@ -82,7 +82,7 @@ export function DashboardPage({ locale }: { locale: Locale }) {
               <h3 className="dashboard-card-title">{locale === "en" ? "Auth Verification" : "تأیید احراز هویت"}</h3>
               <ul className="dashboard-list">
                 <li>✓ <code>accessToken in memory</code> — not localStorage</li>
-                <li>✓ <code>refresh_token</code> HttpOnly Secure Lax</li>
+                <li>✓ <code>__Host-velora_refresh</code> HttpOnly Secure Strict</li>
                 <li>✓ Refresh on <code>UNAUTHENTICATED</code> → retry once</li>
                 <li>✓ <code>fullName</code> (not full_name) — {String(displayUser.fullName ? "OK" : "check")}</li>
                 <li>✓ <code>details.messageKey</code> propagated</li>

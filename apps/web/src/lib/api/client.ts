@@ -3,7 +3,8 @@
  * API client — W1 auth frontend, modern contract adaptation.
  *
  * Preserves 6F's security model (access token in memory only, HttpOnly
- * refresh_token cookie, single-flight refresh, envelope → data) but reconciled
+ * __Host-velora_refresh cookie (SEC-04; was `refresh_token`), single-flight refresh,
+ * envelope → data) but reconciled
  * to Modern @ 80f0ade + W0 landing architecture:
  *  - string IDs (Modern uses string ULIDs, not numbers)
  *  - fullName (not full_name)
@@ -90,7 +91,9 @@ function purgeLegacyAuthStorage(): void {
 }
 
 /**
- * Readable companion marker for the HttpOnly `refresh_token` cookie.
+ * Readable companion marker for the HttpOnly `__Host-velora_refresh` cookie
+ * (SEC-04 — the localStorage keys purged above are the OLD theme-journal keys, not
+ * this cookie's name).
  *
  * The cookie itself is invisible to JS by design, so a brand-new/anonymous
  * visitor cannot tell that there is nothing to restore — and boot would POST
