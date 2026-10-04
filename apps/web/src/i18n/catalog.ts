@@ -27,6 +27,8 @@ import faAuth from "../../messages/fa/auth.json";
 import faLanding from "../../messages/fa/landing.json";
 import faLandingInteractive from "../../messages/fa/landing-interactive.json";
 import faSettings from "../../messages/fa/settings.json";
+import faTrades from "../../messages/fa/trades.json";
+import faDashboard from "../../messages/fa/dashboard.json";
 import enCommon from "../../messages/en/common.json";
 import enErrors from "../../messages/en/errors.json";
 import enTelegram from "../../messages/en/telegram.json";
@@ -34,6 +36,8 @@ import enAuth from "../../messages/en/auth.json";
 import enLanding from "../../messages/en/landing.json";
 import enLandingInteractive from "../../messages/en/landing-interactive.json";
 import enSettings from "../../messages/en/settings.json";
+import enTrades from "../../messages/en/trades.json";
+import enDashboard from "../../messages/en/dashboard.json";
 
 // `settings` is the account surface's catalog (Phase 1 — profile + settings).
 // PROVENANCE: 23 of its keys are byte copies of Legacy `public/locales/{fa,en}.json`
@@ -45,7 +49,7 @@ import enSettings from "../../messages/en/settings.json";
 // must not state a rule the server does not enforce. The remaining keys are
 // authored (letter-prefixed `settings.*`) because Legacy PERSISTED the email
 // preference API but shipped no interface copy for it.
-export type Feature = "common" | "errors" | "auth" | "landing" | "landing-interactive" | "telegram" | "settings";
+export type Feature = "common" | "errors" | "auth" | "landing" | "landing-interactive" | "telegram" | "settings" | "trades" | "dashboard";
 export type Messages = Readonly<Record<string, string>>;
 
 interface ChunkFile {
@@ -56,8 +60,8 @@ interface ChunkFile {
 }
 
 export const CATALOG_FILES: Readonly<Record<Locale, Readonly<Record<Feature, ChunkFile>>>> = {
-  fa: { common: faCommon, errors: faErrors, auth: faAuth, landing: faLanding, "landing-interactive": faLandingInteractive, telegram: faTelegram, settings: faSettings },
-  en: { common: enCommon, errors: enErrors, auth: enAuth, landing: enLanding, "landing-interactive": enLandingInteractive, telegram: enTelegram, settings: enSettings },
+  fa: { common: faCommon, errors: faErrors, auth: faAuth, landing: faLanding, "landing-interactive": faLandingInteractive, telegram: faTelegram, settings: faSettings, trades: faTrades, dashboard: faDashboard },
+  en: { common: enCommon, errors: enErrors, auth: enAuth, landing: enLanding, "landing-interactive": enLandingInteractive, telegram: enTelegram, settings: enSettings, trades: enTrades, dashboard: enDashboard },
 };
 
 const merged = new Map<string, Messages>();

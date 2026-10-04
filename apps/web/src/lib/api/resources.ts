@@ -223,20 +223,84 @@ export function getTradeSymbols(): Promise<{ symbols: string[] }> {
 }
 
 // --- Analytics ---
+// SHAPES ARE THE API'S, NOT A GUESS. These interfaces used to declare
+// `totalTrades`/`winningTrades`/`totalPnL`/`period` and an `equity`/`balance`
+// curve point — none of which `/api/v1/analytics/*` returns. The dashboard read
+// the invented names through `??` fallbacks and rendered 0 / a flat zero line
+// with no error anywhere. The fields below mirror `SummaryMetrics`
+// (`packages/domain/src/metrics.ts`), `EquityPointView` and the by-symbol
+// projection in `apps/api/src/analytics`, and
+// `apps/web/src/lib/api/analyticsContract.test.ts` compares them against the
+// domain's real output so the two cannot drift again.
+//
+// Ratio and money fields are DECIMAL STRINGS at a fixed scale (ratios 4 dp,
+// money 2 dp, R 8 dp) — the scale is part of the wire contract, so they are
+// typed as strings and formatted, never parsed into money.
+
+/**
+ * The summary fields this client actually consumes, at runtime.
+ *
+ * `satisfies` ties every entry to the interface above (a typo or a removed field
+ * fails the build), and `analyticsContract.test.ts` compares this list with the
+ * keys the domain's `computeSummary` really returns — so the wire contract is
+ * checked against the implementation, not against a comment.
+ */
+export const ANALYTICS_SUMMARY_FIELDS = [
+  "tradeCount",
+  "wins",
+  "losses",
+  "breakeven",
+  "winRate",
+  "totalPnl",
+  "profitFactor",
+  "averageR",
+  "bestTrade",
+  "worstTrade",
+] as const satisfies readonly (keyof AnalyticsSummary)[];
+
+/** One strategy group inside `/analytics/summary`. */
+export interface AnalyticsStrategyRow extends AnalyticsSummary {
+  strategy: string;
+}
+
 export interface AnalyticsSummary {
-  totalTrades: number;
-  winningTrades: number;
-  losingTrades: number;
-  winRate: number;
-  profitFactor: number;
-  totalPnL: string;
-  avgWin: string;
-  avgLoss: string;
+  tradeCount: number;
+  wins: number;
+  losses: number;
+  breakeven: number;
+  /** Ratio, 4 dp decimal string ("0.5333"). */
+  winRate: string;
+  /** Money, 2 dp decimal string. */
+  totalPnl: string;
+  /** Ratio, 4 dp decimal string; null means "no losses but some profit" (infinite). */
+  profitFactor: string | null;
+  /** Ratio, 4 dp decimal string. */
+  averageR: string;
   bestTrade: string;
   worstTrade: string;
-  maxDrawdown: string;
-  sharpeRatio?: number;
-  period?: { from: string | null; to: string | null };
+  /** Present on `/analytics/summary`. */
+  byStrategy?: AnalyticsStrategyRow[];
+  window?: { from: string | null; to: string | null; accountId: string | null };
+}
+
+/** One cumulative point of `/analytics/equity-curve`. */
+export interface AnalyticsCurvePoint {
+  /** Calendar day (UTC) the P&L belongs to. */
+  day: string;
+  /** Cumulative net P&L from the start of the window, 2 dp decimal string. */
+  cumulativePnl: string;
+}
+
+/** One instrument group of `/analytics/by-symbol`. */
+export interface AnalyticsSymbolRow extends AnalyticsSummary {
+  symbol: string;
+}
+
+/** One weekday×hour bucket of `/analytics/heatmap`. */
+export interface AnalyticsHeatmapCell {
+  weekday: number;
+  hour: number;
+  metrics: AnalyticsSummary;
 }
 
 export function getAnalyticsSummary(params?: Record<string, string>): Promise<AnalyticsSummary> {
@@ -244,17 +308,17 @@ export function getAnalyticsSummary(params?: Record<string, string>): Promise<An
   return api.request(`/api/v1/analytics/summary${qs}`);
 }
 
-export function getEquityCurve(params?: Record<string, string>): Promise<{ points: Array<{ date: string; equity: string; balance: string }> }> {
+export function getEquityCurve(params?: Record<string, string>): Promise<{ points: AnalyticsCurvePoint[] }> {
   const qs = params ? "?" + new URLSearchParams(params).toString() : "";
   return api.request(`/api/v1/analytics/equity-curve${qs}`);
 }
 
-export function getHeatmap(params?: Record<string, string>): Promise<{ cells: Array<{ day: string; hour: number; pnl: string; count: number }> }> {
+export function getHeatmap(params?: Record<string, string>): Promise<{ cells: AnalyticsHeatmapCell[] }> {
   const qs = params ? "?" + new URLSearchParams(params).toString() : "";
   return api.request(`/api/v1/analytics/heatmap${qs}`);
 }
 
-export function getBySymbol(params?: Record<string, string>): Promise<{ symbols: Array<{ symbol: string; trades: number; pnl: string; winRate: number }> }> {
+export function getBySymbol(params?: Record<string, string>): Promise<{ symbols: AnalyticsSymbolRow[] }> {
   const qs = params ? "?" + new URLSearchParams(params).toString() : "";
   return api.request(`/api/v1/analytics/by-symbol${qs}`);
 }
