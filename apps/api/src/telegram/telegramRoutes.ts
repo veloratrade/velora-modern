@@ -33,6 +33,15 @@ import type { RateLimiter } from "../ratelimits/rateLimiter.js";
 import type { AuditStore } from "../auth/auditStore.js";
 
 /**
+ * The largest bytes accepted on the webhook ingress.
+ *
+ * 256 KiB is ~50x the largest plausible Telegram update and still small enough
+ * that a hostile caller holding the secret cannot make the process allocate
+ * meaningfully. Telegram's own Bot API caps `getUpdates` payloads far below this.
+ */
+export const TELEGRAM_WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
+
+/**
  * Everything the HTTP surface needs, assembled once in `server-main.ts`.
  *
  * `config` is a THUNK because the environment is read at call time: a rotated
@@ -113,7 +122,20 @@ async function handleWebhookIngress(ctx: ExtendedRouteContext): Promise<RouteRes
     return { status: 401, body: fail("UNAUTHENTICATED", "Unauthenticated.", ctx.requestId) };
   }
 
-  const raw = await ctx.readRawBody(ctx.req);
+  // A TIGHTER CAP THAN THE JSON DEFAULT, because a Telegram update is small by
+  // construction: the schema accepts a message, a caption and file REFERENCES,
+  // never file bytes. The kernel's 1 MiB default would let a caller who knows the
+  // secret make this process buffer far more than any real delivery ever contains.
+  // The response mirrors the kernel's own oversized-body contract (400 +
+  // VALIDATION_FAILED, `BodyParseError` mapping in kernel/server.ts) rather than
+  // inventing a new error code for one route.
+  let raw: Buffer;
+  try {
+    raw = await ctx.readRawBody(ctx.req, TELEGRAM_WEBHOOK_MAX_BODY_BYTES);
+  } catch (err) {
+    cap.log({ level: "warn", event: "telegram_webhook_body_rejected", requestId: ctx.requestId, code: err instanceof Error ? err.name : "UNKNOWN" });
+    return { status: 400, body: fail("VALIDATION_FAILED", "request body too large", ctx.requestId) };
+  }
   const result = await cap.pipeline.acceptDeferred(raw, "webhook");
   switch (result.status) {
     case "accepted":

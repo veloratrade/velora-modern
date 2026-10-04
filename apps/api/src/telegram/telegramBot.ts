@@ -27,6 +27,7 @@ import {
   buildCallbackData,
   classifyUpdate,
   parseCallbackData,
+  type RateLimitKey,
   type TelegramCallbackQuery,
   type TelegramMessage,
   type TelegramUpdate,
@@ -36,7 +37,7 @@ import { clamp, copyFor, esc, labelForField, renderDraft, renderTrade, type Loca
 import type { JournalAnalysisService } from "../journal/journalAnalysisService.js";
 import type { AttachmentService } from "../attachments/attachmentService.js";
 import type { AiAttemptStore } from "../aicoach/aiProvider.js";
-import type { InlineKeyboardButton, TelegramBotApi } from "./telegramApi.js";
+import { TELEGRAM_MAX_DOWNLOAD_BYTES, type InlineKeyboardButton, type TelegramBotApi } from "./telegramApi.js";
 import { interpretImageAndRecord, transcribeAndRecord, type MediaInterpreter } from "../aicoach/mediaInterpreter.js";
 import type { RateLimiter } from "../ratelimits/rateLimiter.js";
 import type { TelegramChannelRecord, TelegramDraftKind, TelegramStore } from "./telegramStore.js";
@@ -186,7 +187,7 @@ export class TelegramBot {
     if (matchesCommand(text, "settings")) return this.sendSettings(chatId, userId, locale);
     if (matchesCommand(text, "last")) return this.sendLast(chatId, userId, locale);
     if (matchesCommand(text, "history")) return this.sendHistory(chatId, userId, locale, 1);
-    if (matchesCommand(text, "analyze")) return this.sendAnalysis(chatId, userId, locale);
+    if (matchesCommand(text, "analyze")) return this.sendAnalysis(chatId, userId, tgId, locale);
     if (matchesCommand(text, "channel")) return this.handleChannelCommand(text, userId, chatId, locale);
     if (matchesCommand(text, "journal")) {
       await this.safeSend(chatId, copy.journalPrompt);
@@ -216,6 +217,9 @@ export class TelegramBot {
       await this.safeSend(chatId, copy.journalNoData);
       return "handled";
     }
+    // Budget checked before the draft row exists: a throttled user gets one
+    // sentence, and the pending draft (if any) is left exactly as it was.
+    if (!(await this.withinJournalBudget(chatId, tgId, locale))) return "rejected";
     return this.openDraft(userId, tgId, chatId, String(message.message_id), text, "TEXT", null, {}, locale);
   }
 
@@ -398,7 +402,7 @@ export class TelegramBot {
         case "history":
           return this.sendHistory(chatId, userId, locale, 1);
         case "analyze":
-          return this.sendAnalysis(chatId, userId, locale);
+          return this.sendAnalysis(chatId, userId, tgId, locale);
         case "settings":
           return this.sendSettings(chatId, userId, locale);
         default:
@@ -505,6 +509,9 @@ export class TelegramBot {
     const copy = copyFor(locale);
     const voice = message.voice ?? message.audio;
     if (voice === undefined) return this.sendMenu(chatId, userId, locale);
+    // BEFORE the download and before the provider call: a voice note costs both,
+    // and a throttled user must not be able to spend them.
+    if (!(await this.withinJournalBudget(chatId, tgId, locale))) return "rejected";
     await this.safeSend(chatId, copy.voiceWorking);
 
     const bytes = await this.fetchBytes(voice.file_id);
@@ -544,6 +551,8 @@ export class TelegramBot {
     // Telegram sends several renditions; the largest is the most readable and is
     // the one a chart screenshot needs.
     const largest = photos.reduce((best, candidate) => ((candidate.file_size ?? 0) >= (best.file_size ?? 0) ? candidate : best), photos[0]!);
+    // BEFORE the download and the vision call: same reasoning as voice.
+    if (!(await this.withinJournalBudget(chatId, tgId, locale))) return "rejected";
 
     const bytes = await this.fetchBytes(largest.file_id);
     if (!bytes.ok) {
@@ -590,6 +599,15 @@ export class TelegramBot {
   private async fetchBytes(fileId: string): Promise<{ ok: true; bytes: Buffer } | { ok: false; code: string }> {
     try {
       const file = await this.deps.api.getFile(fileId);
+      // BOUNDED TWICE, IN THIS ORDER. `getFile` reports the size Telegram believes
+      // the file has; refusing on that claim FIRST means an oversized voice note or
+      // screenshot costs no bandwidth and no memory. The API layer then re-checks
+      // the bytes actually received, because the declared size is a claim rather
+      // than a guarantee — and it refuses rather than truncating, since a truncated
+      // screenshot would be stored as a silently corrupt attachment.
+      if (file.fileSizeBytes !== null && file.fileSizeBytes > TELEGRAM_MAX_DOWNLOAD_BYTES) {
+        return { ok: false, code: "FILE_TOO_LARGE" };
+      }
       if (file.filePath === null) return { ok: false, code: "FILE_NOT_FOUND" };
       return { ok: true, bytes: await this.deps.api.downloadFile(file.filePath) };
     } catch (err) {
@@ -757,8 +775,13 @@ export class TelegramBot {
     return "handled";
   }
 
-  private async sendAnalysis(chatId: string, userId: string, locale: Locale | null): Promise<UpdateOutcome> {
+  private async sendAnalysis(chatId: string, userId: string, tgId: string, locale: Locale | null): Promise<UpdateOutcome> {
     const copy = copyFor(locale);
+    // Before the "working…" message and before any model call: an analysis is the
+    // single most expensive thing the bot does, and the limit must be visible in
+    // what the user sees rather than hidden behind a spinner. The bucket is the
+    // TELEGRAM identity (passed in by the caller), never the Velora user id.
+    if (!(await this.withinAnalyzeBudget(chatId, tgId, locale))) return "rejected";
     await this.safeSend(chatId, copy.analyzeWorking);
     const result = await this.deps.analysis.analyze(userId);
     if (result.status !== "ok") {
@@ -801,17 +824,46 @@ export class TelegramBot {
    * the Telegram user id as the bucket discriminator (a bot has no meaningful
    * client IP). Unlinked identities are limited too: onboarding must not become
    * a way to make the server do unbounded work.
+   *
+   * EVERY DECLARED `telegram:*` KEY IS WIRED SOMEWHERE, and this method is how the
+   * expensive bot flows are covered: `telegram:update` bounds all traffic,
+   * `telegram:journal` bounds draft creation and `telegram:analyze` bounds model
+   * calls. A limit that exists only in the contracts table and in the security
+   * documentation is not a control — it is a claim — so each key below has a call
+   * site, and `telegramBot.test.ts` asserts each one actually refuses.
    */
-  private async allowed(tgId: string): Promise<boolean> {
+  private async allowed(tgId: string, key: RateLimitKey = "telegram:update"): Promise<boolean> {
     const limiter = this.deps.limiter;
     if (limiter === undefined) return true;
     try {
-      return (await limiter.hit("telegram:update", `tg:${tgId}`)).allowed;
+      return (await limiter.hit(key, `tg:${tgId}`)).allowed;
     } catch {
       // A limiter-store outage must not take the bot down: failing closed on
       // every message would be worse than a short unthrottled window.
       return true;
     }
+  }
+
+  /**
+   * Refuse a journal-creating action the user has no budget for, BEFORE anything
+   * expensive happens.
+   *
+   * The ordering is the point. A voice note or a screenshot costs a provider call
+   * and a download; checking the limit after them would let a throttled user keep
+   * spending real money while being told to slow down. The caller checks this
+   * first, and returns "rejected" without creating a draft row.
+   */
+  private async withinJournalBudget(chatId: string, tgId: string, locale: Locale | null): Promise<boolean> {
+    if (await this.allowed(tgId, "telegram:journal")) return true;
+    await this.safeSend(chatId, copyFor(locale).rateLimited);
+    return false;
+  }
+
+  /** The analysis counterpart: a model call must not be reachable in a loop. */
+  private async withinAnalyzeBudget(chatId: string, tgId: string, locale: Locale | null): Promise<boolean> {
+    if (await this.allowed(tgId, "telegram:analyze")) return true;
+    await this.safeSend(chatId, copyFor(locale).rateLimited);
+    return false;
   }
 
   private async localeOrNull(telegramUserId: number | null): Promise<Locale | null> {

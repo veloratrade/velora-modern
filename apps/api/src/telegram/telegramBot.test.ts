@@ -24,7 +24,10 @@ import { MemoryTelegramStore } from "./memoryTelegramStore.js";
 import { TelegramBot, type TelegramBotDeps } from "./telegramBot.js";
 import { TelegramLinkService } from "./telegramLinkService.js";
 import type { InlineKeyboardButton, SentMessageOptions, TelegramBotApi } from "./telegramApi.js";
-import type { TelegramUpdate } from "@velora/contracts";
+import type { RateLimitKey, TelegramUpdate } from "@velora/contracts";
+import type { RateLimitDecision } from "@velora/domain";
+import type { RateLimiter } from "../ratelimits/rateLimiter.js";
+import { TELEGRAM_MAX_DOWNLOAD_BYTES } from "./telegramApi.js";
 
 // ── The two fakes ───────────────────────────────────────────────────────────
 
@@ -40,6 +43,8 @@ class FakeBotApi implements TelegramBotApi {
   readonly downloads: string[] = [];
   failingSend = false;
   fileBytes: Buffer = Buffer.from("voice-bytes");
+  /** `getFile`'s claim. Null ⇒ the true length; set it to make the claim a lie. */
+  declaredSizeBytes: number | null = null;
   /** Overridable per test: the bot's permission verdict comes from Telegram. */
   memberResult: { status: "creator" | "administrator" | "member" | "restricted" | "left" | "kicked"; canPostMessages: boolean } = {
     status: "administrator",
@@ -54,10 +59,17 @@ class FakeBotApi implements TelegramBotApi {
   }
   async answerCallbackQuery(): Promise<void> {}
   async getFile(fileId: string) {
-    return { fileId, filePath: `path/${fileId}`, fileSizeBytes: this.fileBytes.length };
+    return { fileId, filePath: `path/${fileId}`, fileSizeBytes: this.declaredSizeBytes ?? this.fileBytes.length };
   }
   async downloadFile(filePath: string): Promise<Buffer> {
     this.downloads.push(filePath);
+    // Mirrors HttpTelegramBotApi.downloadFile: the received bytes are measured
+    // and an oversized body THROWS (FILE_TOO_LARGE) rather than being truncated.
+    // Without this the fake would hand back more bytes than production ever
+    // would, and the "declared size lied" test would prove nothing.
+    if (this.fileBytes.length > TELEGRAM_MAX_DOWNLOAD_BYTES) {
+      throw Object.assign(new Error("file too large"), { code: "FILE_TOO_LARGE" });
+    }
     return this.fileBytes;
   }
   async getChat(chatId: string) {
@@ -87,7 +99,7 @@ class FakeBotApi implements TelegramBotApi {
   }
 }
 
-function makeBot(options: { now?: () => Date } = {}): {
+function makeBot(options: { now?: () => Date; limiter?: RateLimiter } = {}): {
   bot: TelegramBot;
   api: FakeBotApi;
   store: MemoryTelegramStore;
@@ -134,6 +146,7 @@ function makeBot(options: { now?: () => Date } = {}): {
     appUrl: () => "https://app.velora.example",
     getUserLocale: async () => "fa",
     log: () => undefined,
+    ...(options.limiter === undefined ? {} : { limiter: options.limiter }),
     ...(options.now === undefined ? {} : { now: options.now }),
   };
   return { bot: new TelegramBot(deps), api, store, audit, links, trades, journal };
@@ -481,4 +494,119 @@ test("edited messages and channel posts are recognised but never acted on", asyn
   };
   assert.equal(await bot.handleUpdate(post), "ignored");
   assert.equal(store.drafts.length, 0);
+});
+
+
+// ── Rate-limit wiring (security audit) ──────────────────────────────────────
+//
+// EVERY `telegram:*` key declared in `packages/contracts/src/auth.ts` and claimed
+// in `docs/telegram/SECURITY.md` must have a call site: a limit that exists only
+// in a table is a claim, not a control. Each test below exhausts ONE key and then
+// asserts both the refusal AND that the expensive work behind it never ran — no
+// download, no provider call, no draft row — because a limit checked after the
+// spending is not a limit.
+
+/** Refuses exactly the keys named, records every key it is asked about. */
+class SelectiveLimiter implements RateLimiter {
+  readonly asked: { readonly key: RateLimitKey; readonly bucket: string }[] = [];
+  constructor(private readonly refuse: readonly RateLimitKey[]) {}
+  async hit(routeKey: RateLimitKey, bucket: string): Promise<RateLimitDecision> {
+    this.asked.push({ key: routeKey, bucket });
+    return this.refuse.includes(routeKey) ? { allowed: false, retryAfterSec: 60 } : { allowed: true };
+  }
+  keys(): string[] {
+    return [...new Set(this.asked.map((a) => a.key))];
+  }
+  bucketFor(key: string): string | undefined {
+    return this.asked.find((a) => a.key === key)?.bucket;
+  }
+}
+
+function voiceUpdate(updateId: number, fromId = 555): TelegramUpdate {
+  return {
+    update_id: updateId,
+    message: {
+      message_id: updateId * 10,
+      from: { id: fromId, username: "trader" },
+      chat: { id: fromId, type: "private" },
+      date: 1_770_000_000,
+      voice: { file_id: `voice-${updateId}`, duration: 7, mime_type: "audio/ogg" },
+    },
+  };
+}
+
+test("the limiter is keyed by the TELEGRAM identity, not the Velora user id", async () => {
+  const limiter = new SelectiveLimiter([]);
+  const { bot, links } = makeBot({ limiter });
+  await linkAccount(links, "velora-user-77", "9090");
+
+  await bot.handleUpdate(messageUpdate(10, "سلام", 9090));
+  assert.equal(limiter.bucketFor("telegram:update"), "tg:9090", "the bucket must be the Telegram id, or two chats share one budget");
+});
+
+test("an exhausted journal budget refuses a VOICE note BEFORE the download", async () => {
+  const limiter = new SelectiveLimiter(["telegram:journal"]);
+  const { bot, api, store, links } = makeBot({ limiter });
+  await linkAccount(links);
+
+  const outcome = await bot.handleUpdate(voiceUpdate(20));
+  assert.equal(outcome, "rejected");
+  assert.deepEqual(api.downloads, [], "a throttled voice note must not be downloaded at all");
+  assert.equal(store.drafts.length, 0, "and it must not open a draft row");
+  assert.ok(limiter.keys().includes("telegram:journal"));
+  // The refusal is the honest rate-limit message, not a generic failure.
+  assert.ok(api.texts.some((t) => /کمی بعد|محدود|بعداً|rate|limit/i.test(t)), `expected a rate-limit notice, got: ${JSON.stringify(api.texts)}`);
+});
+
+test("an exhausted journal budget refuses a TEXT journal without a draft, while /history still works", async () => {
+  const limiter = new SelectiveLimiter(["telegram:journal"]);
+  const { bot, api, store, links } = makeBot({ limiter });
+  await linkAccount(links);
+
+  const outcome = await bot.handleUpdate(messageUpdate(30, COMPLETE_FA));
+  assert.equal(outcome, "rejected");
+  assert.equal(store.drafts.length, 0, "the parser ran, but no row was written");
+
+  // Reading is not spending: the limit bounds journal creation, not the product.
+  assert.equal(await bot.handleUpdate(commandUpdate(31, "/history")), "handled");
+  assert.ok(!limiter.keys().includes("telegram:analyze"), "…and no unrelated key was consulted");
+});
+
+test("an exhausted analyze budget refuses /analyze BEFORE the model call", async () => {
+  const limiter = new SelectiveLimiter(["telegram:analyze"]);
+  const { bot, api, store, links } = makeBot({ limiter });
+  await linkAccount(links);
+  await bot.handleUpdate(messageUpdate(40, COMPLETE_FA));
+  await bot.handleUpdate(callbackUpdate(41, `confirm:${store.drafts[0]!.id}`));
+  await bot.handleUpdate(commandUpdate(42, "/analyze"));
+  assert.ok(limiter.keys().includes("telegram:analyze"), "the analyze key was consulted");
+  // With no provider configured the flow would have said "analysis is disabled";
+  // the budget refusal comes first, so the user is told to wait, not that the
+  // feature is missing.
+  assert.ok(api.texts.some((t) => /کمی بعد|محدود|rate|limit/i.test(t)), `expected a rate-limit notice, got: ${JSON.stringify(api.texts)}`);
+  assert.ok(!api.texts.some((t) => t.includes("غیرفعال")), "the refusal must not masquerade as 'not configured'");
+});
+
+test("an oversized media file is refused on telegram's DECLARED size, before the download", async () => {
+  const { bot, api, links } = makeBot();
+  await linkAccount(links);
+  api.fileBytes = Buffer.alloc(64); // the bytes are small…
+  api.declaredSizeBytes = TELEGRAM_MAX_DOWNLOAD_BYTES + 1; // …but Telegram declares it oversized
+
+  const outcome = await bot.handleUpdate(voiceUpdate(50));
+  assert.equal(outcome, "handled");
+  assert.deepEqual(api.downloads, [], "the download must never start on an oversized declaration");
+  assert.ok(api.texts.some((t) => /حجم|بزرگ/i.test(t)), `expected the too-large notice, got: ${JSON.stringify(api.texts)}`);
+});
+
+test("a file that lies about its size is still caught AFTER the download", async () => {
+  const { bot, api, links } = makeBot();
+  await linkAccount(links);
+  api.declaredSizeBytes = 64; // Telegram claims it is tiny…
+  api.fileBytes = Buffer.alloc(TELEGRAM_MAX_DOWNLOAD_BYTES + 1, 1); // …the bytes are not
+
+  const outcome = await bot.handleUpdate(voiceUpdate(51));
+  assert.equal(outcome, "handled");
+  assert.deepEqual(api.downloads, ["path/voice-51"], "the download was attempted (the claim looked fine)");
+  assert.ok(api.texts.some((t) => /حجم|بزرگ/i.test(t)), "but the bytes were measured and refused, not truncated");
 });

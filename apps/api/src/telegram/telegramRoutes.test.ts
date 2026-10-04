@@ -32,7 +32,7 @@ import { TelegramBot } from "./telegramBot.js";
 import { TelegramLinkService } from "./telegramLinkService.js";
 import { TelegramUpdatePipeline } from "./telegramUpdatePipeline.js";
 import { resolveTelegramConfig } from "./telegramConfig.js";
-import type { TelegramCapability } from "./telegramRoutes.js";
+import { TELEGRAM_WEBHOOK_MAX_BODY_BYTES, type TelegramCapability } from "./telegramRoutes.js";
 import type { TelegramBotApi } from "./telegramApi.js";
 import type { TelegramUpdate } from "@velora/contracts";
 
@@ -275,6 +275,20 @@ test("WEBHOOK: an authenticated delivery is accepted, and a GET is a 405 with Al
       body: JSON.stringify({ hello: "world" }),
     });
     assert.equal(schemaMismatch.status, 400);
+
+    // An oversized body is refused BY THE BYTES, with the platform's own
+    // oversized-body contract (400 + VALIDATION_FAILED), and it never reaches the
+    // pipeline: no claim, no draft, no send. A Telegram update is a message plus
+    // file REFERENCES, so a megabyte of JSON is not a delivery mistake.
+    const oversized = await fetch(`${base}/api/v1/webhooks/telegram`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Telegram-Bot-Api-Secret-Token": WEBHOOK_SECRET },
+      body: JSON.stringify({ update_id: 6, padding: "x".repeat(TELEGRAM_WEBHOOK_MAX_BODY_BYTES) }),
+    });
+    assert.equal(oversized.status, 400);
+    assert.equal(((await oversized.json()) as Envelope).error?.code, "VALIDATION_FAILED");
+    assert.equal(store.updates.size, 0, "an oversized body must not claim an update");
+    assert.equal(api.sent.length, 0);
 
     const ok = await fetch(`${base}/api/v1/webhooks/telegram`, {
       method: "POST",

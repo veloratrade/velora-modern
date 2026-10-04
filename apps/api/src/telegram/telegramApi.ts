@@ -216,11 +216,15 @@ export class HttpTelegramBotApi implements TelegramBotApi {
   /**
    * Download a file's bytes.
    *
-   * BOUNDED TWICE: the declared size is checked before the request, and the
-   * received body is checked after it, because the declared size is a claim by
-   * Telegram rather than a guarantee about the bytes on the wire. Anything over
-   * the cap is refused rather than truncated — a truncated screenshot would be
-   * silently stored as a corrupt attachment.
+   * THE GUARANTEE THIS METHOD OWNS is the POST-check: the bytes actually received
+   * are measured, and anything over `maxBytes` is refused rather than truncated —
+   * a truncated screenshot would be stored as a silent, corrupt attachment. After
+   * the response buffer exists there is nothing left to bound, which is why the
+   * size Telegram DECLARES (`getFile().file_size`, read before the request) is
+   * enforced by the CALLER: `telegramBot.fetchBytes` refuses on the declared size
+   * first, so an oversized file normally costs no download at all. Neither check
+   * replaces the other, and this method cannot perform the early one because the
+   * declaration does not travel with `filePath`.
    */
   async downloadFile(filePath: string, maxBytes: number = TELEGRAM_MAX_DOWNLOAD_BYTES): Promise<Buffer> {
     let response: Awaited<ReturnType<FetchLike>>;
