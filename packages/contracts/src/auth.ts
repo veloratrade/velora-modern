@@ -66,5 +66,19 @@ export const RATE_LIMIT_DEFAULTS = {
   "auth:reset-password": { limit: 6, windowSec: 3600 },
   "auth:change-password": { limit: 8, windowSec: 900 },
   "trades:extract-screenshot": { limit: 8, windowSec: 300 },
+  // --- Telegram client (ADR-018) --------------------------------------------
+  // MODERN-ONLY VALUES: these have no PHP lineage, because the Telegram client
+  // has no PHP lineage. They are deliberately conservative per-identity limits
+  // (the bucket discriminator is the Telegram user id, not an IP — a bot has no
+  // meaningful client IP). See docs/telegram/SECURITY.md §rate limiting.
+  //
+  // "trades:extract-screenshot" above is REUSED for the Telegram image path: it
+  // is the same product operation (screenshot → candidate fields), and inventing
+  // a second key for it would let the two limits drift apart.
+  "telegram:link-start": { limit: 5, windowSec: 3600 },
+  "telegram:update": { limit: 60, windowSec: 60 },
+  "telegram:journal": { limit: 20, windowSec: 3600 },
+  "telegram:analyze": { limit: 8, windowSec: 3600 },
+  "telegram:channel": { limit: 10, windowSec: 3600 },
 } as const;
 export type RateLimitKey = keyof typeof RATE_LIMIT_DEFAULTS;
