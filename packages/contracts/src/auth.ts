@@ -65,6 +65,37 @@ export const RATE_LIMIT_DEFAULTS = {
   "auth:forgot-password": { limit: 4, windowSec: 3600 },
   "auth:reset-password": { limit: 6, windowSec: 3600 },
   "auth:change-password": { limit: 8, windowSec: 900 },
+  // --- Broker/provider-touching routes (SEC-02, step 2) ---------------------
+  // PHP dispatch-level limits for the routes whose work leaves the process or
+  // verifies broker credentials. Keys are the product operations, not the
+  // Modern paths: `metaapi-connect` is Modern's
+  // POST /accounts/{id}/metaapi/connect (the provisioning call that verifies a
+  // broker login against MetaAPI), `metaapi-detect` is /accounts/detect-server
+  // (same value), and the ingress limit is the webhook receiver. Legacy's own
+  // names are kept in the key text so the lineage stays searchable.
+  //
+  // Legacy ALSO throttled POST /accounts/{id}/sync at 20/300; Modern has no
+  // user-triggered sync route yet (sync-status is a read), so no key is
+  // declared for it — an unused key would be an untested number pretending to
+  // be a guarantee.
+  "accounts:metaapi-connect": { limit: 5, windowSec: 900 },
+  "accounts:detect-server": { limit: 20, windowSec: 900 },
+  "webhooks:metaapi": { limit: 120, windowSec: 60 },
+  // Legacy also throttled its two admin USER MUTATIONS (`admin-user-action`,
+  // 30/300, in Admin/UserManagementController::setStatus + setRole). Modern has
+  // exactly those two operations (PATCH .../role and .../status), so the same
+  // number covers the same surface; the limit is per caller, keyed like every
+  // other bucket here (see throttleKeyFor's caller for the discriminator).
+  //
+  // NOT covered, deliberately: Legacy's remaining buckets guard surfaces Modern
+  // does not have yet — `ai-analyze` / `ai-report` / `ai-feedback` (both the
+  // dispatcher IP limits and AIController's per-USER `ai-*-user-{id}` limits)
+  // belong to the AI phase, `metaapi-sync` guards POST /accounts/{id}/sync which
+  // Modern has no route for, and the `admin-*` controller buckets (config,
+  // feature flags, integrations, settings, health refresh, user create/invite)
+  // guard admin surfaces owned by the admin phase. Each lands WITH its route, so
+  // no key here ever describes a route that does not exist.
+  "admin:user-action": { limit: 30, windowSec: 300 },
   "trades:extract-screenshot": { limit: 8, windowSec: 300 },
   // --- Telegram client (ADR-018) --------------------------------------------
   // MODERN-ONLY VALUES: these have no PHP lineage, because the Telegram client

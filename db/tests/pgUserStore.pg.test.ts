@@ -133,13 +133,33 @@ test("PG: sessions — create, find by refresh hash, rotate, revoke, revoke-all"
     assert.notEqual(found, null);
     assert.equal(found!.id, s1.id);
 
-    await h.store.rotateSession(s1.id, {
-      refreshTokenHash: "rt-2", accessTokenHash: "at-2",
-      ipAddress: null, userAgent: null, expiresAt: T2,
-    });
+    // SEC-04: the rotation is a compare-and-swap against the hash the caller
+    // read. The right expectation wins; a stale one is a NO-OP that reports false.
+    assert.equal(
+      await h.store.rotateSession(
+        s1.id,
+        { refreshTokenHash: "rt-2", accessTokenHash: "at-2", ipAddress: null, userAgent: null, expiresAt: T2 },
+        "rt-1",
+      ),
+      true,
+      "the caller that read the current hash performs the rotation",
+    );
     assert.equal(await h.store.findSessionByRefreshTokenHash("rt-1"), null, "old refresh hash gone after rotation");
     const rotated = await h.store.findSessionByRefreshTokenHash("rt-2");
     assert.notEqual(rotated, null);
+
+    // The race: a second caller presenting the SAME (now stale) expectation must
+    // not be able to rotate the session a second time.
+    assert.equal(
+      await h.store.rotateSession(
+        s1.id,
+        { refreshTokenHash: "rt-2b", accessTokenHash: "at-2b", ipAddress: null, userAgent: null, expiresAt: T2 },
+        "rt-1",
+      ),
+      false,
+      "a stale expectation must not overwrite the winner's rotation",
+    );
+    assert.notEqual(await h.store.findSessionByRefreshTokenHash("rt-2"), null, "the winner's token is intact");
 
     await h.store.createSession({
       userId: u.id, refreshTokenHash: "rt-3", accessTokenHash: "at-3",

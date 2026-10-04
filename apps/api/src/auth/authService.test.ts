@@ -446,3 +446,85 @@ test("locale provenance: registration that carries a locale records source 'user
   assert.equal(user.localeSource, "user");
   assert.notEqual(user.localeUpdatedAt, null);
 });
+
+// --- SEC-04: the read-only edge session probe --------------------------------
+// The probe exists so the HTML edge can ask "is this a live session?" without
+// rotating the caller's token. These tests pin the READ-ONLY property, because a
+// probe that rotated (or revoked, or recorded) would be a silent behavior change
+// for every signed-in user on every page view.
+
+test("SEC-04 sessionProbe: no cookie, unknown token → unauthenticated (no throw, no reason)", async () => {
+  const h = makeService();
+  assert.deepEqual(await h.service.sessionProbe(""), { authenticated: false });
+  assert.deepEqual(await h.service.sessionProbe("not-a-real-refresh-token"), { authenticated: false });
+});
+
+test("SEC-04 sessionProbe: a live session reports authenticated + the caller's OWN role", async () => {
+  const h = makeService();
+  await registerVerifiedUser(h, "probe@velora.example", "a-strong-password-123");
+  const pair = await h.service.login({ email: "probe@velora.example", password: "a-strong-password-123" });
+  assert.deepEqual(await h.service.sessionProbe(pair.refreshToken), { authenticated: true, role: "user" });
+});
+
+test("SEC-04 sessionProbe is READ-ONLY: the token survives, the session is not rotated", async () => {
+  const h = makeService();
+  await registerVerifiedUser(h, "readonly@velora.example", "a-strong-password-123");
+  const pair = await h.service.login({ email: "readonly@velora.example", password: "a-strong-password-123" });
+
+  for (let i = 0; i < 5; i++) {
+    assert.deepEqual(await h.service.sessionProbe(pair.refreshToken), { authenticated: true, role: "user" });
+  }
+  // The strongest statement: the ORIGINAL token is still usable for a real
+  // refresh afterwards. A probe that consumed or rotated it would make this
+  // reject with INVALID_TOKEN.
+  const rotated = await h.service.refresh(pair.refreshToken);
+  assert.ok(rotated.refreshToken.length > 0);
+  assert.notEqual(rotated.refreshToken, pair.refreshToken, "the real refresh still rotates");
+});
+
+test("SEC-04 sessionProbe: revoked, expired and inactive all read as unauthenticated", async () => {
+  let clock = new Date("2026-09-12T10:00:00Z");
+  const h = makeService({ now: () => clock });
+
+  // revoked (logout)
+  await registerVerifiedUser(h, "revoked@velora.example", "a-strong-password-123");
+  const revoked = await h.service.login({ email: "revoked@velora.example", password: "a-strong-password-123" });
+  await h.service.logout(revoked.refreshToken);
+  assert.deepEqual(await h.service.sessionProbe(revoked.refreshToken), { authenticated: false });
+
+  // expired (30-day refresh TTL)
+  await registerVerifiedUser(h, "expired@velora.example", "a-strong-password-123");
+  const expired = await h.service.login({ email: "expired@velora.example", password: "a-strong-password-123" });
+  clock = new Date("2026-11-01T10:00:00Z");
+  assert.deepEqual(await h.service.sessionProbe(expired.refreshToken), { authenticated: false });
+
+  // deactivated account, live session
+  clock = new Date("2026-11-02T10:00:00Z");
+  await registerVerifiedUser(h, "inactive@velora.example", "a-strong-password-123");
+  const inactive = await h.service.login({ email: "inactive@velora.example", password: "a-strong-password-123" });
+  const user = await h.store.findUserByEmail("inactive@velora.example");
+  await h.store.updateUserStatus(user!.id, "suspended", clock);
+  assert.deepEqual(await h.service.sessionProbe(inactive.refreshToken), { authenticated: false });
+});
+
+test("SEC-04 sessionProbe: refresh() still names its refusal reasons (the refactor kept the contract)", async () => {
+  // sessionState() is shared by refresh() and the probe; the public codes are
+  // the auth contract, so the mapping must stay exact.
+  let clock = new Date("2026-09-12T10:00:00Z");
+  const h = makeService({ now: () => clock });
+  await assert.rejects(
+    h.service.refresh(""),
+    (e: unknown) => e instanceof AuthError && e.code === "REFRESH_COOKIE_MISSING",
+  );
+  await assert.rejects(
+    h.service.refresh("bogus"),
+    (e: unknown) => e instanceof AuthError && e.code === "INVALID_TOKEN",
+  );
+  await registerVerifiedUser(h, "codes@velora.example", "a-strong-password-123");
+  const pair = await h.service.login({ email: "codes@velora.example", password: "a-strong-password-123" });
+  clock = new Date("2026-11-01T10:00:00Z");
+  await assert.rejects(
+    h.service.refresh(pair.refreshToken),
+    (e: unknown) => e instanceof AuthError && e.code === "SESSION_EXPIRED",
+  );
+});

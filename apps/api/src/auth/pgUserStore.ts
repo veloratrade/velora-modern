@@ -277,13 +277,30 @@ export class PgUserStore implements UserStore {
       userAgent: string | null;
       expiresAt: Date;
     },
-  ): Promise<void> {
-    await this.q(
+    expectedRefreshTokenHash: string,
+  ): Promise<boolean> {
+    // SEC-04 compare-and-swap: the WHERE clause carries the token the caller
+    // read, so concurrent rotations of the same token cannot both commit. This
+    // is a single statement, so the compare and the write are never interleaved
+    // with another transaction's rotation.
+    // RETURNING (not rowCount) because the house QueryFn exposes rows only: an
+    // UPDATE that matched nothing returns zero rows, which IS the CAS verdict.
+    const rows = await this.q(
       `UPDATE user_sessions
        SET refresh_token_hash = $1, access_token_hash = $2, ip_address = $3, user_agent = $4, expires_at = $5
-       WHERE id = $6`,
-      [input.refreshTokenHash, input.accessTokenHash, input.ipAddress, input.userAgent, input.expiresAt, id],
+       WHERE id = $6 AND refresh_token_hash = $7
+       RETURNING id`,
+      [
+        input.refreshTokenHash,
+        input.accessTokenHash,
+        input.ipAddress,
+        input.userAgent,
+        input.expiresAt,
+        id,
+        expectedRefreshTokenHash,
+      ],
     );
+    return rows.length === 1;
   }
 
   async revokeSession(id: string, revokedAt: Date): Promise<void> {

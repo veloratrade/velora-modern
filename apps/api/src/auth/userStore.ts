@@ -153,6 +153,19 @@ export interface UserStore {
     createdAt: Date;
   }): Promise<SessionRecord>;
   findSessionByRefreshTokenHash(refreshTokenHash: string): Promise<SessionRecord | null>;
+  /**
+   * SEC-04 — rotate a session, ATOMICALLY.
+   *
+   * `expectedRefreshTokenHash` is the hash this caller READ; the rotation only
+   * applies if the stored hash is still that value, otherwise it is a no-op and
+   * the call reports `false`.
+   *
+   * WHY: the previous contract ("UPDATE … WHERE id = $id") let two concurrent
+   * refreshes of the SAME token both succeed — both callers received a fresh
+   * pair, but the row kept only the last writer's hash, so the other caller's
+   * brand-new refresh token was dead on arrival. A compare-and-swap makes the
+   * race detectable at the moment it happens instead of one request later.
+   */
   rotateSession(
     id: string,
     input: {
@@ -162,7 +175,8 @@ export interface UserStore {
       userAgent: string | null;
       expiresAt: Date;
     },
-  ): Promise<void>;
+    expectedRefreshTokenHash: string,
+  ): Promise<boolean>;
   revokeSession(id: string, revokedAt: Date): Promise<void>;
   /** Revoke ALL active sessions of a user (change-password; both lineages). */
   revokeAllSessionsForUser(userId: string, revokedAt: Date): Promise<void>;

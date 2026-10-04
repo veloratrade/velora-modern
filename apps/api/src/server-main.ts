@@ -24,6 +24,9 @@ import { JwtService } from "./auth/jwt.js";
 import { VeloraHasher } from "./auth/hashing.js";
 import { MemoryUserStore } from "./auth/memoryUserStore.js";
 import { PgUserStore } from "./auth/pgUserStore.js";
+import { PgAuthEventStore } from "./auth/pgAuthEventStore.js";
+import { MemoryAuthEventStore } from "./auth/memoryAuthEventStore.js";
+import type { AuthEventStore } from "./auth/authEventStore.js";
 import { AccountService } from "./accounts/accountService.js";
 import { MemoryAccountStore } from "./accounts/memoryAccountStore.js";
 import { PgAccountStore } from "./accounts/pgAccountStore.js";
@@ -151,6 +154,11 @@ async function main(): Promise<void> {
     });
   }
   const userStore = pool !== undefined ? new PgUserStore(pool) : new MemoryUserStore();
+  // SEC-03 — authentication-attempt history. Same posture as every other store:
+  // the real adapter on the PostgreSQL posture, the in-memory one otherwise, so
+  // dev and PG cannot diverge in behaviour.
+  const authEventStore: AuthEventStore =
+    pool !== undefined ? new PgAuthEventStore(pool) : new MemoryAuthEventStore();
   const accountStore = pool !== undefined ? new PgAccountStore(pool) : new MemoryAccountStore();
   // v2.5 COPY TRADING — the producer half of the dispatch pipeline.
   //
@@ -203,6 +211,8 @@ async function main(): Promise<void> {
     accounts?: AccountService;
     trades?: TradeService;
     adminUsers?: AdminUserService;
+    /** SEC-03 — authentication-attempt history (read surface + recorder). */
+    authEvents?: AuthEventStore;
     ownership?: OwnershipService;
     credentials?: CredentialService;
     provisioning?: MetaApiProvisioningService;
@@ -230,6 +240,7 @@ async function main(): Promise<void> {
       hasher: new VeloraHasher(),
       jwt: JwtService.create(boot.jwtSecret),
       mail,
+      authEvents: authEventStore,
       // Verification/reset links must point at this environment's validated
       // origin (ADR-013); boot already guarantees it is present and canonical.
       appOrigin: boot.appOrigin,
@@ -267,6 +278,10 @@ async function main(): Promise<void> {
       getSystemOwnerUserId: async () => (await ownershipStore.getOwnership())?.ownerUserId ?? null,
       audit: auditStore,
     });
+    // SEC-03: the login-history read surface. Wired ONLY here (inside the
+    // auth-configured branch) so a deployment without authentication cannot
+    // expose an authentication-history endpoint.
+    capabilities.authEvents = authEventStore;
 
     // C-22 encrypted credential store. FAIL-CLOSED: without a valid
     // CREDENTIAL_MASTER_KEY the capability is simply ABSENT — it is never

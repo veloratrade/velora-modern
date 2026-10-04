@@ -209,9 +209,14 @@ export class MemoryUserStore implements UserStore {
       userAgent: string | null;
       expiresAt: Date;
     },
-  ): Promise<void> {
+    expectedRefreshTokenHash: string,
+  ): Promise<boolean> {
     const s = this.sessions.get(id);
-    if (!s) return;
+    if (!s) return false;
+    // Same compare-and-swap as PgUserStore: a rotation whose expectation no
+    // longer matches is a NO-OP that reports failure, so the in-memory batteries
+    // exercise the production race semantics rather than a friendlier variant.
+    if (s.refreshTokenHash !== expectedRefreshTokenHash) return false;
     this.sessionsByRefreshHash.delete(s.refreshTokenHash);
     this.sessionsByRefreshHash.set(input.refreshTokenHash, id);
     this.sessions.set(id, {
@@ -222,6 +227,7 @@ export class MemoryUserStore implements UserStore {
       userAgent: input.userAgent,
       expiresAt: iso(input.expiresAt),
     });
+    return true;
   }
 
   async revokeSession(id: string, revokedAt: Date): Promise<void> {
