@@ -1,0 +1,595 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-04",
+  "source_audit": "docs/audits/2026-10-04-CAPABILITY-AUDIT-legacy-to-modern.md",
+  "git": {
+    "modern_head": "42f38cba1e96ab6f3582aaccd3f1644b9fb6133a",
+    "modern_branch": "feat/telegram-journal-client",
+    "legacy_ref": "edede31"
+  },
+  "status_vocabulary": [
+    "MISSING",
+    "UI_ONLY",
+    "BACKEND_ONLY",
+    "PARTIAL",
+    "IMPLEMENTED",
+    "VERIFIED",
+    "LEGACY_ONLY",
+    "INTENTIONALLY_NOT_MIGRATED"
+  ],
+  "counts": {
+    "VERIFIED": {
+      "count": 8,
+      "ids": [
+        "ACC-01",
+        "ACC-04",
+        "ACC-05",
+        "ACC-07",
+        "ACC-08",
+        "ACC-09",
+        "TRD-01",
+        "PLT-01"
+      ]
+    },
+    "IMPLEMENTED": {
+      "count": 4,
+      "ids": [
+        "ACC-02",
+        "ACC-03",
+        "TRD-12",
+        "PLT-08"
+      ]
+    },
+    "PARTIAL": {
+      "count": 14,
+      "ids": [
+        "ACC-06",
+        "SEC-01",
+        "SEC-02",
+        "SEC-04",
+        "TRD-02",
+        "TRD-04",
+        "TRD-05",
+        "TRD-06",
+        "TRD-07",
+        "ADM-01",
+        "PLT-03",
+        "PLT-05",
+        "PLT-06",
+        "PLT-11"
+      ]
+    },
+    "BACKEND_ONLY": {
+      "count": 2,
+      "ids": [
+        "AI-05",
+        "PLT-14"
+      ]
+    },
+    "UI_ONLY": {
+      "count": 2,
+      "ids": [
+        "TRD-09",
+        "ADM-04"
+      ]
+    },
+    "MISSING": {
+      "count": 19,
+      "ids": [
+        "ACC-10",
+        "ACC-11",
+        "SEC-03",
+        "TRD-03",
+        "TRD-08",
+        "AI-01",
+        "AI-02",
+        "AI-03",
+        "AI-04",
+        "SUP-01",
+        "SUP-02",
+        "ADM-02",
+        "ADM-03",
+        "PLT-02",
+        "PLT-04",
+        "PLT-07",
+        "PLT-09",
+        "PLT-10",
+        "PLT-12"
+      ]
+    },
+    "LEGACY_ONLY": {
+      "count": 2,
+      "ids": [
+        "TRD-10",
+        "TRD-11"
+      ]
+    },
+    "INTENTIONALLY_NOT_MIGRATED": {
+      "count": 2,
+      "ids": [
+        "TRD-13",
+        "PLT-13"
+      ]
+    }
+  },
+  "capabilities": [
+    {
+      "id": "ACC-01",
+      "area": "account",
+      "capability": "Register + e-mail verification gate",
+      "status": "VERIFIED",
+      "legacy_evidence": "POST /auth/register 5/3600, verify-email 20/900, resend 4/3600; users.email_verified_at",
+      "modern_evidence": "UI /register,/verify-email; API register/verify-email/resend-verification; email_verifications; login 401 EMAIL_NOT_VERIFIED; 14 auth test files",
+      "next_action": "none"
+    },
+    {
+      "id": "ACC-02",
+      "area": "account",
+      "capability": "Sign in / refresh / sign out",
+      "status": "IMPLEMENTED",
+      "legacy_evidence": "auth/login 8/300, refresh 30/300, logout; auth_events",
+      "modern_evidence": "POST /auth/login|refresh|logout; user_sessions refresh-token hash; Secure cookie; auth tests",
+      "next_action": "none"
+    },
+    {
+      "id": "ACC-03",
+      "area": "account",
+      "capability": "Forgot / reset password",
+      "status": "IMPLEMENTED",
+      "legacy_evidence": "forgot 4/3600, reset 6/3600; password_resets",
+      "modern_evidence": "POST /auth/forgot-password|reset-password; password_resets; UI pages both locales",
+      "next_action": "none"
+    },
+    {
+      "id": "ACC-04",
+      "area": "account",
+      "capability": "Change own password (user-facing)",
+      "status": "VERIFIED",
+      "legacy_evidence": "form on /profile + POST /auth/change-password 8/900",
+      "modern_evidence": "Phase 1: /settings → Security change-password form over POST /auth/change-password. Browser-verified on a production build (wrong current password → localized error; success → all sessions revoked → /login). Unit: authService.test.ts 21/21. Screenshot 04.",
+      "next_action": null
+    },
+    {
+      "id": "ACC-05",
+      "area": "account",
+      "capability": "Profile page (identity overview)",
+      "status": "VERIFIED",
+      "legacy_evidence": "/profile page with identity, member since, role",
+      "modern_evidence": "Phase 1: /profile renders the REAL identity from GET /auth/me (full name, e-mail, role, plan, member-since in Jalali, timezone) and points editing at /settings. Browser-verified fa+en, desktop+mobile, no overflow. Screenshots 01/06/08/12.",
+      "next_action": null
+    },
+    {
+      "id": "ACC-06",
+      "area": "account",
+      "capability": "Profile data fields (full name, timezone)",
+      "status": "PARTIAL",
+      "legacy_evidence": "users.first_name,last_name,full_name,timezone",
+      "modern_evidence": "RE-VERIFIED 2026-10-04 (the first audit pass was WRONG here): migration 0002_identity_capability.sql ALREADY adds users.full_name + users.timezone; register accepts both and GET /auth/me returns them (curl-verified on live PG); 0022 adds first_name,last_name,locale_source,locale_updated_at. Only first_name/last_name are Legacy-only, and no Legacy UI string consumes them.",
+      "next_action": "None for the migrated fields. first_name/last_name have no consumer and stay deliberately unmigrated unless a future requirement needs them."
+    },
+    {
+      "id": "ACC-07",
+      "area": "account",
+      "capability": "Locale preference persisted per user",
+      "status": "VERIFIED",
+      "legacy_evidence": "users.locale,locale_source,locale_updated_at; PATCH /auth/me/preferences via velora-localization.js",
+      "modern_evidence": "Phase 1: locale select in /settings → Preferences writes PATCH /auth/me/preferences {locale} and records locale_source='user' + locale_updated_at (raw row asserted: db/tests/pgUserStore.pg.test.ts 6/6 on PG 16.15). Browser-verified EN→FA switch navigates to the fa route with RTL. Screenshot 09.",
+      "next_action": null
+    },
+    {
+      "id": "ACC-08",
+      "area": "account",
+      "capability": "AI processing consent",
+      "status": "VERIFIED",
+      "legacy_evidence": "toggle on /profile → users.ai_consent_at; UserAIConsentRepository",
+      "modern_evidence": "Phase 1: /settings → Preferences consent pill + toggle over PATCH /auth/me/preferences {ai_consent}. The row shows the SERVER's answer (no optimistic state); browser-verified toggle inactive→active and back, session copy updated. Screenshot 03 area.",
+      "next_action": null
+    },
+    {
+      "id": "ACC-09",
+      "area": "account",
+      "capability": "E-mail category preferences (6)",
+      "status": "VERIFIED",
+      "legacy_evidence": "GET/PUT /auth/email-preferences; 6 keys",
+      "modern_evidence": "Phase 1: /settings → 6 email categories over GET/PUT /auth/email-preferences with Legacy's merge semantics; partial PUT persists and survives reload (browser-verified), raw row asserted on PG.",
+      "next_action": null
+    },
+    {
+      "id": "ACC-10",
+      "area": "account",
+      "capability": "User sessions/devices admin view",
+      "status": "MISSING",
+      "legacy_evidence": "admin sessions/devices/login-history/revoke-sessions",
+      "modern_evidence": "user_sessions/user_devices tables only",
+      "next_action": "Fold into ADM-01"
+    },
+    {
+      "id": "ACC-11",
+      "area": "account",
+      "capability": "Admin create/invite/verify user",
+      "status": "MISSING",
+      "legacy_evidence": "POST /admin/users, /users/invitations, /users/{id}/verify-email",
+      "modern_evidence": "—",
+      "next_action": "Fold into ADM-01"
+    },
+    {
+      "id": "SEC-01",
+      "area": "security",
+      "capability": "RBAC vocabulary + enforcement",
+      "status": "PARTIAL",
+      "legacy_evidence": "24 P_* permissions in Role.php, enforced per route",
+      "modern_evidence": "4 enforced: admin.panel.access, rbac.matrix.view, rbac.self.view, users.view",
+      "next_action": "Enforce the permissions the next surfaces need (MG-RBAC-VOCAB)"
+    },
+    {
+      "id": "SEC-02",
+      "area": "security",
+      "capability": "Rate limiting on expensive routes",
+      "status": "PARTIAL",
+      "legacy_evidence": "15 throttled routes incl. accounts/sync/ai",
+      "modern_evidence": "8 auth buckets + telegram 2; accounts/detect-server/sync/ai not throttled",
+      "next_action": "Extend table with accounts/sync limits"
+    },
+    {
+      "id": "SEC-03",
+      "area": "security",
+      "capability": "Auth events / login history",
+      "status": "MISSING",
+      "legacy_evidence": "auth_events; admin security/logins,signups; login-history",
+      "modern_evidence": "audit_log exists; no auth-event recording",
+      "next_action": "Record auth events (MG-AUTH-EVENTS)"
+    },
+    {
+      "id": "SEC-04",
+      "area": "security",
+      "capability": "Session/cookie/CSP/HSTS/edge authz hardening",
+      "status": "PARTIAL",
+      "legacy_evidence": "__Host- prefix, SameSite=Strict, CSP manifest, proxy HSTS, HTML-route gates",
+      "modern_evidence": "open: MG-SEC-COOKIE, MG-SEC-CSP, MG-SEC-HSTS, MG-SEC-EDGE-AUTHZ",
+      "next_action": "Carried register items; not re-audited"
+    },
+    {
+      "id": "TRD-01",
+      "area": "trading",
+      "capability": "Trade journal CRUD + exits + symbols",
+      "status": "VERIFIED",
+      "legacy_evidence": "GET/POST/PUT/DELETE /trades, exits, symbols",
+      "modern_evidence": "kernel routes incl. regex matchers; trades/trade_events/trade_exits; optimistic concurrency (If-Match/version); 4 test files; UI /trades",
+      "next_action": "none"
+    },
+    {
+      "id": "TRD-02",
+      "area": "trading",
+      "capability": "Manual trade entry UI",
+      "status": "PARTIAL",
+      "legacy_evidence": "/trades/new full form + symbol icons + emotion picker",
+      "modern_evidence": "/trades real form persisting POST /trades; missing contract/commission/swap + iconography",
+      "next_action": "Add remaining numeric fields if parity required (design-preserving)"
+    },
+    {
+      "id": "TRD-03",
+      "area": "trading",
+      "capability": "Screenshot import (OCR)",
+      "status": "MISSING",
+      "legacy_evidence": "POST /trades/extract-screenshot + velora-smart-import.js; trade_screenshots, ai_extractions",
+      "modern_evidence": "—",
+      "next_action": "AI/OCR pipeline slice (MG-AI-OCR)"
+    },
+    {
+      "id": "TRD-04",
+      "area": "trading",
+      "capability": "Trade list filters/sort parity",
+      "status": "PARTIAL",
+      "legacy_evidence": "legacy list params enforced in controller/repository",
+      "modern_evidence": "modern list + own contract; divergences incl. r_multiple scale 4 vs 8",
+      "next_action": "MG-API-CONTRACT-DIVERGENCE + MG-RMULTIPLE-SCALE decisions"
+    },
+    {
+      "id": "TRD-05",
+      "area": "trading",
+      "capability": "Connect MT account (provisioning)",
+      "status": "PARTIAL",
+      "legacy_evidence": "POST /accounts/connect-metaapi 5/900, detect-server 20/900, DELETE /accounts/{id}",
+      "modern_evidence": "3-step POST /accounts → /credentials → /accounts/{id}/metaapi/connect; disconnect; timezone; DELETE; real /accounts UI",
+      "next_action": "Live MetaAPI run + assembly parity (MG-METAAPI-ASSEMBLY)"
+    },
+    {
+      "id": "TRD-06",
+      "area": "trading",
+      "capability": "Sync: cadence, manual trigger, visibility",
+      "status": "PARTIAL",
+      "legacy_evidence": "POST /accounts/{id}/sync 20/300, GET sync-status; hourly cron; sync_jobs",
+      "modern_evidence": "GET /accounts/{id}/sync-status; worker handlers + scheduler test; worker never deployed; no manual route",
+      "next_action": "Deploy worker / decide manual sync (MG-WORKER-DEPLOY, MG-METAAPI-CADENCE)"
+    },
+    {
+      "id": "TRD-07",
+      "area": "trading",
+      "capability": "Dashboard summary/equity/strategies",
+      "status": "PARTIAL",
+      "legacy_evidence": "GET /dashboard/summary|equity-curve|strategies",
+      "modern_evidence": "/dashboard real via analytics/*; no dashboard/* API; no strategies endpoint",
+      "next_action": "Decide dashboard semantics source; add strategies if kept"
+    },
+    {
+      "id": "TRD-08",
+      "area": "performance",
+      "capability": "Performance analytics surface",
+      "status": "MISSING",
+      "legacy_evidence": "/performance static content page (no API)",
+      "modern_evidence": "analytics/* API + aggregates migrations exist; /analytics thin, /performance shell",
+      "next_action": "Build /performance or retire shell (owner decision)"
+    },
+    {
+      "id": "TRD-09",
+      "area": "wallet",
+      "capability": "Wallet / cloud-wallet view",
+      "status": "UI_ONLY",
+      "legacy_evidence": "wallet page hard-coded demo equity, no API",
+      "modern_evidence": "/wallet shell",
+      "next_action": "Owner decision: build from account equity or retire shell"
+    },
+    {
+      "id": "TRD-10",
+      "area": "content",
+      "capability": "Blog/legal/404 content surfaces",
+      "status": "LEGACY_ONLY",
+      "legacy_evidence": "blog x6, privacy, terms, 404",
+      "modern_evidence": "—",
+      "next_action": "Content-only; no behaviour to migrate"
+    },
+    {
+      "id": "TRD-11",
+      "area": "content",
+      "capability": "Markets/news informational pages",
+      "status": "LEGACY_ONLY",
+      "legacy_evidence": "static pages with 23–28 i18n keys, no data source",
+      "modern_evidence": "/markets,/news shells",
+      "next_action": "Content-only; shells are placeholders, not migrations"
+    },
+    {
+      "id": "TRD-12",
+      "area": "integration",
+      "capability": "Telegram journal client",
+      "status": "IMPLEMENTED",
+      "legacy_evidence": "(Modern-only capability)",
+      "modern_evidence": "ADR-018, 0023 migration, telegram handlers, /settings section, 6 test files, rate limits, caps",
+      "next_action": "Live Bot API verification (MG-TG-1)"
+    },
+    {
+      "id": "TRD-13",
+      "area": "platform",
+      "capability": "Copy trading / EA / developer API / tenancy",
+      "status": "INTENTIONALLY_NOT_MIGRATED",
+      "legacy_evidence": "absent in Legacy",
+      "modern_evidence": "0019–0021 + routes + tests",
+      "next_action": "Not parity work; excluded from counts"
+    },
+    {
+      "id": "AI-01",
+      "area": "ai",
+      "capability": "Analyze my trades",
+      "status": "MISSING",
+      "legacy_evidence": "POST /ai/analyze-trades 10/3600; AI/Analysis; ai_analysis, ai_jobs, provider chain",
+      "modern_evidence": "ai-coach latest-insights only (different meaning)",
+      "next_action": "AI pipeline slice"
+    },
+    {
+      "id": "AI-02",
+      "area": "ai",
+      "capability": "Weekly/monthly AI report",
+      "status": "MISSING",
+      "legacy_evidence": "POST /ai/weekly-report 5/3600; ai_reports; e-mail delivery",
+      "modern_evidence": "—",
+      "next_action": "AI pipeline slice + e-mail types"
+    },
+    {
+      "id": "AI-03",
+      "area": "ai",
+      "capability": "AI answer feedback",
+      "status": "MISSING",
+      "legacy_evidence": "POST /ai/feedback 20/3600; ai_feedback",
+      "modern_evidence": "—",
+      "next_action": "AI pipeline slice"
+    },
+    {
+      "id": "AI-04",
+      "area": "ai",
+      "capability": "Intelligence Q&A surface",
+      "status": "MISSING",
+      "legacy_evidence": "/intelligence with preset questions + free text",
+      "modern_evidence": "/intelligence shell",
+      "next_action": "Build after AI pipeline exists (never UI-first)"
+    },
+    {
+      "id": "AI-05",
+      "area": "ai",
+      "capability": "AI coach insights + consent gate",
+      "status": "BACKEND_ONLY",
+      "legacy_evidence": "—",
+      "modern_evidence": "GET/POST /ai-coach/latest-insights, POST /ai-coach/consent, ai_coaching_logs (0017)",
+      "next_action": "Optional UI; not legacy parity"
+    },
+    {
+      "id": "SUP-01",
+      "area": "support",
+      "capability": "User support tickets",
+      "status": "MISSING",
+      "legacy_evidence": "6 routes incl. messages/read/reopen; support_conversations/messages",
+      "modern_evidence": "/support shell, no API",
+      "next_action": "Support slice (own domain)"
+    },
+    {
+      "id": "SUP-02",
+      "area": "support",
+      "capability": "Admin communication centre",
+      "status": "MISSING",
+      "legacy_evidence": "7 admin routes + translations + copilot draft",
+      "modern_evidence": "—",
+      "next_action": "Admin slice; depends on SUP-01"
+    },
+    {
+      "id": "ADM-01",
+      "area": "admin",
+      "capability": "Admin user management",
+      "status": "PARTIAL",
+      "legacy_evidence": "GET/POST /admin/users + 8 routes, P_USERS_*",
+      "modern_evidence": "GET /admin/users, GET /admin/users/{id}, PATCH role|status; users.view gated",
+      "next_action": "Extend to sessions/devices/verify/invite"
+    },
+    {
+      "id": "ADM-02",
+      "area": "admin",
+      "capability": "Admin analytics/overview/billing",
+      "status": "MISSING",
+      "legacy_evidence": "admin analytics x6, overview, billing",
+      "modern_evidence": "GET /admin/metrics, GET /admin/audit-logs",
+      "next_action": "Admin slice 2"
+    },
+    {
+      "id": "ADM-03",
+      "area": "admin",
+      "capability": "Admin system surface",
+      "status": "MISSING",
+      "legacy_evidence": "40+ routes: health, diagnostics, logs, settings, feature flags, integrations, AI routing/credentials",
+      "modern_evidence": "—",
+      "next_action": "Admin slice 3 (MG-ADMIN)"
+    },
+    {
+      "id": "ADM-04",
+      "area": "admin",
+      "capability": "Admin console UI",
+      "status": "UI_ONLY",
+      "legacy_evidence": "admin/index.html 145 KB, 15 modules; admin/v2",
+      "modern_evidence": "/admin 34-line shell",
+      "next_action": "Rebuild console module by module"
+    },
+    {
+      "id": "PLT-01",
+      "area": "platform",
+      "capability": "PostgreSQL single source of truth",
+      "status": "VERIFIED",
+      "legacy_evidence": "MySQL 46 tables",
+      "modern_evidence": "23 migrations, pg driver, PG stores; db/tests 32 files; 70 real-PG tests at HEAD",
+      "next_action": "none"
+    },
+    {
+      "id": "PLT-02",
+      "area": "platform",
+      "capability": "Legacy data migration/cutover",
+      "status": "MISSING",
+      "legacy_evidence": "ADR-004 sampling blocked; unmapped tables",
+      "modern_evidence": "no cutover rehearsal; MG-SCHEMA-MAPPING",
+      "next_action": "Mapping table + rehearsal (MG-DATA-MIGRATION)"
+    },
+    {
+      "id": "PLT-03",
+      "area": "platform",
+      "capability": "Background workers/cron deployed",
+      "status": "PARTIAL",
+      "legacy_evidence": "api/workers + cron",
+      "modern_evidence": "apps/worker handlers + scheduler test; never deployed",
+      "next_action": "Deployment + proof of run (MG-WORKER-DEPLOY)"
+    },
+    {
+      "id": "PLT-04",
+      "area": "platform",
+      "capability": "Backup/restore + ops tooling",
+      "status": "MISSING",
+      "legacy_evidence": "tools/ 86 PHP ops scripts",
+      "modern_evidence": "no backup, no restore drill, no probes",
+      "next_action": "MG-BACKUP-RESTORE, MG-OPS-TOOLING"
+    },
+    {
+      "id": "PLT-05",
+      "area": "platform",
+      "capability": "Localization coverage fa/en",
+      "status": "PARTIAL",
+      "legacy_evidence": "1,994 keys per locale",
+      "modern_evidence": "726 fa keys; 624 shared key names = 31.3%; 1,370 unmapped",
+      "next_action": "MG-I18N-COVERAGE"
+    },
+    {
+      "id": "PLT-06",
+      "area": "platform",
+      "capability": "Transactional e-mail types",
+      "status": "PARTIAL",
+      "legacy_evidence": "email_notifications, 10 types",
+      "modern_evidence": "2 of 10; no templates/CID/locale copy/delivery log",
+      "next_action": "MG-EMAIL-TYPES"
+    },
+    {
+      "id": "PLT-07",
+      "area": "domain",
+      "capability": "Jalali calendar, session engine, achievements",
+      "status": "MISSING",
+      "legacy_evidence": "JalaliCalendar, TradingSessionEngine, user_achievements",
+      "modern_evidence": "—",
+      "next_action": "MG-DOMAIN-LEGACY-ONLY"
+    },
+    {
+      "id": "PLT-08",
+      "area": "integration",
+      "capability": "Telegram journal client (alias of TRD-12)",
+      "status": "IMPLEMENTED",
+      "legacy_evidence": "—",
+      "modern_evidence": "see TRD-12",
+      "next_action": "see TRD-12"
+    },
+    {
+      "id": "PLT-09",
+      "area": "platform",
+      "capability": "In-app notifications",
+      "status": "MISSING",
+      "legacy_evidence": "notifications table",
+      "modern_evidence": "—",
+      "next_action": "Secondary"
+    },
+    {
+      "id": "PLT-10",
+      "area": "content",
+      "capability": "Marketing/blog/legal surfaces",
+      "status": "MISSING",
+      "legacy_evidence": "blog x6, privacy, terms",
+      "modern_evidence": "—",
+      "next_action": "Content-only"
+    },
+    {
+      "id": "PLT-11",
+      "area": "billing",
+      "capability": "Subscription / checkout",
+      "status": "PARTIAL",
+      "legacy_evidence": "checkout page; admin billing; no user billing API",
+      "modern_evidence": "GET/POST /subscriptions/me, POST /subscriptions/checkout, stripe webhook, subscriptions (0017); no page",
+      "next_action": "Billing surface decision + UI if kept"
+    },
+    {
+      "id": "PLT-12",
+      "area": "platform",
+      "capability": "The eight badged shells become real",
+      "status": "MISSING",
+      "legacy_evidence": "n/a",
+      "modern_evidence": "/profile /support /admin /intelligence /markets /news /performance /wallet",
+      "next_action": "Sequence per S15"
+    },
+    {
+      "id": "PLT-13",
+      "area": "platform",
+      "capability": "Legacy PHP/MVC structural patterns",
+      "status": "INTENTIONALLY_NOT_MIGRATED",
+      "legacy_evidence": "entire PHP app",
+      "modern_evidence": "kernel dispatcher + services + PG",
+      "next_action": "Architecture is not a capability"
+    },
+    {
+      "id": "PLT-14",
+      "area": "platform",
+      "capability": "Third-party credential vault",
+      "status": "BACKEND_ONLY",
+      "legacy_evidence": "admin ai_provider_credentials",
+      "modern_evidence": "user_credentials (0010) + credentialService + credentialCrypto; UI only via /accounts METAAPI",
+      "next_action": "Optional admin UI"
+    }
+  ],
+  "notes": []
+}
