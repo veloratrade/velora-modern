@@ -74,10 +74,12 @@ export const RATE_LIMIT_DEFAULTS = {
   // (same value), and the ingress limit is the webhook receiver. Legacy's own
   // names are kept in the key text so the lineage stays searchable.
   //
-  // Legacy ALSO throttled POST /accounts/{id}/sync at 20/300; Modern has no
-  // user-triggered sync route yet (sync-status is a read), so no key is
-  // declared for it — an unused key would be an untested number pretending to
-  // be a guarantee.
+  // Legacy ALSO throttled POST /accounts/{id}/sync at 20/300. That route now
+  // EXISTS in Modern (TRD-06: the user-triggered sync the accounts page needs),
+  // so the key landed WITH it — and the queue it feeds is the same one the tick
+  // and the webhook ingress feed, which is why the limit is per user and the
+  // work is deduplicated by the job key rather than by the response.
+  "accounts:sync": { limit: 20, windowSec: 300 },
   "accounts:metaapi-connect": { limit: 5, windowSec: 900 },
   "accounts:detect-server": { limit: 20, windowSec: 900 },
   "webhooks:metaapi": { limit: 120, windowSec: 60 },
@@ -90,8 +92,7 @@ export const RATE_LIMIT_DEFAULTS = {
   // NOT covered, deliberately: Legacy's remaining buckets guard surfaces Modern
   // does not have yet — `ai-analyze` / `ai-report` / `ai-feedback` (both the
   // dispatcher IP limits and AIController's per-USER `ai-*-user-{id}` limits)
-  // belong to the AI phase, `metaapi-sync` guards POST /accounts/{id}/sync which
-  // Modern has no route for, and the `admin-*` controller buckets (config,
+  // belong to the AI phase, and the `admin-*` controller buckets (config,
   // feature flags, integrations, settings, health refresh, user create/invite)
   // guard admin surfaces owned by the admin phase. Each lands WITH its route, so
   // no key here ever describes a route that does not exist.

@@ -74,6 +74,8 @@ import { PgWebhookEventStore } from "./webhooks/pgWebhookStore.js";
 import { PgBossSyncTrigger, DurableOnlySyncTrigger, type SyncTrigger } from "./webhooks/syncTrigger.js";
 import type { WebhookAccountRef } from "./webhooks/metaApiWebhookService.js";
 import { PgSyncStatusStore } from "./accounts/syncStatusService.js";
+import { ManualSyncService, PgManualSyncStore } from "./accounts/manualSyncService.js";
+import { makeSyncPendingMarker } from "./accounts/syncPending.js";
 import { PgAnalyticsStore } from "./analytics/analyticsStore.js";
 import { PgTagStore } from "./tags/tagService.js";
 import { AttachmentService, PgAttachmentStore, LocalAttachmentStorage } from "./attachments/attachmentService.js";
@@ -219,6 +221,8 @@ async function main(): Promise<void> {
     // --- backend migration (directive t) ---
     webhooks?: MetaApiWebhookService;
     syncStatus?: import("./accounts/syncStatusService.js").SyncStatusStore;
+    /** TRD-06 — user-triggered MetaAPI sync (POST /accounts/{id}/sync). */
+    manualSync?: import("./accounts/manualSyncService.js").ManualSyncService;
     analytics?: import("./analytics/analyticsStore.js").AnalyticsStore;
     tags?: import("./tags/tagService.js").TagStore;
     attachments?: AttachmentService;
@@ -456,6 +460,48 @@ async function main(): Promise<void> {
       log: (event) => console.log(JSON.stringify(event)),
     });
 
+    // -----------------------------------------------------------------------
+    // ONE sync trigger for EVERY producer that can ask for a MetaAPI sync.
+    //
+    // There are three: the worker's scheduled tick (its own process), the
+    // webhook ingress, and — new in TRD-06 — the user-triggered
+    // POST /accounts/{id}/sync. They must hand the queue the SAME job shape and
+    // the SAME window, because the idempotency key `sync:{accountId}:{from}`
+    // only deduplicates jobs that agree on the window. The trigger used to be
+    // constructed inside the webhook block, which is why the ingress could
+    // drift to a 24-hour window while the tick asked for 12 months; it is now
+    // built once here and injected into both callers.
+    //
+    // Failure to start degrades to `DurableOnlySyncTrigger` (logged, code only —
+    // a queue error can carry a connection string). That is a DELAY, never a
+    // loss: the account is marked CONNECTING durably and the tick converges.
+    // -----------------------------------------------------------------------
+    let syncTrigger: SyncTrigger = new DurableOnlySyncTrigger();
+    const databaseUrl = boot.persistence.databaseUrl;
+    if (databaseUrl !== undefined) {
+      try {
+        syncTrigger = await PgBossSyncTrigger.create(databaseUrl);
+      } catch {
+        console.log(JSON.stringify({ level: "warn", event: "sync.trigger_unavailable" }));
+      }
+    }
+    console.log(JSON.stringify({ level: "info", event: "sync.trigger", trigger: syncTrigger.name }));
+
+    // The durable "awaiting sync" marker: ONE implementation, shared with the
+    // webhook ingress (see accounts/syncPending.ts for why it is conditional).
+    const markSyncPending = makeSyncPendingMarker(q);
+
+    // TRD-06 — the user-triggered sync the Legacy accounts page had and Modern
+    // did not. Wired whenever the database is: the queue is optional and the
+    // service says so truthfully in its `dispatched` field.
+    capabilities.manualSync = new ManualSyncService({
+      store: new PgManualSyncStore(q),
+      markSyncPending,
+      trigger: syncTrigger,
+      log: (event) => console.log(JSON.stringify(event)),
+    });
+    console.log(JSON.stringify({ level: "info", event: "accounts.manual_sync.enabled" }));
+
     // v0.2 webhook ingress. The SECRET decides whether the capability exists at
     // all: with no secret the route answers 503 WEBHOOK_SECRET_MISSING (the
     // Legacy contract), never an unverified accept. The secret is read through a
@@ -464,18 +510,6 @@ async function main(): Promise<void> {
     const webhookSecret = (process.env["METAAPI_WEBHOOK_SECRET"] ?? "").trim();
     if (webhookSecret !== "") {
       const webhookStore = new PgWebhookEventStore(pool);
-      let trigger: SyncTrigger = new DurableOnlySyncTrigger();
-      const databaseUrl = boot.persistence.databaseUrl;
-      if (databaseUrl !== undefined) {
-        try {
-          trigger = await PgBossSyncTrigger.create(databaseUrl);
-        } catch {
-          // Degradation, not failure: the event is already recorded durably and
-          // the worker's scheduled tick still converges. Code only in the log —
-          // never the connection string.
-          console.log(JSON.stringify({ level: "warn", event: "webhooks.sync_trigger_unavailable" }));
-        }
-      }
       capabilities.webhooks = new MetaApiWebhookService({
         store: webhookStore,
         secret: () => (process.env["METAAPI_WEBHOOK_SECRET"] ?? "").trim() || null,
@@ -494,22 +528,10 @@ async function main(): Promise<void> {
             syncCursor: row.sync_cursor === null ? null : String(row.sync_cursor),
           };
         },
-        markSyncPending: async (accountId) => {
-          // `sync_status` is constrained by 0004 to
-          // DISCONNECTED|CONNECTING|SYNCING|CONNECTED|ERROR. There is no
-          // "PENDING": the closest TRUE statement the vocabulary can make is
-          // CONNECTING ("not yet converged"), and the DURABLE record of the
-          // outstanding work is the webhook_events row plus the queued job — not
-          // this column. Writing an out-of-vocabulary value would be rejected by
-          // the engine (found by the real-PG battery).
-          await q(
-            "UPDATE trading_accounts SET sync_status = 'CONNECTING', updated_at = now() WHERE id = $1 AND sync_status NOT IN ('SYNCING', 'CONNECTED')",
-            [accountId],
-          );
-        },
-        trigger,
+        markSyncPending,
+        trigger: syncTrigger,
       });
-      console.log(JSON.stringify({ level: "info", event: "webhooks.enabled", trigger: trigger.name }));
+      console.log(JSON.stringify({ level: "info", event: "webhooks.enabled", trigger: syncTrigger.name }));
     } else {
       console.log(JSON.stringify({ level: "warn", event: "webhooks.secret_absent" }));
     }

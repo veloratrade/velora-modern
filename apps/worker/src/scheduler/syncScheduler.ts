@@ -22,7 +22,7 @@
 // jobs — the correct behaviour for an installation that has not connected any
 // MetaAPI account, and the reason this producer cannot manufacture work.
 import type { Pool } from "pg";
-import { METAAPI_SYNC_JOB_CLASS, DEFAULT_JOB_POLICIES } from "@velora/contracts";
+import { METAAPI_SYNC_JOB_CLASS, DEFAULT_JOB_POLICIES, syncWindow, SYNC_INITIAL_LOOKBACK_MS } from "@velora/contracts";
 import type { MetaApiSyncPayload, SafeJobDescriptor } from "@velora/contracts";
 import type { QueuePort } from "../queue/QueuePort.js";
 import { listSyncableAccounts } from "../metaapi/syncRepository.js";
@@ -41,10 +41,12 @@ export const DEFAULT_SYNC_CRON = "0 * * * *";
 /**
  * How far back a first-ever sync reaches.
  *
- * Mirrors the VERIFIED legacy bound (`months` clamped to 12, floor
- * `-12 months`) rather than inventing a retention policy.
+ * The value now lives in `@velora/contracts` with the window rule itself, so
+ * the tick, the webhook ingress and the user-triggered sync cannot disagree
+ * about what "sync this account" means. Re-exported under its historical name
+ * for the callers that already import it from here.
  */
-export const INITIAL_LOOKBACK_MS = 365 * 24 * 60 * 60 * 1000;
+export const INITIAL_LOOKBACK_MS = SYNC_INITIAL_LOOKBACK_MS;
 
 /**
  * Build the descriptor for one account's sync job.
@@ -86,17 +88,18 @@ export async function runSyncTick(
   now: Date = new Date(),
 ): Promise<number> {
   const accounts = await listSyncableAccounts(pool);
-  const to = now.toISOString();
   let enqueued = 0;
 
   for (const account of accounts) {
-    // The window starts at the durable cursor. Only a first-ever sync falls
-    // back to the lookback bound — the cursor is never guessed thereafter.
-    const from = account.syncCursor ?? new Date(now.getTime() - INITIAL_LOOKBACK_MS).toISOString();
-    if (from >= to) continue; // nothing to ask for; never emit an inverted window
+    // The window starts at the durable cursor (or the lookback bound on a
+    // first-ever sync) and comes from the SHARED rule, so a tick job and a
+    // webhook job for one account are the same window — which is what makes the
+    // `sync:{accountId}:{from}` idempotency key mean what it claims.
+    const window = syncWindow(account.syncCursor, now);
+    if (window === null) continue; // nothing to ask for; never emit an inverted window
 
     await queue.enqueue(
-      buildSyncDescriptor(account.accountId, account.metaapiAccountId, from, to),
+      buildSyncDescriptor(account.accountId, account.metaapiAccountId, window.from, window.to),
     );
     enqueued++;
   }

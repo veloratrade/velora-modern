@@ -19,6 +19,7 @@ export { capabilityAbsent, forbidden, notFound, unauthenticated, validation } fr
 
 import { handleWebhookRoutes } from "../webhooks/webhookRoutes.js";
 import { handleSyncStatusRoutes } from "../accounts/syncStatusRoutes.js";
+import { handleManualSyncRoutes } from "../accounts/manualSyncRoutes.js";
 import { handleAnalyticsRoutes } from "../analytics/analyticsRoutes.js";
 import { handleTagRoutes } from "../tags/tagRoutes.js";
 import { handleAttachmentRoutes } from "../attachments/attachmentRoutes.js";
@@ -45,6 +46,7 @@ const ROUTE_HANDLERS: readonly ExtendedRouteHandler[] = [
   handleTelegramRoutes,
   // Authenticated capability surface.
   handleSyncStatusRoutes,
+  handleManualSyncRoutes,
   handleAnalyticsRoutes,
   handleTagRoutes,
   handleAttachmentRoutes,

@@ -97,6 +97,12 @@ export interface ApiConfig {
   readonly webhooks?: import("../webhooks/metaApiWebhookService.js").MetaApiWebhookService;
   /** v0.2 connection status monitor. */
   readonly syncStatus?: import("../accounts/syncStatusService.js").SyncStatusStore;
+  /**
+   * v0.2 user-triggered sync (TRD-06). Absent ⇒ POST /accounts/{id}/sync answers
+   * the documented fail-closed 503 rather than silently accepting a request no
+   * queue will ever see.
+   */
+  readonly manualSync?: import("../accounts/manualSyncService.js").ManualSyncService;
   /** v0.5 analytics reads. */
   readonly analytics?: import("../analytics/analyticsStore.js").AnalyticsStore;
   /** v0.5 journal tags. */
@@ -190,6 +196,11 @@ export const THROTTLED_PATTERN_ROUTES: readonly {
   // is the expensive, abuse-worthy operation Legacy limited to 5 per 15 min
   // ("metaapi-connect"). `[^/]+` matches Modern's account-id contract (ids are
   // opaque strings, not integers as in PHP).
+  // TRD-06: Legacy throttled POST /accounts/{id}/sync at 20/300. It is a cheap
+  // route (it enqueues; the WORKER does the provider call) but an unbounded one
+  // would let a single user hammer the queue, so the bucket is carried over
+  // verbatim now that the route exists.
+  { method: "POST", pattern: /^\/api\/v1\/accounts\/[^/]+\/sync$/, key: "accounts:sync" },
   { method: "POST", pattern: /^\/api\/v1\/accounts\/[^/]+\/metaapi\/connect$/, key: "accounts:metaapi-connect" },
   // SEC-02: Legacy threw `admin-user-action` (30/300) inside the two handlers
   // that mutate a user — setStatus and setRole — rather than at dispatch. Modern
