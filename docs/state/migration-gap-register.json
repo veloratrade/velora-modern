@@ -906,6 +906,48 @@
       ],
       "decisions": [],
       "closure_criteria": "Test-side expectation update (owner-gated)"
+    },
+    {
+      "id": "MG-TG-1",
+      "section": "E",
+      "title": "Telegram journal client (ADR-018) is implemented and tested against scripted transports, but NO live round trip exists: no bot token and no provider credential are in scope, so real Telegram delivery, real Gemini calls and a deployed webhook remain unproven",
+      "status": "OPEN",
+      "priority": "P2",
+      "verification_state": "NOT_VERIFIED",
+      "audit_refs": [],
+      "evidence": [
+        "docs/telegram/DEPLOYMENT.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "Owner supplies TELEGRAM_BOT_TOKEN + GEMINI_API_KEY in a deployed environment; setWebhook registered; one journal confirmed end-to-end from a real Telegram account and observed in the web journal"
+    },
+    {
+      "id": "MG-TG-2",
+      "section": "E",
+      "title": "n8n relay transport for media/AI is deliberately NOT implemented: the Remote/PHP era's `n8n_relay` variant has no relay URL, contract or deployment in Modern, so building one would invent an integration rather than reuse one. The `MediaInterpreter` seam is the single place it would be added",
+      "status": "OPEN",
+      "priority": "P3",
+      "verification_state": "STATIC",
+      "audit_refs": [],
+      "evidence": [
+        "docs/adr/ADR-018-telegram-journal-client.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "Owner decision: implement a relay transport behind `MediaInterpreter` (with an owner-provided relay contract) or record the drop permanently"
+    },
+    {
+      "id": "MG-TG-3",
+      "section": "E",
+      "title": "Telegram work runs synchronously in the API process (deferred after the webhook 200); no queue/worker path is used because `apps/worker` is not deployed. A long media download plus a model call therefore occupies an API request slot after the answer",
+      "status": "OPEN",
+      "priority": "P3",
+      "verification_state": "STATIC",
+      "audit_refs": [],
+      "evidence": [
+        "apps/api/src/telegram/telegramUpdatePipeline.ts"
+      ],
+      "decisions": [],
+      "closure_criteria": "Worker deployed (MG-WORKER-DEPLOY) and the deferred task moved onto the existing queue with the claim row already in place"
     }
   ],
   "owner_decisions": [
@@ -1067,6 +1109,16 @@
       "verification_state": "STATIC",
       "evidence": [
         "apps/worker/src/index.ts"
+      ]
+    },
+    {
+      "area": "Telegram journal client (ADR-018)",
+      "claim": "First-class client on the existing platform: migration 0023 (6 tables + widened audit vocabulary), one-time SHA-256 link tokens with single-use consumption in one conditional UPDATE, identity from bearer/Telegram id only, journal writes through TradeService, AI behind the existing AiProvider boundary, one update-stream consumer enforced three ways. Runtime NOT VERIFIED against live Telegram/Gemini services (MG-TG-1)",
+      "verification_state": "RECORDED_RUNTIME",
+      "evidence": [
+        "docs/telegram/DEPLOYMENT.md",
+        "docs/telegram/SECURITY.md",
+        "docs/telegram/README.md"
       ]
     }
   ]

@@ -1,7 +1,7 @@
 # VELORA-MODERN — Current Project State (Canonical)
 
 **System:** Agent Context System (ADR-017) · **Schema version:** 1
-**Last updated:** 2026-09-26 (Asia/Tehran) — entries AC-1…AC-8 (… AC-7: Markdown/JSON sync; AC-8: PR #8 merged to main, verified baseline `ab0eed7`)
+**Last updated:** 2026-10-04 (Asia/Tehran) — entries AC-1…AC-9 (… AC-7: Markdown/JSON sync; AC-8: PR #8 merged to main, verified baseline `ab0eed7`; **AC-9: Telegram journal client (ADR-018) implemented on branch `feat/telegram-journal-client` — NOT pushed, NOT merged** — see §2a)
 **Machine-readable twin:** `docs/state/current-state.json` (read by `tools/agent-context.mjs`; the two must be updated in the same change)
 **Mode:** GOVERNANCE STATE RECORD — this file records *what is verified*, never what is hoped.
 
@@ -39,6 +39,23 @@ divergence must be traceable through `CHANGE_LOG.md` entries.
 | Legacy baseline | `edede313280f2f0e298f5ccbf5bbdd4d676c80bd` (`main`, 2026-09-14) — read-only reference; never modified by modernization work |
 | Product capability reference | `veloratrade/docs/pdf/Roadmap.pdf` @ `edede31` |
 | Architecture authority | `MASTER_ROADMAP.md` (root) — see §6 contradictions before trusting any single status label in it |
+
+## 2a. Branch work in flight (not on `main`) — AC-9
+
+| Field | Value |
+|---|---|
+| Branch | `feat/telegram-journal-client` (from `main` @ `0e9c4d7`) |
+| Branch HEAD | `e6d861a5c3c62bedcfc42daa0dc73efb1263dc01` (5 capability commits + the AC-9 state commit) |
+| State | **UNPUSHED / UNMERGED.** `main` is untouched; `current_verified.modern_sha` stays `ab0eed7` by design |
+| Capability | Telegram journal client (ADR-018) — same users, same PostgreSQL schema, same journal domain (`TradeService` / ADR-002 ledger), same AI boundary (`AiProvider` + `ai_coaching_logs`) |
+| Evidence | `npm run typecheck` exit 0 · `node tools/run-tests.mjs` **945/945** (0 fail, 0 skipped) · `secret-scan` PASS · `next build` exit 0 |
+| Gaps opened | `MG-TG-1` (no live Telegram/Gemini round trip), `MG-TG-2` (n8n relay not implemented), `MG-TG-3` (no worker path) |
+| Tool verdict | `tools/agent-context.mjs` reports `DRIFTED` **while this branch is checked out** — expected: the tool compares HEAD against the verified `main` SHA, and this work is deliberately not on `main` |
+
+**Nothing in this row may be cited as a property of `main`, of production, or of a
+deployed environment.** A live Telegram delivery, a live Gemini call, a delivered
+webhook and real-PostgreSQL concurrency are all `NOT_VERIFIED`
+(`docs/telegram/DEPLOYMENT.md` §7).
 
 ## 3. Verification-state vocabulary (binding)
 

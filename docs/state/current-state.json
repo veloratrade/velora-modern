@@ -2,7 +2,7 @@
   "$comment": "VELORA-MODERN machine-readable current project state — twin of docs/state/CURRENT_STATE.md (update both in the same change). Read and verified by tools/agent-context.mjs at every session start (ADR-017).",
   "schema_version": 1,
   "system": "velora-agent-context",
-  "last_updated": "2026-09-26",
+  "last_updated": "2026-10-04",
   "verification_states": [
     "STATIC",
     "RECORDED_RUNTIME",
@@ -41,8 +41,8 @@
     "modern_sha": "ab0eed790fa8ffc160bc53e34264a61b02ffaedb",
     "legacy_sha": "edede313280f2f0e298f5ccbf5bbdd4d676c80bd",
     "verified_at": "2026-09-26",
-    "verification": "STATIC (git). PR #8 merged to main via merge commit ab0eed7 (parents ffcb0e9 + 75ddf5c); branch history preserved. Intervening commits since 59047b8 are governance-only + merge bookkeeping (AC-4..AC-8) — no application-path change except the reviewed comment-only citation fix (MG-DOC-4) already carried by the merged branch.",
-    "notes": "modern_sha advances only through CHANGE_LOG-logged, classified commits. Chain: 59047b8 (AC-2) -> d85a589 (AC-4) -> 5140098 (AC-5) -> 3135da9/23aa83f/9d26aa0/1819397 (AC-6 curation) -> 75ddf5c (AC-7) -> ab0eed7 (PR #8 merge) -> this AC-8 curation commit (self-records)."
+    "verification": "STATIC (git). PR #8 merged to main via merge commit ab0eed7 (parents ffcb0e9 + 75ddf5c); branch history preserved. Intervening commits since 59047b8 are governance-only + merge bookkeeping (AC-4..AC-8) — no application-path change except the reviewed comment-only citation fix (MG-DOC-4) already carried by the merged branch. AC-9 (2026-10-04) deliberately does NOT advance this SHA: the Telegram journal client is an UNPUSHED feature branch, so main's verified state is unchanged.",
+    "notes": "modern_sha advances only through CHANGE_LOG-logged, classified commits. Chain: 59047b8 (AC-2) -> d85a589 (AC-4) -> 5140098 (AC-5) -> 3135da9/23aa83f/9d26aa0/1819397 (AC-6 curation) -> 75ddf5c (AC-7) -> ab0eed7 (PR #8 merge) -> AC-8 curation commit. AC-9 (branch feat/telegram-journal-client) is recorded in branch_work below and is NOT part of this chain until it is merged."
   },
   "artifacts": {
     "current_state_md": "docs/state/CURRENT_STATE.md",
@@ -93,12 +93,35 @@
       "MG-BACKUP-RESTORE"
     ]
   },
+  "branch_work": {
+    "entry": "AC-9",
+    "branch": "feat/telegram-journal-client",
+    "base": "0e9c4d7e6e1f984287490ce02f5681c208e35c7a (main)",
+    "head": "e6d861a5c3c62bedcfc42daa0dc73efb1263dc01",
+    "capability": "Telegram journal client (ADR-018) — first-class client: same users, same PostgreSQL schema, same journal domain (TradeService / ADR-002 ledger), same AI boundary (AiProvider + ai_coaching_logs)",
+    "pushed": false,
+    "merged": false,
+    "deployed": false,
+    "tool_verdict": "DRIFTED while this branch is checked out — expected and correct: tools/agent-context.mjs compares HEAD against the verified main SHA, and this work is deliberately not on main.",
+    "gaps_opened": [
+      "MG-TG-1",
+      "MG-TG-2",
+      "MG-TG-3"
+    ],
+    "report": "docs/telegram/PHASE-J-FINAL-REPORT.md"
+  },
   "last_battery": {
-    "result": "804/804 local (0 fail/0 skipped); migrations 19/19; tsc 0 errors; secret-scan PASS; next build exit 0; REAL-PG BATTERIES: 23 batteries x 2 orders (forward+reverse), 0 failures, 0 skipped, anti-skip assertions satisfied",
-    "at_sha": "51400982515e3e87ae0e9122ca409ed3ecdc27ae",
-    "date": "2026-09-26",
-    "classification": "CURRENT_RUNTIME_VERIFIED (captured this session against the verified tree; decays to RECORDED_RUNTIME for later sessions per CURRENT_STATE.md §3)",
-    "real_pg_caveats": "Disposable local PostgreSQL 17.11 (not 16); test-only creds mirroring postgres-evidence.yml; cluster destroyed after the run; D1 pg-smoke S1b fails on a stale [0001..0005] expectation (MG-OBS-6) — migrations 0001..0022 all applied, idempotent re-run applied 0"
+    "result": "945/945 local (0 fail / 0 cancelled / 0 skipped, ~180 s) INCLUDING the Telegram batteries; migrations 0001..0023 apply with the re-run applying 0; tsc 0 errors (exit 0, 5 projects); secret-scan PASS (0 findings); next build exit 0 with /settings + /en/settings in the route table",
+    "at_sha": "e6d861a5c3c62bedcfc42daa0dc73efb1263dc01",
+    "branch": "feat/telegram-journal-client (AC-9 — NOT pushed, NOT merged)",
+    "date": "2026-10-04",
+    "previous": {
+      "result": "804/804 local; REAL-PG BATTERIES 23 x 2 orders, 0 failures",
+      "at_sha": "51400982515e3e87ae0e9122ca409ed3ecdc27ae",
+      "date": "2026-09-26"
+    },
+    "classification": "RECORDED_RUNTIME (captured this session on the branch HEAD above; does NOT advance current_verified.modern_sha, which records main)",
+    "real_pg_caveats": "Unchanged for main: disposable local PostgreSQL 17.11 (not 16), test-only creds mirroring postgres-evidence.yml, cluster destroyed after the run; D1 pg-smoke S1b fails on a stale [0001..0005] expectation (MG-OBS-6). AC-9 adds NO new real-PostgreSQL evidence: db/tests/telegramStoreAdapter.test.ts is PGlite (real PostgreSQL semantics, single session) — not concurrency evidence."
   },
   "distribution": {
     "branch": "governance/agent-context",

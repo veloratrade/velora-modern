@@ -99,6 +99,8 @@ From audit §18 (`COMPLETE` ×31) and §19.2. Verification states reflect the au
 | Stripe billing | `MODERN-ONLY` roadmap v1.0 capability; signature verification present (prices NOT VERIFIED) | STATIC (§12.2) |
 | Queue mechanism | pg-boss v10, policies, outbox, DLQ (runtime NOT VERIFIED — worker undeployed) | STATIC (§12.4) |
 
+| Telegram journal client (ADR-018) | First-class client on the existing platform: migration 0023 (6 tables + widened audit vocabulary), one-time SHA-256 link tokens with single-use consumption in ONE conditional UPDATE, identity from bearer/Telegram id only, journal writes through `TradeService`, AI behind the existing `AiProvider` boundary, one update-stream consumer enforced three ways. Runtime NOT VERIFIED against live Telegram/Gemini services (MG-TG-1) | `RECORDED_RUNTIME` | `docs/telegram/DEPLOYMENT.md`, `docs/telegram/SECURITY.md`, `docs/telegram/README.md` |
+
 ## §E — Documentation defects, contradictions and observations (recorded; fixed only where authorized — see status column)
 
 | ID | Item | Source | Status |
@@ -115,6 +117,10 @@ From audit §18 (`COMPLETE` ×31) and §19.2. Verification states reflect the au
 | MG-OBS-4 | `AGENTS.md` artifact map was missing `MASTER_ROADMAP.md` and 2026-09-16+ evidence (fixed by the ADR-017 introducing commit, CHANGE_LOG AC-1) | inspection 2026-09-26 | CLOSED (this change) |
 | MG-OBS-5 | Audit §9.2 says legacy takes contract size "from the deal"; source shows `MetaApiService.php` never sets `contract_size` (0 grep matches) and the assembler emits none — legacy assembled trades use the schema default `1.00000000` (`schema.sql:232`). Modern's hardcoded `1` is parity on this field; the material divergences are assembly/volume/prices/timestamps. Immutable audit text unchanged; reading awaits owner confirmation (OD-M-PA-3) | brief §2, 2026-09-26 | OPEN (`STATIC` — owner confirmation) |
 | MG-OBS-6 | `tools/pg-smoke.ts` S1b asserts the stale D1-era migration list `[0001..0005]` vs tree `0001..0022` — the D1 smoke cannot pass on the current tree (migrations themselves apply cleanly). **`pg-smoke.ts` was NOT modified**; the real-PG battery evidence (MG-G11 / AC-6) remains valid; fixing `pg-smoke.ts` is a separate authorized change | AC-6 run, 2026-09-26 | OPEN (`STATIC` — owner-gated test-side fix) |
+
+| MG-TG-1 | Telegram client implemented and tested against scripted transports, but NO live round trip exists: no bot token and no provider credential are in scope, so real Telegram delivery, real Gemini calls and a deployed webhook remain unproven | ADR-018 work, 2026-10-04 | OPEN (`NOT_VERIFIED`) |
+| MG-TG-2 | n8n relay transport for media/AI is deliberately NOT implemented — the Remote/PHP era's `n8n_relay` variant has no relay URL, contract or deployment in Modern, so building one would invent an integration rather than reuse one. The `MediaInterpreter` seam is where it would be added | ADR-018 work, 2026-10-04 | OPEN (`STATIC` — owner decision: implement with a relay contract, or record the drop) |
+| MG-TG-3 | Telegram work runs synchronously in the API process (deferred after the webhook 200); no queue/worker path because `apps/worker` is not deployed — a long media download plus a model call occupies a request slot after the answer | ADR-018 work, 2026-10-04 | OPEN (`STATIC` — closes when MG-WORKER-DEPLOY lands) |
 
 ## Update rules
 
