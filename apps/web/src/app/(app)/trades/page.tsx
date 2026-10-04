@@ -180,7 +180,11 @@ export default function TradesPage() {
     );
   }
 
-  const input = (labelKey: string, value: string, onChange: (v: string) => void, opts: { required?: boolean; placeholder?: string; list?: string } = {}) => (
+  // `name` is set on every field on purpose: a form control without one has no
+  // identity to the browser (autofill, form history, password managers) or to a
+  // test, which then has to locate it by its visible Persian label text. The
+  // names mirror the API payload keys the form posts.
+  const input = (labelKey: string, value: string, onChange: (v: string) => void, opts: { name: string; required?: boolean; placeholder?: string; list?: string }) => (
     <label>
       <span className="label">
         {t(labelKey, null, labelKey)}
@@ -188,6 +192,7 @@ export default function TradesPage() {
       </span>
       <input
         className="input v-latn-num"
+        name={opts.name}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         required={opts.required}
@@ -248,6 +253,7 @@ export default function TradesPage() {
               </span>
               <input
                 className="input v-latn-num"
+                name="symbol"
                 value={form.symbol}
                 onChange={(e) => setForm({ ...form, symbol: e.target.value })}
                 placeholder="EURUSD"
@@ -288,26 +294,26 @@ export default function TradesPage() {
                   : t("pages.trades.new.short.expecting.decline.c09a8f55", null, "Short")}
               </small>
             </div>
-            {input("trades.accountId", form.accountId, (v) => setForm({ ...form, accountId: v }), {
+            {input("trades.accountId", form.accountId, (v) => setForm({ ...form, accountId: v }), { name: "accountId",
               placeholder: t("trades.accountIdPlaceholder", null, "your numeric account id"),
             })}
           </div>
 
           <div className="label label-nocap text-gold mt-8">{t("trades.entryAndCosts", null, "Entry and costs")}</div>
           <div className="grid-3">
-            {input("pages.trades.new.entry.price.8d5e74ab", form.entryPrice, (v) => setForm({ ...form, entryPrice: v }), { required: true, placeholder: "1.10000" })}
-            {input("pages.trades.new.exit.price.7ded7c82", form.exitPrice, (v) => setForm({ ...form, exitPrice: v }), { required: true, placeholder: "1.10500" })}
-            {input("pages.trades.new.volume.lot.6b042d07", form.volume, (v) => setForm({ ...form, volume: v }), { required: true, placeholder: "0.10" })}
+            {input("pages.trades.new.entry.price.8d5e74ab", form.entryPrice, (v) => setForm({ ...form, entryPrice: v }), { name: "entryPrice", required: true, placeholder: "1.10000" })}
+            {input("pages.trades.new.exit.price.7ded7c82", form.exitPrice, (v) => setForm({ ...form, exitPrice: v }), { name: "exitPrice", required: true, placeholder: "1.10500" })}
+            {input("pages.trades.new.volume.lot.6b042d07", form.volume, (v) => setForm({ ...form, volume: v }), { name: "volume", required: true, placeholder: "0.10" })}
           </div>
           <div className="grid-3">
-            {input("pages.trades.new.contract.size.fbd9b24e", form.contractSize, (v) => setForm({ ...form, contractSize: v }), { placeholder: "1" })}
-            {input("pages.trades.new.commission.075f0257", form.commission, (v) => setForm({ ...form, commission: v }), { placeholder: "0" })}
-            {input("pages.trades.new.swap.10e4a1fd", form.swap, (v) => setForm({ ...form, swap: v }), { placeholder: "0" })}
+            {input("pages.trades.new.contract.size.fbd9b24e", form.contractSize, (v) => setForm({ ...form, contractSize: v }), { name: "contractSize", placeholder: "1" })}
+            {input("pages.trades.new.commission.075f0257", form.commission, (v) => setForm({ ...form, commission: v }), { name: "commission", placeholder: "0" })}
+            {input("pages.trades.new.swap.10e4a1fd", form.swap, (v) => setForm({ ...form, swap: v }), { name: "swap", placeholder: "0" })}
           </div>
           <div className="grid-3">
-            {input("pages.trades.new.stop.loss.sl.a16f5daa", form.stopLoss, (v) => setForm({ ...form, stopLoss: v }), { placeholder: "1.09500" })}
-            {input("pages.trades.new.take.profit.tp.f3e73cce", form.takeProfit, (v) => setForm({ ...form, takeProfit: v }), { placeholder: "1.11500" })}
-            {input("common.strategy.1b590fba", form.strategyTag, (v) => setForm({ ...form, strategyTag: v }), { placeholder: t("pages.trades.new.pullback.breakout.296f1e6b", null, "Pullback, breakout…") })}
+            {input("pages.trades.new.stop.loss.sl.a16f5daa", form.stopLoss, (v) => setForm({ ...form, stopLoss: v }), { name: "stopLoss", placeholder: "1.09500" })}
+            {input("pages.trades.new.take.profit.tp.f3e73cce", form.takeProfit, (v) => setForm({ ...form, takeProfit: v }), { name: "takeProfit", placeholder: "1.11500" })}
+            {input("common.strategy.1b590fba", form.strategyTag, (v) => setForm({ ...form, strategyTag: v }), { name: "strategyTag", placeholder: t("pages.trades.new.pullback.breakout.296f1e6b", null, "Pullback, breakout…") })}
           </div>
 
           <div className="label label-nocap text-gold mt-8">{t("pages.trades.new.p05.timing_psychology", null, "Timing and psychology")}</div>
@@ -316,13 +322,13 @@ export default function TradesPage() {
               <span className="label">
                 {t("pages.trades.new.open.time.f5d607ee", null, "Open Time")} *
               </span>
-              <input className="input v-latn-num" type="datetime-local" value={form.openTime} onChange={(e) => setForm({ ...form, openTime: e.target.value })} required />
+              <input className="input v-latn-num" name="openTime" type="datetime-local" value={form.openTime} onChange={(e) => setForm({ ...form, openTime: e.target.value })} required />
             </label>
             <label>
               <span className="label">
                 {t("pages.trades.new.close.time.3fc955ae", null, "Close Time")} *
               </span>
-              <input className="input v-latn-num" type="datetime-local" value={form.closeTime} onChange={(e) => setForm({ ...form, closeTime: e.target.value })} required />
+              <input className="input v-latn-num" name="closeTime" type="datetime-local" value={form.closeTime} onChange={(e) => setForm({ ...form, closeTime: e.target.value })} required />
             </label>
             <div>
               <span className="label">{t("pages.trades.new.emotional.score.3adcd56b", null, "Emotional Score")}</span>

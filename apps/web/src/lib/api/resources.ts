@@ -119,6 +119,25 @@ export function getSyncStatus(accountId: string): Promise<SyncStatusView> {
   return api.request(`/api/v1/accounts/${encodeURIComponent(accountId)}/sync-status`);
 }
 
+/**
+ * TRD-06 — ask for a sync now (POST /accounts/{id}/sync).
+ *
+ * Three outcomes, all of them ordinary: `queued` (202 — dispatched says whether
+ * a queue accepted it immediately, deduplicated says the same window was already
+ * queued), `up-to-date` (200 — the cursor is already at/after now) and a thrown
+ * ApiError carrying the API's own code (`METAAPI_REQUIRED` for an account with
+ * no provider link, `TOO_MANY_REQUESTS` past 20/300).
+ */
+export function triggerSync(accountId: string): Promise<{
+  accountId: string;
+  status: "queued" | "up-to-date";
+  dispatched?: boolean;
+  deduplicated?: boolean;
+  window?: { from: string; to: string };
+}> {
+  return api.request(`/api/v1/accounts/${encodeURIComponent(accountId)}/sync`, { method: "POST", body: {} });
+}
+
 export function connectMetaApi(accountId: string): Promise<{ accountId: string; metaapiAccountId: string; status: string; alreadyConnected?: boolean }> {
   return api.request(`/api/v1/accounts/${encodeURIComponent(accountId)}/metaapi/connect`, { method: "POST", body: {} });
 }

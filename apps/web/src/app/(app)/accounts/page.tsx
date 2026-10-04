@@ -1,7 +1,8 @@
 
 "use client";
 import React, { useEffect, useState } from "react";
-import { listAccounts, createAccount, detectServer, getSyncStatus, connectMetaApi, disconnectMetaApi, listCredentials, createCredential, deleteCredential } from "../../../lib/api/resources";
+import { fmtDateLong } from "../../../i18n/format";
+import { listAccounts, createAccount, detectServer, getSyncStatus, triggerSync, connectMetaApi, disconnectMetaApi, listCredentials, createCredential, deleteCredential } from "../../../lib/api/resources";
 import type { AccountRecord } from "../../../lib/api/resources";
 import { createTranslator } from "../../../i18n/catalog";
 import type { Locale } from "../../../contracts/locale";
@@ -62,6 +63,28 @@ export default function AccountsPage() {
   const onConnect = async (id:string) => {
     try { const r:any = await connectMetaApi(id); setMsg(locale==="fa"?"اتصال موفق":"Connected: "+ (r.metaapiAccountId||"")); await refresh(); } catch(e:any){ setMsg(capMsg(t, e, "metaapi", locale)); }
   };
+  // TRD-06: ask for a sync now. The response is only a POINTER (the work is
+  // queued), so the row's state comes from the refresh — never from the click.
+  const [syncing, setSyncing] = useState<string|null>(null);
+  const onSync = async (id:string) => {
+    setSyncing(id); setMsg("");
+    try {
+      const r = await triggerSync(id);
+      setMsg(r.status === "up-to-date"
+        ? (locale==="fa" ? "همگام‌سازی لازم نیست — حساب به‌روز است" : "Nothing to sync — already up to date")
+        : (r.deduplicated
+            ? (locale==="fa" ? "همین بازه از قبل در صف است" : "The same window is already queued")
+            : (locale==="fa" ? "درخواست همگام‌سازی ثبت شد" : "Sync requested")));
+      await refresh();
+    } catch(e:any){
+      setMsg(e?.code === "TOO_MANY_REQUESTS"
+        ? (locale==="fa" ? "درخواست‌های همگام‌سازی زیاد است — کمی بعد تلاش کنید" : "Too many sync requests — try again shortly")
+        : e?.details?.account === "METAAPI_REQUIRED"
+          ? (locale==="fa" ? "فقط حساب‌های متصل به MetaApi قابل همگام‌سازی‌اند" : "Only MetaApi accounts can be synchronized")
+          : capMsg(t, e, "sync status", locale));
+    } finally { setSyncing(null); }
+  };
+
   const onDisconnect = async (id:string) => {
     try { await disconnectMetaApi(id); setMsg(locale==="fa"?"قطع شد":"Disconnected"); await refresh(); } catch(e:any){ setMsg(capMsg(t, e, "metaapi", locale)); }
   };
@@ -129,10 +152,18 @@ export default function AccountsPage() {
                   </div>
                   <div className="flex-gap-8">
                     <button className="btn-primary" onClick={()=>onConnect(a.id)} type="button">Connect</button>
+                    <button className="btn-ghost" onClick={()=>onSync(a.id)} type="button" disabled={syncing===a.id}>
+                      {syncing===a.id ? (locale==="fa"?"در حال ارسال…":"Requesting…") : (locale==="fa"?"همگام‌سازی":"Sync now")}
+                    </button>
                     <button className="btn-ghost" onClick={()=>onDisconnect(a.id)} type="button">Disconnect</button>
                   </div>
                 </div>
-                <div className="page-sub v-latn-num mt-8">ID {a.id} · created {new Date(a.createdAt).toLocaleDateString(locale==="fa"?"fa-IR":"en-US")}</div>
+                {/* `toLocaleDateString("fa-IR")` renders PERSIAN DIGITS, which the
+                    product rule (and the phase-1 formatter work) forbids — the row
+                    showed "۱۴۰۵/۷/۱۲" next to Latin "ID 7". `fmtDateLong` is the one
+                    place that formats a calendar date: same Jalali month for fa, Latin
+                    digits in both locales. Found by the visual pass, fixed here. */}
+                <div className="page-sub v-latn-num mt-8">ID {a.id} · created {fmtDateLong(locale, a.createdAt)}</div>
               </div>
             ))}
           </div>
