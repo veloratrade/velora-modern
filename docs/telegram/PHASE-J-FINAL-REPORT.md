@@ -56,6 +56,15 @@ web app immediately; a trade created on the web appears in `/last` and `/history
 | `e8d8d045b103c08dc56e0ad7f8b8364f9c17e18d` | `feat(web): Settings -> Telegram connection (website-first linking)` | the Settings screen, `telegram.json` catalogs (fa/en, 42 keys each), sidebar entry, resource functions |
 | `e6d861a5c3c62bedcfc42daa0dc73efb1263dc01` | `docs(telegram): operator guide, design map and security notes` | `docs/telegram/{DEPLOYMENT,README,SECURITY}.md` |
 
+**A note on three filenames that appear in early notes and in no tree:** a
+`telegramWebhookHandler.ts` (superseded — the ingress lives in
+`telegramRoutes.ts`, and the shared parse/claim step is `telegramUpdatePipeline.ts`),
+a `telegramUpdateHandler.ts` and a `telegramChannelService.ts` were considered and
+**never created**; nothing imports them and no document references them. Channel
+work lives in `telegramBot.ts` (binding, which requires server-side verification)
+and the `telegram_channels` table reached through the store port. Three modules
+would have been three places for one behaviour to drift.
+
 Deliberately **not** built, and recorded as decisions rather than omissions:
 `journal_entries` table, a second auth system, a separate Telegram database, an
 n8n relay transport (it does not exist in Modern — `MG-TG-2`), a second update
@@ -66,7 +75,9 @@ consumer, and any worker/queue path (`apps/worker` is undeployed — `MG-TG-3`).
 ## 3. What was proven (TESTED)
 
 `node tools/run-tests.mjs` → **945 tests, 945 passed, 0 failed, 0 cancelled,
-0 skipped**, ~180 s. Baseline on this branch before the Phase F batteries was
+0 skipped**, ~180 s (~180–195 s across runs), **re-run and confirmed at the final
+committed HEAD `e97981112e08dfdd97279514467ac75a97588e44`** (the two commits after
+the code HEAD are documentation-only: state records and this report). Baseline on this branch before the Phase F batteries was
 **851/851**; the delta is the batteries below. `npm run typecheck` → **exit 0**
 (5 projects). `bash tools/secret-scan.sh` → **PASS (0 findings)**. `npx next build`
 → **exit 0** with `/settings` and `/en/settings` in the route table.
