@@ -676,10 +676,12 @@
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
         "packages/domain/src/jalali.ts",
-        "packages/domain/src/jalali.test.ts"
+        "packages/domain/src/jalali.test.ts",
+        "packages/domain/src/tradingSession.ts",
+        "packages/domain/src/tradingSession.test.ts"
       ],
       "decisions": [],
-      "closure_criteria": "Ported or owner-dropped. PROGRESS 2026-10-04 (AC-14): JalaliCalendar ported to packages/domain/src/jalali.ts (pure, IO-free; gregorianToJalali verbatim, jalaliToGregorian + isJalaliLeap from the legacy single-owner TradeTimeNormalizer, formatJalaliDate; 11/11 tests incl. legacy golden vectors J1-J8 and full-day sweeps). OBSERVATION (verified against the executed legacy PHP itself): the legacy header's round-trip claim '1925..2124 / jy 1304..1503' is INACCURATE - the measured clean windows are gregorian-first 2000..2100 (every day) and jalali-first jy 1379..1478 except Esfand-30 of the 9 in-window leap years; outside them the legacy pair drifts (e.g. 1925-01-01 -> 1303/10/11 -> 1924-12-31). The port preserves legacy behavior verbatim (parity over correction); out-of-window drift is pinned by tests so any future algorithm change is loud; correcting the algorithm is an owner decision. REMAINING: TradingSessionEngine port, achievements engine port."
+      "closure_criteria": "Ported or owner-dropped. PROGRESS 2026-10-04 (AC-14): JalaliCalendar ported to packages/domain/src/jalali.ts (pure, IO-free; gregorianToJalali verbatim, jalaliToGregorian + isJalaliLeap from the legacy single-owner TradeTimeNormalizer, formatJalaliDate; 11/11 tests incl. legacy golden vectors J1-J8 and full-day sweeps). OBSERVATION (verified against the executed legacy PHP itself): the legacy header's round-trip claim '1925..2124 / jy 1304..1503' is INACCURATE - the measured clean windows are gregorian-first 2000..2100 (every day) and jalali-first jy 1379..1478 except Esfand-30 of the 9 in-window leap years; outside them the legacy pair drifts (e.g. 1925-01-01 -> 1303/10/11 -> 1924-12-31). The port preserves legacy behavior verbatim (parity over correction); out-of-window drift is pinned by tests so any future algorithm change is loud; correcting the algorithm is an owner decision. PROGRESS 2026-10-04 (AC-15): TradingSessionEngine + SessionWindow ported to packages/domain/src/tradingSession.ts (never invents windows; explicit IANA zones; DST via platform tz database; cross-midnight; half-open [start,end); legacy validation rules incl. EST/offset rejection). 19/19 tests (legacy vectors S1-S21) PLUS a direct cross-check: the ACTUAL legacy PHP classes and the modern port produce IDENTICAL output on all 14 classification vectors (summer/winter DST, boundaries, cross-midnight, weekday filter). REMAINING: achievements engine port."
     },
     {
       "id": "MG-OPS-TOOLING",
