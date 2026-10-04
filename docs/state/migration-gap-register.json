@@ -647,17 +647,21 @@
       "id": "MG-RANGE-GUARD",
       "section": "B",
       "title": "No runtime PnL range guard (assertFits equivalent)",
-      "status": "OPEN",
+      "status": "CLOSED",
       "priority": "P3",
-      "verification_state": "STATIC",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§9.1"
       ],
       "evidence": [
-        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "packages/domain/src/pnl.ts",
+        "apps/api/src/trades/tradeService.ts",
+        "packages/domain/src/pnl.test.ts",
+        "apps/api/src/trades/tradeService.test.ts"
       ],
       "decisions": [],
-      "closure_criteria": "Guard implemented or owner-waived"
+      "closure_criteria": "Guard implemented or owner-waived. Implemented 2026-10-04 (AC-13): legacy PnlCalculator::assertFits port - computePnl returns an explicit out-of-range result kind (netPnl 16 integer/8 fraction digits, rMultiple 10/8 - the legacy limits, stricter than the modern NUMERIC(20,2)/(20,8) columns so schema fit is guaranteed); tradeService maps it to the legacy error vocabulary (422 VALIDATION_FAILED, code OUT_OF_RANGE, messageKey errors.validation.range, field profitLoss/rMultiple) at both call sites (create + exit recompute). Verified: domain 17/17 incl. 6 boundary tests (16-digit pass / 17-digit reject, negative, shadowing order, 10-digit r pass / 11-digit reject); service 28/28 incl. 3 integration tests; full battery ALL PASS; typecheck 0 errors; secret-scan 0 findings. Mechanism divergence (deliberate, documented): result kind instead of throw, per ADR-001 §5 house style - the audit itself notes modern 'makes the branch explicit'."
     },
     {
       "id": "MG-DOMAIN-LEGACY-ONLY",
