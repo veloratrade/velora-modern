@@ -512,3 +512,125 @@ browser profile is a second suspect. Runtime and visual verification is therefor
 `next build` + `next start` (production), which is the stricter environment anyway. The dev-mode CSP
 also logs dozens of inline-*style* violations from Next's own dev runtime — that is why this phase
 moved its last inline styles into `app.css`.
+
+## §17 Phase 2 delivery record (2026-10-04) — auth / security / RBAC
+
+**Scope (§9 phase 2): SEC-01…SEC-04.** Executed in the order SEC-02 → SEC-03 → SEC-04 → SEC-01
+(reported as a deviation from the audit's §15 order; the reason is stated per item below).
+No new top-level nav, no second auth system, no compatibility layer; PostgreSQL stays the only
+authoritative store.
+
+### SEC-02 — rate limiting (was PARTIAL: 3 of 15 Legacy dispatcher routes + the admin mutations)
+
+| What | Legacy evidence | Modern result |
+|---|---|---|
+| Provider/IPC buckets | `api/index.php` `RateLimiter::hit('metaapi-connect', 5, 900)` · `('metaapi-detect', 20, 900)` · `('metaapi-webhook', 120, 60)` | `accounts:metaapi-connect` 5/900 · `accounts:detect-server` 20/900 · `webhooks:metaapi` 120/60 |
+| Dynamic path | `preg_match('~\A/api/v1/accounts/\d+/sync\z~D')` inside the throttle `switch` | `THROTTLED_PATTERN_ROUTES` + `throttleKeyFor()`: `POST /accounts/{id}/metaapi/connect` (1 pattern rule) |
+| Admin user mutations | `UserManagementController::setStatus` + `::setRole` → `RateLimiter::hit('admin-user-action', 30, 300)` — the ONE bucket Legacy attached to those two handlers | `admin:user-action` 30/300 on `PATCH .../users/{id}/role` and `.../status` (a second, third pattern rule) |
+
+Ordering is Modern's (limiter at dispatch, i.e. BEFORE auth) and is the safe direction: an
+unauthenticated flood is refused without doing auth work, while an authorized actor still gets
+exactly Legacy's 30 mutations per 5 minutes. Asserted behaviourally, not just as a table:
+`rateLimitRoutes.test.ts` **17/17**, including "the two mutations share ONE bucket" (15+15 then 429)
+and "near-misses stay unthrottled".
+
+**Deliberately NOT declared:** Legacy's `metaapi-sync` (20/300) guards `POST /accounts/{id}/sync`,
+a route Modern does not have; Legacy's `ai-analyze` / `ai-report` / `ai-feedback` (both the
+dispatcher IP limits and `AIController`'s per-USER `ai-*-user-{id}` limits) belong to the AI phase;
+the `admin-*` controller buckets (config, feature flags, integrations, settings, health refresh,
+user create/invite) guard admin surfaces owned by the admin phase. **A rate-limit key for a route
+that does not exist is an untested number pretending to be a guarantee** — each lands with its
+route. (Discovered while closing this item: Legacy also throttles inside controllers; the full
+33-call inventory is recorded so later phases inherit the exact numbers instead of re-deriving them.)
+
+### SEC-03 — auth events / login history (was MISSING)
+
+`auth_events` (migration `0024`), the port + Postgres + memory stores, recording at signup-success /
+login-success / login-failure (reason = the returned code), and
+`GET /api/v1/admin/users/{id}/login-history`. **Schema decisions and the two documented divergences
+from Legacy are recorded in `docs/security/RBAC-CAPABILITY-MAP.md` (row 10) and in the migration
+comments**: (a) a failed login from an UNKNOWN address stores `user_id NULL` and never the attempted
+address (anti-enumeration) while Legacy kept the attempt row; (b) the raw `ip_address`/`user_agent`
+are **omitted from the response body** for anyone who is not `super_admin`/System Owner, where Legacy
+returned them to any `users.view` holder (Modern keeps Legacy's D3 intent — the sensitive view is
+super-admin-only — and enforces it in the payload, not in the template). Write path is fail-open
+(logged, `lastWriteError()`), read path fail-loud — a deliberate divergence from Legacy's swallowed
+read errors, because an unreadable audit trail must not look like an empty one.
+
+Batteries: `authEvents.test.ts` 5/5 · `loginHistoryRoutes.test.ts` 5/5 (401/403/404/400/503 + masking
+asserted by **absence of the key**) · `pgAuthEvents.pg.test.ts` 4/4 (NULL actor, CHECK rejections,
+ordering/paging, real login writes, CASCADE) · `readinessSchema.pg.test.ts` 5/5. Migration `0024` is
+applied on the evidence database.
+
+### SEC-04 — session / cookie / CSP / HSTS / edge authorisation (was PARTIAL)
+
+| Item | Legacy | Modern |
+|---|---|---|
+| Refresh cookie | `api/src/Core/Response.php`: `__Host-velora_refresh`, `Path=/`, Secure, HttpOnly, **SameSite=Strict** | Identical. The old `refresh_token` name is CLEARED on every Set-Cookie (never read, no fallback) so the rename leaves nothing behind |
+| HSTS | `.htaccess:49` → `Strict-Transport-Security: max-age=31536000` (no includeSubDomains/preload) | API `SECURITY_HEADERS` + web `proxy.ts` set **Legacy's exact value**; the stronger directives are deliberately NOT added — Legacy does not set them and both are commitments the app cannot honestly make |
+| HTML route gates | `locale-router.php`: `$protectedRoutes` → no HTML until a live server session; `admin/index.html` additionally requires a panel role; **fail closed when the check cannot run** | `apps/web/src/proxy.ts` + `lib/auth/protectedRoutes.ts`: the proxy asks `GET /api/v1/auth/session` (READ-ONLY probe) and refuses with 302 → `/{locale}/login` + `no-store`, or → `/{locale}/dashboard` for a signed-in non-panel user; an unreachable probe fails closed (`X-Velora-Edge-Gate: gate-unavailable`) |
+| Cache class | `.htaccess` `private, max-age=0, must-revalidate` on HTML + `no-store` on the gate | The proxy now actually applies ADR-009 §4 **route class D** (`private, no-store`) to authenticated routes — declared in the frozen contract but never applied before this phase |
+
+The probe exists because Modern's web tier holds no database credentials by contract, and it must NOT
+be `POST /auth/refresh`: that rotates the token, so a page view would spend the 30/300 refresh budget
+and turn every navigation into a rotation event. `AuthService.sessionProbe()` shares its validation
+with `refresh()` through one private `sessionState()`, and is read-only: **`db/tests/pgSessionProbe.pg.test.ts`
+asserts the `user_sessions` row is byte-identical after five probes and that the original token still
+performs a real rotation afterwards** (3/3, stable over repeated runs).
+
+**Defect found by this phase's own real-PG concurrency test and fixed immediately (never left as TODO):**
+refresh rotation was **not atomic** — two concurrent refreshes of the same token both succeeded, both
+returned a fresh pair, and the row kept only the last writer's hash, so the other caller's brand-new
+refresh token was dead on arrival. Fixed with a compare-and-swap
+(`UPDATE … WHERE id = $n AND refresh_token_hash = $expected RETURNING id`) in both stores; a rotation
+whose expectation is stale is a no-op that reports `false`, and the service refuses the loser with the
+same typed `INVALID_TOKEN` a stale token gets instead of handing it a dead pair. No schema change.
+**Remaining, documented not invented:** ADR-005 item 9 also promises *reuse detection with family
+revocation + a security event* when an already-rotated token is replayed; that needs rotation history
+(a `family_id`/previous-hash column), so it belongs with the schema work of phase 4. Today a replayed
+rotated token is refused (`INVALID_TOKEN`) — the reuse is not yet *detected and escalated*.
+
+**Contract delta, stated rather than silently changed:** Legacy protects 11 HTML routes; Modern's
+protected list is 10 because `markets` and `news` are declared **public** by the frozen `PUBLIC_ROUTES`
+contract (ADR-009 C-03), which carries an explicit owner-decision flag (R8). The guard test
+(`apps/web/src/lib/auth/protectedRoutes.test.ts`, 7/7) pins the current truth in BOTH directions and
+fails if a page appears that is neither protected nor public by contract. These two pages render no
+user data; the shell itself carries nothing user-specific.
+
+### SEC-01 — RBAC vocabulary map (was PARTIAL: 4 of 24 Legacy permissions)
+
+`docs/security/RBAC-CAPABILITY-MAP.md`: all 24 Legacy `P_*` permissions with **meaning, owner,
+enforcement point, evidence**, the 3 Modern-only permissions, the invariants table with its proofs, and
+a governance rule. 6 of 24 are ENFORCED today (overview, users.view, the merged suspend/activate pair,
+users.change_role, audit.view_sensitive); the rest are PARTIAL or NOT DECLARED **with the reason** —
+declaring a permission for an operation that does not exist would fabricate an authorization surface.
+The document is held to the code by `apps/api/src/auth/rbacCapabilityMap.test.ts` **5/5**, which reads
+the markdown, cross-checks every row against the real 24 Legacy ids and Modern's `PERMISSIONS`
+vocabulary, and fails if a row claims an enforcement point that no `PERMISSIONS` entry backs. The
+governing rule is written into both: **a capability brings its permission with it** — the phase that
+lands support / admin / AI surfaces adds the permission, its grant row, its enforcement point and its
+test in the same commit, and moves the row to ENFORCED.
+
+### Phase-2 gate results
+
+| Gate | Result |
+|---|---|
+| `npx tsc -b packages/contracts packages/domain apps/api apps/worker apps/web` | **0 errors** |
+| `npm test` (root runner) | **1014/1014, 0 fail, 0 skipped** (up from 945 tests) |
+| Real-PG batteries (26 files, `DATABASE_URL` → PostgreSQL 16.15) | **all green — 283 tests** (was 256 + this phase's 4 auth-event tests + 3 probe tests + 2 CAS assertions in `pgUserStore.pg`) |
+| `npx next build` (apps/web) | success (proxy gate compiled into the production server) |
+| `tools/secret-scan.sh` | **PASS (0 findings)** |
+
+**Runtime + browser evidence (live PG, API 8080, Next production 3200):**
+`GET /api/v1/auth/session` → `{authenticated:false}` anonymous, `{authenticated:true, role:"user"}`
+signed in, `no-store` (route battery 6/6). Browser: real form login → `__Host-velora_refresh`
+`secure=true httpOnly=true sameSite=Strict path=/ domain=127.0.0.1` **accepted by Chromium over plain
+HTTP** and the legacy `refresh_token` cookie gone; page reload on a gated route stays signed in
+(`POST /auth/refresh → 200`); anonymous `/dashboard`, `/settings`, `/profile`, `/trades`, `/admin`
+→ landed on `/login` (and `/en/*` → `/en/login`); signed-in pages → **200 with
+`Cache-Control: private, no-store`** for all five; a plain user on `/admin` → landed on `/dashboard`
+(the server-side panel gate, no client guard involved); the same user promoted to `admin` in
+PostgreSQL reaches `/admin` **without re-login** (the gate reads authority from storage on every
+check); with the API stopped, protected pages refuse with `gate-unavailable` + `no-store` while
+`/markets`, `/news`, `/support`, `/login` still serve — Legacy's fail-closed semantics.
+Existing user capability removed: **none.** "No existing user capability was removed."

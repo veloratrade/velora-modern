@@ -3,7 +3,7 @@
   "generated_at": "2026-10-04",
   "source_audit": "docs/audits/2026-10-04-CAPABILITY-AUDIT-legacy-to-modern.md",
   "git": {
-    "modern_head": "42f38cba1e96ab6f3582aaccd3f1644b9fb6133a",
+    "modern_head": "a3bd138",
     "modern_branch": "feat/telegram-journal-client",
     "legacy_ref": "edede31"
   },
@@ -19,7 +19,7 @@
   ],
   "counts": {
     "VERIFIED": {
-      "count": 8,
+      "count": 10,
       "ids": [
         "ACC-01",
         "ACC-04",
@@ -27,6 +27,8 @@
         "ACC-07",
         "ACC-08",
         "ACC-09",
+        "SEC-03",
+        "SEC-04",
         "TRD-01",
         "PLT-01"
       ]
@@ -41,12 +43,11 @@
       ]
     },
     "PARTIAL": {
-      "count": 14,
+      "count": 13,
       "ids": [
         "ACC-06",
         "SEC-01",
         "SEC-02",
-        "SEC-04",
         "TRD-02",
         "TRD-04",
         "TRD-05",
@@ -74,11 +75,10 @@
       ]
     },
     "MISSING": {
-      "count": 19,
+      "count": 18,
       "ids": [
         "ACC-10",
         "ACC-11",
-        "SEC-03",
         "TRD-03",
         "TRD-08",
         "AI-01",
@@ -217,36 +217,36 @@
       "area": "security",
       "capability": "RBAC vocabulary + enforcement",
       "status": "PARTIAL",
-      "legacy_evidence": "24 P_* permissions in Role.php, enforced per route",
-      "modern_evidence": "4 enforced: admin.panel.access, rbac.matrix.view, rbac.self.view, users.view",
-      "next_action": "Enforce the permissions the next surfaces need (MG-RBAC-VOCAB)"
+      "legacy_evidence": "24 P_* permissions in Role.php (18 admin / 24 super_admin), enforced per route, fail-closed can()",
+      "modern_evidence": "docs/security/RBAC-CAPABILITY-MAP.md answers for all 24 with meaning/owner/enforcement/evidence + guard test rbacCapabilityMap.test.ts 5/5; 6 of 24 ENFORCED in code (overview→admin.panel.access, users.view, suspend+activate merged→users.manage_status, change_role, audit.view_sensitive via SEC-03) + 3 Modern-only permissions",
+      "next_action": "A capability brings its permission with it: each later phase adds the permission + grant row + enforcement point + test in the same commit and moves its map row to ENFORCED (phases 5/6/7 own support/admin/AI)."
     },
     {
       "id": "SEC-02",
       "area": "security",
       "capability": "Rate limiting on expensive routes",
       "status": "PARTIAL",
-      "legacy_evidence": "15 throttled routes incl. accounts/sync/ai",
-      "modern_evidence": "8 auth buckets + telegram 2; accounts/detect-server/sync/ai not throttled",
-      "next_action": "Extend table with accounts/sync limits"
+      "legacy_evidence": "33 RateLimiter::hit calls: 15 at PHP dispatch (per-IP) + 18 inside admin/AI/support controllers (incl. per-USER ai-*-user-{id})",
+      "modern_evidence": "All 15 dispatcher routes that EXIST in Modern are throttled at Legacy's exact numbers: 8 auth buckets + accounts:metaapi-connect 5/900 + accounts:detect-server 20/900 + webhooks:metaapi 120/60 + admin:user-action 30/300 on the two PATCH mutations Legacy limited in setStatus/setRole; THROTTLED_PATTERN_ROUTES + throttleKeyFor() single lookup; rateLimitRoutes.test.ts 17/17 incl. behavioural 429s and the shared-bucket case",
+      "next_action": "Remaining Legacy buckets land WITH their routes: metaapi-sync (no Modern sync route), ai-analyze/report/feedback (AI phase), admin-* controller buckets (admin phase). No key is declared for a route that does not exist."
     },
     {
       "id": "SEC-03",
       "area": "security",
       "capability": "Auth events / login history",
-      "status": "MISSING",
-      "legacy_evidence": "auth_events; admin security/logins,signups; login-history",
-      "modern_evidence": "audit_log exists; no auth-event recording",
-      "next_action": "Record auth events (MG-AUTH-EVENTS)"
+      "status": "VERIFIED",
+      "legacy_evidence": "api/database/schema.sql auth_events + AuthService write sites 135/349/373 + AuthEventRepository + admin logins/signups + login-history route (api/index.php:243)",
+      "modern_evidence": "auth_events (0024, applied); event_type/result closed vocabularies + CHECK reason-only-on-failure; NULL user_id for unknown account (address never stored); fail-open write (logged) vs fail-loud read; GET /api/v1/admin/users/{id}/login-history gated by users.view with 404/400/503 contracts and ip/UA omitted from the body unless super_admin|System Owner; append-only privileges in db/roles.sql. Batteries: authEvents 5/5, loginHistoryRoutes 5/5, pgAuthEvents.pg 4/4, readinessSchema 5/5",
+      "next_action": "None for the login/signup surface. Legacy's admin security listings (logins/signups pages) remain part of the admin phase; the data they need now exists."
     },
     {
       "id": "SEC-04",
       "area": "security",
       "capability": "Session/cookie/CSP/HSTS/edge authz hardening",
-      "status": "PARTIAL",
-      "legacy_evidence": "__Host- prefix, SameSite=Strict, CSP manifest, proxy HSTS, HTML-route gates",
-      "modern_evidence": "open: MG-SEC-COOKIE, MG-SEC-CSP, MG-SEC-HSTS, MG-SEC-EDGE-AUTHZ",
-      "next_action": "Carried register items; not re-audited"
+      "status": "VERIFIED",
+      "legacy_evidence": "Response.php __Host-velora_refresh + SameSite=Strict; .htaccess:49 HSTS max-age=31536000; locale-router.php protected-route session check with 302+no-store and admin role gate, fail closed; .htaccess HTML cache private,max-age=0,must-revalidate; CSP manifest verification",
+      "modern_evidence": "Cookie renamed to __Host-velora_refresh with Path=/; HttpOnly; Secure; SameSite=Strict and the legacy name cleared (chromium-accepted, browser-verified); Legacy's exact HSTS on API + web; edge gate in proxy.ts via read-only GET /api/v1/auth/session (route battery 6/6) refusing anonymous (302→/{locale}/login+no-store) and non-panel /admin (302→/{locale}/dashboard), failing closed when the probe cannot answer; ADR-009 route class D (private, no-store) now actually applied; rotation made atomic by compare-and-swap (concurrency asserted on real PG); protectedRoutes.test.ts 7/7 pins the protected/public split including the R8 delta for markets/news",
+      "next_action": "ADR-005 item 9 second half (reuse detection → revoke the token family + security event) needs rotation history (family_id/previous hash) and belongs with phase-4 schema work; today a replayed rotated token is refused but not escalated. /markets + /news remain public per the frozen PUBLIC_ROUTES contract (owner decision R8)."
     },
     {
       "id": "TRD-01",
