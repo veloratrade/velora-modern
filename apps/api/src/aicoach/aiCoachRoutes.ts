@@ -53,9 +53,13 @@ export class PgAiCoachStore implements AiCoachStore {
 
   async latest(userId: string, limit: number): Promise<CoachingInsight[]> {
     const rows = await this.q(
+      // `feature = 'coach'` (migration 0023): journal extraction, transcription and
+      // image interpretation share this ledger so there is ONE cost/outcome
+      // record, but they are NOT coaching insights. Without this predicate a
+      // transcription attempt could be rendered to the user as coaching.
       `SELECT id, provider, model, prompt_version, trades_analyzed, insight, outcome, created_at
          FROM ai_coaching_logs
-        WHERE user_id = $1 AND outcome = 'success'
+        WHERE user_id = $1 AND outcome = 'success' AND feature = 'coach'
         ORDER BY created_at DESC, id DESC
         LIMIT $2`,
       [userId, limit],

@@ -29,6 +29,7 @@ import { handlePortfolioRoutes } from "../portfolio/portfolioRoutes.js";
 import { handleEaRoutes } from "../ea/eaRoutes.js";
 import { handleTenancyRoutes } from "../tenancy/tenancyRoutes.js";
 import { handleDeveloperRoutes } from "../developer/developerRoutes.js";
+import { handleTelegramRoutes } from "../telegram/telegramRoutes.js";
 
 /**
  * Registration order is significant only for readability: each handler matches
@@ -38,6 +39,10 @@ const ROUTE_HANDLERS: readonly ExtendedRouteHandler[] = [
   // Ingress first: it is unauthenticated (signature-authenticated) and must not
   // be reachable behind any bearer check.
   handleWebhookRoutes,
+  // Telegram: the webhook ingress is registered here for the same reason (its
+  // secret-token check precedes any bearer handling), and its authenticated
+  // routes resolve identity from `claims.sub` only.
+  handleTelegramRoutes,
   // Authenticated capability surface.
   handleSyncStatusRoutes,
   handleAnalyticsRoutes,

@@ -19,6 +19,7 @@ import {
   AiProviderNotConfiguredError,
   checkPayloadSize,
   validateInsight,
+  type AiAttemptFeature,
   type AiAttemptRecord,
   type AiAttemptStore,
   type AiGenerationRequest,
@@ -39,6 +40,11 @@ export type GenerationOutcome =
 
 export interface GenerationInput {
   readonly userId: string;
+  /**
+   * Which feature is asking. Omitted ⇒ 'coach', so every existing caller keeps
+   * its exact behaviour while a new feature can be told apart in the ledger.
+   */
+  readonly feature?: AiAttemptFeature | undefined;
   readonly facts: Readonly<Record<string, unknown>>;
   readonly windowFrom?: string | null;
   readonly windowTo?: string | null;
@@ -65,6 +71,7 @@ export class AiCoachService {
   async generate(input: GenerationInput): Promise<GenerationOutcome> {
     const base = {
       userId: input.userId,
+      feature: input.feature ?? "coach",
       provider: this.deps.provider.name,
       model: this.deps.provider.model,
       promptVersion: INSIGHT_PROMPT_VERSION,

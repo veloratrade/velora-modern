@@ -104,6 +104,17 @@ export interface ApiConfig {
   readonly admin?: import("../admin/adminRoutes.js").AdminStore;
   /** v1.5 portfolio / prop drawdown / FX reads. */
   readonly portfolio?: import("../portfolio/portfolioRoutes.js").PortfolioStore;
+  /**
+   * Telegram journal client (ADR-018 / migration 0023): linking, the bot
+   * surface and the webhook ingress, composed in one place because they share
+   * one store, one config resolution and one update pipeline.
+   *
+   * Absent when the bot token is missing, or when `TELEGRAM_UPDATE_MODE` does
+   * not name a consumer, or when polling was refused in production — the whole
+   * surface then answers its documented fail-closed 503 and the rest of the
+   * product is unaffected.
+   */
+  readonly telegram?: import("../telegram/telegramRoutes.js").TelegramCapability;
   /** v2.0 EA ingestion store. */
   readonly ea?: import("../ea/eaRoutes.js").EaStore;
   /** v2.0 sync dispatch used by EA ingestion (falls back to durable-only). */

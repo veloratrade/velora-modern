@@ -81,6 +81,21 @@ import { PgPortfolioStore } from "./portfolio/portfolioRoutes.js";
 import { PgEaStore } from "./ea/eaRoutes.js";
 import { PgTenancyStore } from "./tenancy/tenancyRoutes.js";
 import { PgDeveloperStore } from "./developer/developerRoutes.js";
+// Telegram journal client (ADR-018 / migration 0023). Composed here like every
+// other migrated capability: one place where its dependencies are visible.
+import { resolveTelegramConfig } from "./telegram/telegramConfig.js";
+import { HttpTelegramBotApi } from "./telegram/telegramApi.js";
+import { PgTelegramStore } from "./telegram/pgTelegramStore.js";
+import { TelegramLinkService } from "./telegram/telegramLinkService.js";
+import { TelegramBot } from "./telegram/telegramBot.js";
+import { TelegramUpdatePipeline } from "./telegram/telegramUpdatePipeline.js";
+import { TelegramPoller } from "./telegram/telegramPoller.js";
+import { JournalApplicationService } from "./journal/journalApplicationService.js";
+import { JournalAnalysisService } from "./journal/journalAnalysisService.js";
+import { UnconfiguredMediaInterpreter, GeminiMediaInterpreter, type MediaInterpreter } from "./aicoach/mediaInterpreter.js";
+import { GeminiAiProvider } from "./aicoach/geminiProvider.js";
+import { AiCoachService } from "./aicoach/aiCoachService.js";
+import { PgAiAttemptStore, UnconfiguredAiProvider, AI_PROVIDERS } from "./aicoach/aiProvider.js";
 
 
 async function main(): Promise<void> {
@@ -207,6 +222,7 @@ async function main(): Promise<void> {
     tenancy?: import("./tenancy/tenancyRoutes.js").TenancyStore;
     developer?: import("./developer/developerRoutes.js").DeveloperStore;
     developerKeys?: import("./developer/developerAuth.js").DeveloperKeyAuth;
+    telegram?: import("./telegram/telegramRoutes.js").TelegramCapability;
   } = {};
   if (boot.jwtSecret !== undefined) {
     capabilities.auth = new AuthService({
@@ -503,6 +519,153 @@ async function main(): Promise<void> {
       console.log(JSON.stringify({ level: "info", event: "attachments.enabled", storage: "local-disk" }));
     } else {
       console.log(JSON.stringify({ level: "warn", event: "attachments.storage_absent" }));
+    }
+
+    // -----------------------------------------------------------------------
+    // Telegram journal client (ADR-018 / migration 0023).
+    //
+    // FAIL-CLOSED AND PARTIAL BY DESIGN. The capability is composed from what is
+    // actually configured, and every missing piece removes exactly the surface it
+    // belongs to:
+    //   * no bot token        → no Telegram capability at all (503 everywhere);
+    //   * no webhook secret   → no ingress (and `TELEGRAM_UPDATE_MODE=webhook`
+    //                           is refused by the resolver);
+    //   * no bot username or
+    //     no public app URL   → the bot runs, the web surface runs, but the
+    //                           onboarding button is unavailable and the API says
+    //                           so rather than returning a broken link;
+    //   * no update mode      → nobody consumes the stream (TG-006).
+    // The bot token itself is never logged, never placed on an error, and its
+    // `SecretValue` holder prints as `[redacted]`.
+    // -----------------------------------------------------------------------
+    const telegram = resolveTelegramConfig(process.env);
+    for (const finding of telegram.findings) {
+      // Finding CODE + fixed message only; the messages never embed a value.
+      console.log(JSON.stringify({ level: telegram.configured ? "warn" : "info", event: "telegram.finding", code: finding.code, message: finding.message }));
+    }
+    if (telegram.configured && telegram.botToken !== null) {
+      const telegramStore = new PgTelegramStore(pool);
+      const telegramApi = new HttpTelegramBotApi(telegram.botToken);
+      // The SAME append-only audit trail every other privileged mutation writes
+      // to (a second PgAuditStore over the same table — the store is stateless
+      // beyond its executor, so this is one trail, not two).
+      const telegramAudit = new PgAuditStore(pool);
+      const links = new TelegramLinkService({
+        store: telegramStore,
+        audit: telegramAudit,
+        botUsername: () => resolveTelegramConfig(process.env).botUsername,
+      });
+
+      // Profile lookups. Both are read per call: a user who changes their
+      // timezone or language sees the change on their next message.
+      const profileQuery = async (userId: string): Promise<{ locale: "fa" | "en"; timezone: string } | null> => {
+        const rows = await q("SELECT locale, timezone FROM users WHERE id = $1 LIMIT 1", [userId]);
+        const row = rows[0];
+        if (row === undefined) return null;
+        return { locale: row["locale"] === "en" ? "en" : "fa", timezone: String(row["timezone"] ?? "UTC") };
+      };
+
+      // ONE attempt ledger for the whole AI surface: coaching, journal
+      // extraction, transcription and vision all land in `ai_coaching_logs`
+      // tagged by `feature`, which is what makes the cost/outcome answerable in
+      // one query instead of several partial ones.
+      const attempts = new PgAiAttemptStore(q);
+      const consent = capabilities.aiCoach ?? new PgAiCoachStore(q);
+
+      // Journal analysis reuses the PLATFORM's coaching pipeline: consent gate,
+      // payload bound, provider port, output validation, durable attempt record.
+      // Nothing about that governance is re-implemented for Telegram.
+      const geminiKey = (process.env["GEMINI_API_KEY"] ?? "").trim();
+      const provider = geminiKey === "" ? undefined : new GeminiAiProvider({ apiKey: geminiKey });
+      const coach = new AiCoachService({
+        provider: provider ?? new UnconfiguredAiProvider(),
+        consent,
+        attempts,
+        allowedProviders: AI_PROVIDERS,
+      });
+
+      // Media interpretation is a SEPARATE capability with its own key decision:
+      // a deployment may enable journal analysis and decline voice/vision, and
+      // the bot degrades to "send it as text" instead of failing.
+      let interpreter: MediaInterpreter = new UnconfiguredMediaInterpreter();
+      if (geminiKey !== "") interpreter = new GeminiMediaInterpreter({ apiKey: geminiKey });
+
+      // A DEDICATED TradeService over the same durable ledger.
+      //
+      // WHY NOT REUSE `capabilities.trades`: that one is composed next to the
+      // HTTP auth capability and therefore exists only when a boot JWT secret
+      // does. The bot's write path must not depend on the presence of the HTTP
+      // login surface — the webhook ingress is unauthenticated by design, and a
+      // deployment that consumes updates but has no JWT secret still has to be
+      // able to journal (and to refuse to, explicitly, if it cannot). Both
+      // instances are thin wrappers over the SAME stores, so the ADR-002 fold,
+      // validation and event log are identical on either path.
+      const journalTrades = new TradeService({
+        store: new PgTradeStore(pool),
+        getUserTimezone: async (userId) => (await profileQuery(userId))?.timezone ?? "UTC",
+        verifyAccountOwnership: async (accountId, userId) =>
+          (await q("SELECT 1 FROM trading_accounts WHERE id = $1 AND user_id = $2 LIMIT 1", [accountId, userId])).length > 0,
+      });
+      const journal = new JournalApplicationService({
+        trades: journalTrades,
+        drafts: telegramStore,
+        getUserTimezone: async (userId) => (await profileQuery(userId))?.timezone ?? "UTC",
+      });
+
+      const bot = new TelegramBot({
+        api: telegramApi,
+        store: telegramStore,
+        links,
+        journal,
+        analysis: new JournalAnalysisService({ coach, journal }),
+        media: { interpreter, attempts },
+        attachments: capabilities.attachments,
+        // One durable limiter store across every process, so the limit a user
+        // hits does not depend on which replica answered.
+        limiter: new FixedWindowRateLimiter(rateLimitStore),
+        appUrl: () => resolveTelegramConfig(process.env).appUrl,
+        getUserLocale: async (userId) => (await profileQuery(userId))?.locale ?? null,
+        log: (event) => console.log(JSON.stringify(event)),
+      });
+
+      const pipeline = new TelegramUpdatePipeline({
+        bot,
+        mode: () => resolveTelegramConfig(process.env).updateMode,
+        log: (event) => console.log(JSON.stringify(event)),
+      });
+
+      capabilities.telegram = {
+        config: () => resolveTelegramConfig(process.env),
+        links,
+        store: telegramStore,
+        pipeline,
+        limiter: new FixedWindowRateLimiter(rateLimitStore),
+        audit: telegramAudit,
+        log: (event: Record<string, unknown>) => console.log(JSON.stringify(event)),
+      };
+
+      // THE SECOND CONSUMER IS NEVER STARTED. The resolver has already refused
+      // polling in production (TG-007); here the mode is the only thing that can
+      // start the loop, and webhook mode reaches the bot exclusively through the
+      // ingress route.
+      if (telegram.updateMode === "polling") {
+        const poller = new TelegramPoller({ api: telegramApi, pipeline, log: (event) => console.log(JSON.stringify(event)) });
+        void poller.run();
+        console.log(JSON.stringify({ level: "warn", event: "telegram.polling_enabled" }));
+      }
+      console.log(
+        JSON.stringify({
+          level: "info",
+          event: "telegram.enabled",
+          updateMode: telegram.updateMode,
+          linking: telegram.linkingConfigured,
+          ingress: telegram.webhookConfigured,
+          analysis: provider !== undefined,
+          media: geminiKey !== "",
+        }),
+      );
+    } else {
+      console.log(JSON.stringify({ level: "info", event: "telegram.disabled" }));
     }
   }
   void withTransaction;

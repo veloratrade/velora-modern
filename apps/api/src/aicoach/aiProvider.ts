@@ -123,9 +123,22 @@ export function validateInsight(insight: unknown): InsightValidation {
   return { ok: true };
 }
 
+/**
+ * Which FEATURE asked for the generation.
+ *
+ * 0017's ledger records every attempt, but its columns cannot tell a coaching
+ * insight from a journal extraction or a transcription. Migration 0023 adds the
+ * discriminator so ONE ledger keeps answering "what did we spend, on what, and
+ * did it work" without a second AI table, and so the coach's read path can
+ * exclude attempts that are not coaching.
+ */
+export type AiAttemptFeature = "coach" | "journal_extract" | "transcribe" | "vision_extract";
+
 /** A durable record's shape, matching 0017's ai_coaching_logs contract. */
 export interface AiAttemptRecord {
   readonly userId: string;
+  /** Defaults to 'coach' — the only meaning a pre-0023 row can have. */
+  readonly feature?: AiAttemptFeature | undefined;
   readonly provider: AiProviderName;
   readonly model: string;
   readonly promptVersion: string;
@@ -153,14 +166,14 @@ export class PgAiAttemptStore implements AiAttemptStore {
     const rows = await this.q(
       `INSERT INTO ai_coaching_logs
          (user_id, provider, model, prompt_version, window_from, window_to, trades_analyzed,
-          insight, tokens_in, tokens_out, cost_micro_usd, outcome, error_code)
+          insight, tokens_in, tokens_out, cost_micro_usd, outcome, error_code, feature)
        VALUES ($1, $2, $3, $4, $5::timestamptz, $6::timestamptz, $7,
-               $8::jsonb, $9, $10, $11, $12, $13)
+               $8::jsonb, $9, $10, $11, $12, $13, $14)
        RETURNING id::text AS id`,
       [
         entry.userId, entry.provider, entry.model, entry.promptVersion, entry.windowFrom, entry.windowTo,
         entry.tradesAnalyzed, JSON.stringify(entry.insight), entry.tokensIn, entry.tokensOut,
-        entry.costMicroUsd, entry.outcome, entry.errorCode,
+        entry.costMicroUsd, entry.outcome, entry.errorCode, entry.feature ?? "coach",
       ],
     );
     return { id: String(rows[0]?.["id"]) };
