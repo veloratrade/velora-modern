@@ -12,7 +12,7 @@ type NavItem = { href: string; icon: keyof typeof SidebarIcons; key: string; fal
 
 const NAV: NavItem[] = [
   { href: "/dashboard", icon: "dash", key: "common.dashboard.2aea7aaf", fallback: "داشبورد" },
-  { href: "/accounts", icon: "accounts", key: "common.accounts", fallback: "حساب‌ها" },
+  { href: "/accounts", icon: "accounts", key: "nav.accounts", fallback: "حساب‌ها" },
   { href: "/trades", icon: "journal", key: "common.trades.c19408e7", fallback: "ژورنال معاملات" },
   { href: "/analytics", icon: "perf", key: "common.performance.a68933d2", fallback: "تحلیل عملکرد" },
   { href: "/markets", icon: "mkt", key: "common.markets.9f1cdf65", fallback: "بازارها" },
@@ -50,9 +50,10 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
 
   const onLogout = async (e: React.MouseEvent) => {
     e.preventDefault();
-    const fa = locale === "fa";
-    const msg = fa ? "آیا می‌خواهید از حساب VELORA خارج شوید؟" : "Do you want to sign out?";
-    const ok = window.confirm(msg);
+    // Legacy's own confirmation copy (public/locales/*.json @edede31) — the shell
+    // used to hard-code this sentence here, which meant the EN shell could drift
+    // from the catalog. The wording is Legacy's, not a Modern invention.
+    const ok = window.confirm(t("pages.dashboard.are.you.sure.you.want.to.logout.16e6ca9b", null, "مطمئن هستید که می‌خواهید از حساب VELORA خارج شوید؟"));
     if (ok) {
       await logout();
       window.location.replace(prefix + "/login");
@@ -127,11 +128,11 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         )}
         {signedIn ? (
           <button className="sb-logout" onClick={onLogout} type="button">
-            <span>{locale === "fa" ? "خروج" : "Sign out"}</span>
+            <span>{t("nav.logout", null, "خروج")}</span>
           </button>
         ) : (
           <Link className="sb-logout sb-signin" href={prefix + "/login"} onClick={onClose}>
-            <span>{locale === "fa" ? "ورود به حساب" : "Sign in"}</span>
+            <span>{t("common.login.to.account.8181f948", null, "ورود به حساب")}</span>
           </Link>
         )}
       </aside>
