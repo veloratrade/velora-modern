@@ -1,0 +1,24 @@
+{
+  "schema": "velora-legacy-export/1",
+  "synthetic": true,
+  "note": "SYNTHETIC FIXTURE \u2014 invented rows for the load rehearsal harness. Never production data.",
+  "source_system": "legacy-mysql (fixture)",
+  "exported_at": "2026-10-04T00:00:00Z",
+  "tables": [
+    "users",
+    "trading_accounts",
+    "trades",
+    "trade_exits"
+  ],
+  "row_counts": {
+    "users": 4,
+    "trading_accounts": 3,
+    "trades": 6,
+    "trade_exits": 2
+  },
+  "money_totals": {
+    "commission": "31.50",
+    "swap": "-3.50",
+    "net_pnl": "1532.00"
+  }
+}

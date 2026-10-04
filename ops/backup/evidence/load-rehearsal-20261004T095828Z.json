@@ -1,0 +1,166 @@
+{
+  "schema": "velora-load-rehearsal/1",
+  "synthetic": true,
+  "synthetic_note": "SYNTHETIC FIXTURE — this run proves the rehearsal MACHINERY, not production data.",
+  "rehearsal_id": "load-rehearsal-20261004T095828Z",
+  "at": "2026-10-04T09:58:28.414Z",
+  "source_commit_sha": "a02a38d2bbca851115be01794d5fa28fe0412525",
+  "source_system": "legacy-mysql (fixture)",
+  "exported_at": "2026-10-04T00:00:00Z",
+  "export_dir": "./db/data-step/fixtures/legacy-export.FIXTURE",
+  "target": "127.0.0.1:54329/velora_phase4_rehearsal",
+  "verdict": "REHEARSAL_PASSED",
+  "a_gates": [
+    {
+      "id": "A1",
+      "name": "source vocabulary",
+      "verdict": "MAPPED",
+      "detail": "distinct sources: manual=3, metaapi=1, import=1, auto_sync=1"
+    },
+    {
+      "id": "A2",
+      "name": "locale vocabulary",
+      "verdict": "PASS",
+      "detail": "distinct locales: fa, en"
+    },
+    {
+      "id": "A3",
+      "name": "leverage shape",
+      "verdict": "PASS",
+      "detail": "empty=0, all others match ^(1:)?[1-9][0-9]{0,7}$"
+    },
+    {
+      "id": "A4",
+      "name": "direction vocabulary",
+      "verdict": "PASS",
+      "detail": "distinct directions: buy, sell"
+    },
+    {
+      "id": "A5",
+      "name": "money fraction digits",
+      "verdict": "PASS",
+      "detail": "max fraction digits = 2 (target NUMERIC(20,2) needs no rounding)"
+    },
+    {
+      "id": "A6",
+      "name": "symbol canonicalisation",
+      "verdict": "MAPPED",
+      "detail": "distinct symbols: EURUSD=2, GBPUSD=1, XAU/USD=1, XAUUSD=1, NAS100=1 — contract sizes are NOT inferred (only observed pairs may be mapped)"
+    },
+    {
+      "id": "A7",
+      "name": "time resolution census",
+      "verdict": "QUARANTINE",
+      "detail": "1 row(s) carry no UTC instant and no interpretation is recorded — excluded from the load, never promoted to an invented instant"
+    },
+    {
+      "id": "A7b",
+      "name": "naive text preserved",
+      "verdict": "PASS",
+      "detail": "every row with a naive source text carries it in source_time_naive (the raw evidence survives the migration)"
+    },
+    {
+      "id": "A8",
+      "name": "canonical email uniqueness",
+      "verdict": "PASS",
+      "detail": "4 distinct canonical addresses"
+    },
+    {
+      "id": "A9",
+      "name": "source referential integrity",
+      "verdict": "PASS",
+      "detail": "no orphans in the export"
+    },
+    {
+      "id": "A10",
+      "name": "financial guards in the source",
+      "verdict": "PASS",
+      "detail": "no zero/negative price, volume or contract size; no close-before-open"
+    },
+    {
+      "id": "A12",
+      "name": "field-level mapping",
+      "verdict": "MAPPED",
+      "detail": "2 column(s) have no target and are RECORDED, not loaded: users.subscription_status, trades.outside_boundary"
+    },
+    {
+      "id": "A11",
+      "name": "census (informational)",
+      "verdict": "INFO",
+      "detail": "users=4 accounts=3 trades=6 exits=2 quarantined=1"
+    }
+  ],
+  "applied_mappings": [
+    {
+      "concern": "source_vocabulary",
+      "from": "auto_sync",
+      "to": "metaapi",
+      "rows": 1,
+      "basis": "GAP-03 / OD-15 — legacy `auto_sync` means the MetaAPI sync job produced the row; the target CHECK accepts manual|metaapi|import"
+    },
+    {
+      "concern": "symbol_canonicalisation",
+      "from": "XAU/USD",
+      "to": "XAUUSD",
+      "rows": 1,
+      "basis": "GAP-15 — slash forms are rewritten to the canonical broker symbol; contract size is taken from the row, never inferred"
+    }
+  ],
+  "unmapped_fields": [
+    {
+      "table": "users",
+      "column": "subscription_status",
+      "rows": 4,
+      "reason": "Modern has no provider-less subscription lifecycle: `subscriptions` is the Stripe object (0017: provider CHECK = 'stripe', plan CHECK pro|enterprise, partial unique index on active rows). The legacy lifecycle (none|active|past_due|grace|expired|cancelled, plus plan_started_at/plan_expires_at/plan_updated_at) therefore has NO target; the user-visible fact is preserved in users.plan. Needs an owner decision — MG-SCHEMA-MAPPING."
+    },
+    {
+      "table": "trades",
+      "column": "outside_boundary",
+      "rows": 6,
+      "reason": "No modern equivalent exists for the legacy per-row boundary taint; the instant is present and validated, so the flag carries no decision. Recorded here rather than loaded into a column nobody reads — MG-SCHEMA-MAPPING."
+    }
+  ],
+  "quarantine": {
+    "rows": [
+      {
+        "table": "trades",
+        "id": "5",
+        "reason": "UNRESOLVED_TIME — no recorded interpretation (ADR-004 sampling decision outstanding)"
+      }
+    ],
+    "money_excluded": {
+      "commission": "15.00",
+      "swap": "-2.50",
+      "profit_loss": "47.50"
+    },
+    "file": "./ops/backup/evidence/quarantine-legacy-export.FIXTURE.jsonl"
+  },
+  "loaded_counts": {
+    "users": "4",
+    "subs": "0",
+    "accounts": "3",
+    "trades": "5",
+    "exits": "2",
+    "subscriptions": "not mapped (see unmapped_fields)"
+  },
+  "money_parity": {
+    "commission": "16.50",
+    "swap": "-1.00",
+    "net_pnl": "1484.50"
+  },
+  "pnl_golden_recomputation": {
+    "trades_recomputed": 5,
+    "mismatches": [],
+    "rounding_mode": "bcmath-truncate",
+    "r_multiple_scale": 4
+  },
+  "decisions_file": {
+    "synthetic": true,
+    "note": "FIXTURE ONLY. These mappings exist so the rehearsal harness's MAPPED and QUARANTINE paths are exercised end to end. A real export needs its own decisions file, and the time decision must be the owner's (ADR-004 sampling) — never a default copied from here."
+  },
+  "not_claimed": [
+    "This is not production migration evidence: no production data was exported, read or copied.",
+    "The ADR-004 time-interpretation decision is still outstanding; unresolved rows were quarantined, never invented.",
+    "Derived analytics tables are rebuildable and are never copied by a load."
+  ]
+}

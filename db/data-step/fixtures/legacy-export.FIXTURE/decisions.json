@@ -1,0 +1,228 @@
+{
+  "schema": "velora-migration-decisions/1",
+  "synthetic": true,
+  "note": "FIXTURE ONLY. These mappings exist so the rehearsal harness's MAPPED and QUARANTINE paths are exercised end to end. A real export needs its own decisions file, and the time decision must be the owner's (ADR-004 sampling) \u2014 never a default copied from here.",
+  "source_vocabulary": {
+    "auto_sync": {
+      "to": "metaapi",
+      "basis": "GAP-03 / OD-15 \u2014 legacy `auto_sync` means the MetaAPI sync job produced the row; the target CHECK accepts manual|metaapi|import"
+    }
+  },
+  "symbol_canonicalisation": {
+    "XAU/USD": {
+      "to": "XAUUSD",
+      "basis": "GAP-15 \u2014 slash forms are rewritten to the canonical broker symbol; contract size is taken from the row, never inferred"
+    }
+  },
+  "locale_vocabulary": {
+    "fa": {
+      "to": "fa",
+      "basis": "GAP-04 \u2014 legacy and modern vocabularies already agree for fa/en"
+    },
+    "en": {
+      "to": "en",
+      "basis": "GAP-04"
+    }
+  },
+  "leverage_rule": {
+    "empty": "100",
+    "basis": "GAP-05 \u2014 target is NOT NULL DEFAULT '100'; an empty legacy leverage becomes the documented default, not a guess"
+  },
+  "time": {
+    "mode": "given_utc_only",
+    "resolves_unresolved_rows": false,
+    "basis": "ADR-004 \u2014 the naive-datetime sampling decision is OUTSTANDING, so rows with no offset-explicit instant are quarantined (UNRESOLVED_TIME) rather than interpreted"
+  },
+  "field_mapping": {
+    "users": {
+      "id": {
+        "target": "id"
+      },
+      "email": {
+        "target": "email"
+      },
+      "password_hash": {
+        "target": "password_hash"
+      },
+      "full_name": {
+        "target": "full_name"
+      },
+      "timezone": {
+        "target": "timezone"
+      },
+      "plan": {
+        "target": "plan"
+      },
+      "subscription_status": {
+        "target": null,
+        "reason": "Modern has no provider-less subscription lifecycle: `subscriptions` is the Stripe object (0017: provider CHECK = 'stripe', plan CHECK pro|enterprise, partial unique index on active rows). The legacy lifecycle (none|active|past_due|grace|expired|cancelled, plus plan_started_at/plan_expires_at/plan_updated_at) therefore has NO target; the user-visible fact is preserved in users.plan. Needs an owner decision \u2014 MG-SCHEMA-MAPPING."
+      },
+      "locale": {
+        "target": "locale"
+      },
+      "status": {
+        "target": "status"
+      },
+      "email_verified_at": {
+        "target": "email_verified_at"
+      },
+      "ai_consent_at": {
+        "target": "ai_consent_at"
+      },
+      "created_at": {
+        "target": "created_at"
+      }
+    },
+    "trading_accounts": {
+      "id": {
+        "target": "id"
+      },
+      "user_id": {
+        "target": "user_id"
+      },
+      "broker_server": {
+        "target": "broker_server"
+      },
+      "account_number": {
+        "target": "external_account_id"
+      },
+      "account_type": {
+        "target": "account_type"
+      },
+      "platform": {
+        "target": "platform"
+      },
+      "provider": {
+        "target": "provider"
+      },
+      "label": {
+        "target": "label"
+      },
+      "currency": {
+        "target": "currency"
+      },
+      "leverage": {
+        "target": "leverage"
+      },
+      "timezone": {
+        "target": "timezone"
+      },
+      "status": {
+        "target": "status"
+      },
+      "sync_status": {
+        "target": "sync_status"
+      },
+      "balance": {
+        "target": "balance"
+      },
+      "starting_balance": {
+        "target": "starting_balance"
+      },
+      "consecutive_errors": {
+        "target": "consecutive_errors"
+      },
+      "created_at": {
+        "target": "created_at"
+      }
+    },
+    "trades": {
+      "id": {
+        "target": "id"
+      },
+      "user_id": {
+        "target": "user_id"
+      },
+      "account_id": {
+        "target": "account_id"
+      },
+      "symbol": {
+        "target": "symbol"
+      },
+      "direction": {
+        "target": "direction"
+      },
+      "entry_price": {
+        "target": "entry_price"
+      },
+      "exit_price": {
+        "target": "exit_price"
+      },
+      "volume": {
+        "target": "volume"
+      },
+      "contract_size": {
+        "target": "contract_size"
+      },
+      "commission": {
+        "target": "commission"
+      },
+      "swap": {
+        "target": "swap"
+      },
+      "profit_loss": {
+        "target": "net_pnl"
+      },
+      "r_multiple": {
+        "target": "r_multiple"
+      },
+      "stop_loss": {
+        "target": "stop_loss"
+      },
+      "take_profit": {
+        "target": "take_profit"
+      },
+      "source": {
+        "target": "source"
+      },
+      "status": {
+        "target": "status"
+      },
+      "open_time": {
+        "target": "raw_open_text"
+      },
+      "close_time": {
+        "target": "raw_close_text"
+      },
+      "source_timezone": {
+        "target": "source_timezone"
+      },
+      "time_status": {
+        "target": "time_status"
+      },
+      "occurred_open_at_utc": {
+        "target": "occurred_at"
+      },
+      "occurred_close_at_utc": {
+        "target": "occurred_close_at_utc"
+      },
+      "outside_boundary": {
+        "target": null,
+        "reason": "No modern equivalent exists for the legacy per-row boundary taint; the instant is present and validated, so the flag carries no decision. Recorded here rather than loaded into a column nobody reads \u2014 MG-SCHEMA-MAPPING."
+      },
+      "source_time_naive": {
+        "target": "source_time_naive"
+      }
+    },
+    "trade_exits": {
+      "id": {
+        "target": "id"
+      },
+      "trade_id": {
+        "target": "trade_id"
+      },
+      "exit_price": {
+        "target": "price"
+      },
+      "volume": {
+        "target": "volume"
+      },
+      "pnl": {
+        "target": "pnl"
+      },
+      "exited_at": {
+        "target": "exited_at"
+      }
+    }
+  }
+}

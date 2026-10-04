@@ -1,0 +1,5 @@
+id,email,password_hash,full_name,timezone,plan,subscription_status,locale,status,email_verified_at,ai_consent_at,created_at
+1,fixture.one@velora.test,$2y$12$fixturehashfixturehashfixturehas,Fixture One,Asia/Tehran,pro,active,fa,active,2026-01-04T10:00:00Z,2026-02-01T09:00:00Z,2026-01-04T10:00:00Z
+2,fixture.two@velora.test,$2y$12$fixturehashfixturehashfixturehas,Fixture Two,UTC,free,none,en,active,2026-01-05T10:00:00Z,\N,2026-01-05T10:00:00Z
+3,fixture.three@velora.test,$2y$12$fixturehashfixturehashfixturehas,Fixture Three,Europe/Berlin,free,none,en,suspended,\N,\N,2026-01-06T10:00:00Z
+4,fixture.four@velora.test,$2y$12$fixturehashfixturehashfixturehas,Fixture Four,Asia/Tehran,pro,active,fa,active,2026-01-07T10:00:00Z,\N,2026-01-07T10:00:00Z
