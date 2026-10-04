@@ -3,7 +3,7 @@
   "generated_at": "2026-10-04",
   "source_audit": "docs/audits/2026-10-04-CAPABILITY-AUDIT-legacy-to-modern.md",
   "git": {
-    "modern_head": "a3bd138",
+    "modern_head": "e0bfc2a",
     "modern_branch": "feat/telegram-journal-client",
     "legacy_ref": "edede31"
   },
@@ -27,37 +27,37 @@
         "ACC-07",
         "ACC-08",
         "ACC-09",
+        "PLT-01",
         "SEC-03",
         "SEC-04",
-        "TRD-01",
-        "PLT-01"
+        "TRD-01"
       ]
     },
     "IMPLEMENTED": {
-      "count": 4,
+      "count": 5,
       "ids": [
         "ACC-02",
         "ACC-03",
-        "TRD-12",
-        "PLT-08"
+        "PLT-08",
+        "TRD-06",
+        "TRD-12"
       ]
     },
     "PARTIAL": {
-      "count": 13,
+      "count": 12,
       "ids": [
         "ACC-06",
+        "ADM-01",
+        "PLT-03",
+        "PLT-05",
+        "PLT-06",
+        "PLT-11",
         "SEC-01",
         "SEC-02",
         "TRD-02",
         "TRD-04",
         "TRD-05",
-        "TRD-06",
-        "TRD-07",
-        "ADM-01",
-        "PLT-03",
-        "PLT-05",
-        "PLT-06",
-        "PLT-11"
+        "TRD-07"
       ]
     },
     "BACKEND_ONLY": {
@@ -70,8 +70,8 @@
     "UI_ONLY": {
       "count": 2,
       "ids": [
-        "TRD-09",
-        "ADM-04"
+        "ADM-04",
+        "TRD-09"
       ]
     },
     "MISSING": {
@@ -79,22 +79,22 @@
       "ids": [
         "ACC-10",
         "ACC-11",
-        "TRD-03",
-        "TRD-08",
+        "ADM-02",
+        "ADM-03",
         "AI-01",
         "AI-02",
         "AI-03",
         "AI-04",
-        "SUP-01",
-        "SUP-02",
-        "ADM-02",
-        "ADM-03",
         "PLT-02",
         "PLT-04",
         "PLT-07",
         "PLT-09",
         "PLT-10",
-        "PLT-12"
+        "PLT-12",
+        "SUP-01",
+        "SUP-02",
+        "TRD-03",
+        "TRD-08"
       ]
     },
     "LEGACY_ONLY": {
@@ -107,8 +107,8 @@
     "INTENTIONALLY_NOT_MIGRATED": {
       "count": 2,
       "ids": [
-        "TRD-13",
-        "PLT-13"
+        "PLT-13",
+        "TRD-13"
       ]
     }
   },
@@ -272,8 +272,8 @@
       "capability": "Screenshot import (OCR)",
       "status": "MISSING",
       "legacy_evidence": "POST /trades/extract-screenshot + velora-smart-import.js; trade_screenshots, ai_extractions",
-      "modern_evidence": "—",
-      "next_action": "AI/OCR pipeline slice (MG-AI-OCR)"
+      "modern_evidence": "audited 2026-10-04: nothing on the Modern side. Legacy pipeline read end to end — POST /trades/extract-screenshot: 8/300 per user, max 4 images (8 MiB each / 16 MiB total, ≤12 MP, PNG/JPEG/WebP verified against the declared type), 30 s deadline, AI_FEATURE_DISABLED flag, consent gate, Tesseract fallback, sha256 dedup, ai_extractions + ai_audit_logs rows (hash only, never the image), and the 501 OCR_UNAVAILABLE answer when no engine exists; the wizard (velora-smart-import.js) validates, compresses and maps the result into the trade form.",
+      "next_action": "Phase 7 (AI): the endpoint's core deliverable is `texts` + `times` produced by a DETERMINISTIC OCR engine, so it depends on an OCR engine this host does not have (no tesseract binary). Design the deterministic-first contract + ingest half (image validation, feature flag, dedup, audit, quota, job lifecycle) here in phase 3 and wire the engine as the fail-closed dependency (MG-AI-OCR)."
     },
     {
       "id": "TRD-04",
@@ -297,10 +297,10 @@
       "id": "TRD-06",
       "area": "trading",
       "capability": "Sync: cadence, manual trigger, visibility",
-      "status": "PARTIAL",
+      "status": "IMPLEMENTED",
       "legacy_evidence": "POST /accounts/{id}/sync 20/300, GET sync-status; hourly cron; sync_jobs",
-      "modern_evidence": "GET /accounts/{id}/sync-status; worker handlers + scheduler test; worker never deployed; no manual route",
-      "next_action": "Deploy worker / decide manual sync (MG-WORKER-DEPLOY, MG-METAAPI-CADENCE)"
+      "modern_evidence": "GET /accounts/{id}/sync-status; POST /accounts/{id}/sync (20/300) → ManualSyncService + shared syncWindow contract; pg-boss descriptor dispatched to the real queue; web control on /accounts; manualSyncService.test 8, migratedRoutes 3, rateLimitRoutes 1, contracts/syncWindow 6, db/tests/manualSync.pg 4; 16/16 runtime checks on real PostgreSQL; hourly tick + webhook ingress share the same window",
+      "next_action": "Worker service deployed (MG-WORKER-DEPLOY) — otherwise a queued job has no consumer in production; cadence decision (MG-METAAPI-CADENCE)"
     },
     {
       "id": "TRD-07",

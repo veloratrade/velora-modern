@@ -339,7 +339,8 @@
       "decisions": [
         "OD-AC-WORKER"
       ],
-      "closure_criteria": "Worker service defined + one tick of each scheduler proven in a real environment"
+      "closure_criteria": "Worker service defined + one tick of each scheduler proven in a real environment",
+      "note": "2026-10-04 (TRD-06 runtime check, local): with the API running against a fresh local PostgreSQL, `pgboss.queue` held ONLY the queues the local worker created — no pg-boss schema from any deployment — and a manual sync job sat in state `created` with `retry_count 0` until a worker started. The queue path is real and observable; in production it has no consumer until this gap closes."
     },
     {
       "id": "MG-SEC-COOKIE",
@@ -446,7 +447,8 @@
         "apps/api/src/aicoach"
       ],
       "decisions": [],
-      "closure_criteria": "AI/OCR capability implemented or owner-scoped"
+      "closure_criteria": "AI/OCR capability implemented or owner-scoped",
+      "note": "2026-10-04 (TRD-03 recon): Legacy's extraction endpoint was read end to end; its core deliverable is the deterministic OCR output (`texts`/`times`) plus AI-or-fallback extraction, with a sha256 dedup cache, consent gate, feature flag, audit rows and a 501 when no engine exists. Modern has none of it, and this host has no OCR engine (no tesseract binary), so the endpoint's deterministic half is a fail-closed dependency, not something to stub. Phase 7 owns the AI half; the OCR contract is designed in phase 3."
     },
     {
       "id": "MG-BACKUP-RESTORE",
@@ -609,8 +611,8 @@
     {
       "id": "MG-METAAPI-CADENCE",
       "section": "B",
-      "title": "Hourly vs per-minute sync safety net; manual sync trigger missing",
-      "status": "PARTIAL",
+      "title": "Hourly vs per-minute sync safety net (the manual trigger now exists)",
+      "status": "OPEN",
       "priority": "P2",
       "verification_state": "STATIC",
       "audit_refs": [
@@ -618,10 +620,16 @@
         "§4.2"
       ],
       "evidence": [
-        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+        "docs/audits/2026-10-04-CAPABILITY-AUDIT-legacy-to-modern.md",
+        "apps/api/src/accounts/manualSyncService.ts",
+        "apps/api/src/accounts/manualSyncRoutes.ts",
+        "packages/contracts/src/metaapiSync.ts",
+        "apps/worker/src/scheduler/syncScheduler.ts",
+        "db/tests/manualSync.pg.test.ts"
       ],
       "decisions": [],
-      "closure_criteria": "Cadence decided + manual trigger or owner-acceptance"
+      "closure_criteria": "Cadence decided + user-triggered sync and visibility in place (manual trigger and sync-status DONE 2026-10-04; the cadence number itself is still an owner decision)",
+      "note": "2026-10-04 (TRD-06): `POST /accounts/{id}/sync` now exists with Legacy's 20/300 throttle, the durable CONNECTING marker, and the SAME window rule the tick and the webhook ingress use — closing the 'manual sync trigger missing' half of this gap and removing a real divergence (the ingress asked for 24 h, the tick for 12 months, under one idempotency key). The remaining half is the cadence number and the deployed worker (MG-WORKER-DEPLOY)."
     },
     {
       "id": "MG-RMULTIPLE-SCALE",
