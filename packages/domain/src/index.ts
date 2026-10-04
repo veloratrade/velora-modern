@@ -2,6 +2,7 @@ export * from "./decimal.js";
 export * from "./pnl.js";
 export * from "./jalali.js";
 export * from "./tradingSession.js";
+export * from "./achievements.js";
 export * from "./tradeLedger.js";
 export * from "./jobSemantics.js";
 export * from "./time.js";
