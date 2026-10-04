@@ -31,6 +31,7 @@ import {
   type TelegramStatusView,
 } from "../../../lib/api/resources";
 import { ApiError } from "../../../lib/api/client";
+import { AccountSettingsSections } from "./AccountSettingsSections";
 import type { Locale } from "../../../contracts/locale";
 import { createTranslator } from "../../../i18n/catalog";
 
@@ -43,7 +44,10 @@ type Phase = "loading" | "ready" | "absent" | "failed";
 
 export default function SettingsPage() {
   const locale = useLocale();
-  const t = createTranslator(locale, ["common", "errors", "telegram"]);
+  // Features: telegram (the connected-accounts surface) + settings (the account
+  // sections below it — Phase 1). Loading both here is what lets every label come
+  // from a catalog instead of an inline fallback.
+  const t = createTranslator(locale, ["common", "errors", "telegram", "settings"]);
   const fa = locale === "fa";
 
   const [phase, setPhase] = useState<Phase>("loading");
@@ -151,11 +155,21 @@ export default function SettingsPage() {
           <h1 className="page-title">{t("telegram.settings.title", null, fa ? "تنظیمات" : "Settings")}</h1>
           <p className="page-sub">{t("telegram.settings.subtitle", null, "")}</p>
         </div>
-        {phase === "ready" && status !== null ? (
-          <span className={`badge ${stateBadge.cls}`}>{t(stateBadge.key, null, stateBadge.fallback)}</span>
-        ) : (
-          <span className="badge badge-disconnected">{phase === "loading" ? t("telegram.loading", null, "…") : "—"}</span>
-        )}
+        <div className="flex-gap-8 flex-wrap flex-center">
+          {/*
+            The read-only identity overview lives on `/profile`; this is its one
+            door from the account surface. A link (not a nav item, not a second
+            settings page) keeps navigation hierarchy unchanged.
+          */}
+          <a className="btn-ghost btn-sm" href={`${fa ? "" : "/en"}/profile`}>
+            {t("settings.profileView", null, fa ? "مشاهده پروفایل" : "View profile")}
+          </a>
+          {phase === "ready" && status !== null ? (
+            <span className={`badge ${stateBadge.cls}`}>{t(stateBadge.key, null, stateBadge.fallback)}</span>
+          ) : (
+            <span className="badge badge-disconnected">{phase === "loading" ? t("telegram.loading", null, "…") : "—"}</span>
+          )}
+        </div>
       </div>
 
       {phase === "absent" ? (
@@ -176,7 +190,7 @@ export default function SettingsPage() {
 
       {phase === "ready" && status !== null ? (
         <section aria-labelledby="connected-accounts" className="grid-gap-12">
-          <h2 className="label" id="connected-accounts" style={{ marginTop: 4 }}>
+          <h2 className="label mt-4" id="connected-accounts">
             {t("telegram.section.connectedAccounts", null, fa ? "حساب‌های متصل" : "Connected accounts")}
           </h2>
           <div className="card">
@@ -276,6 +290,14 @@ export default function SettingsPage() {
           </div>
         </section>
       ) : null}
+
+      {/*
+        Phase 1 account sections (audit §4). ORDER IS THE CONTRACT: Connected
+        accounts (ADR-018, above) → Security → Preferences → Email notifications.
+        They are rendered by a sibling component so this file's Telegram logic
+        stays untouched; section order is enforced by where they sit, not by CSS.
+      */}
+      <AccountSettingsSections onSessionEnded={() => window.location.assign((fa ? "" : "/en") + "/login")} />
     </div>
   );
 }

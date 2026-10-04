@@ -71,3 +71,25 @@
 .text-error{color:#fca5a5}
 .code-block{background:rgba(255,255,255,.04);padding:12px;border-radius:10px;overflow-x:auto;font-size:11px}
 .font-900{font-weight:900}
+
+/* --- Phase 1 account surface (profile + settings) ---------------------------
+   Additive only: the identity fact list and the preference rows reuse the
+   existing hairline separators, radii and type scale. No existing class is
+   replaced, and nothing here changes the look of the pages that shipped before.
+   The profile avatar is the sidebar's own `.sb-av` (shell.css) — not a new one. */
+.pf-facts{margin:0;}
+.pf-fact{display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.06);}
+.pf-fact:last-child{border-bottom:none;}
+.pf-fact dt{margin:0;}
+.pf-fact dd{margin:0;font-size:13px;font-weight:700;color:#edeae0;}
+.pref-row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06);}
+.pref-row:last-child{border-bottom:none;}
+.pref-row .label{margin-bottom:0;}
+
+/* Phase 1 polish: inline `style={{…}}` was replaced by these utilities so the
+   account surface ships zero inline styles under the nonce CSP. Names follow
+   the existing scale (.mt-4/.mb-8/.flex-gap-8) — additive, nothing replaced. */
+.flex-center{align-items:center}
+.inline-block{display:inline-block}
+.mb-2{margin-bottom:2px}
+.select-locale{min-width:160px}

@@ -74,7 +74,32 @@ export function fmtTime(locale: Locale, value: string, options: Intl.DateTimeFor
   return toLatin(f.format(d));
 }
 
+/**
+ * Long CALENDAR date — Phase 1 account surface ("member since" on `/profile`).
+ *
+ * Distinct from `fmtTime`, which formats a wall-clock "HH:mm": this one formats an
+ * ISO instant as a date and is the ONE place the account pages get that from, so
+ * `/profile` and `/settings` cannot drift on locale, calendar or digits.
+ * `fa-IR` renders the Jalali calendar a Persian reader expects (Legacy showed the
+ * same), the Latin-digit product rule is applied by the same `toLatin` pass the
+ * other formatters use, and non-finite input answers "—" rather than echoing it.
+ */
+export function fmtDateLong(locale: Locale, value: string, options: Intl.DateTimeFormatOptions = {}): string {
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms)) return "—";
+  const intl = localeMeta(locale).intlLocale;
+  const opts: Intl.DateTimeFormatOptions = { dateStyle: "long", ...options, numberingSystem: "latn" };
+  const k = cacheKey("d", intl, opts);
+  let f = cache.get(k) as Intl.DateTimeFormat | undefined;
+  if (!f) {
+    f = new Intl.DateTimeFormat(intl, opts);
+    cache.set(k, f);
+  }
+  return toLatin(f.format(new Date(ms)));
+}
+
 export type FormatKind = "number" | "currency" | "percent" | "time";
+
 
 /** Declarative formatting used by markup that Legacy tagged with data-format. */
 export function formatValue(

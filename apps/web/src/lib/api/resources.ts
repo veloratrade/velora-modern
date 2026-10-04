@@ -1,6 +1,66 @@
 "use client";
 import * as api from "./client";
 
+// --- Account & identity (Phase 1: /profile overview + /settings sections) -----
+// Shapes mirror the Modern kernel handlers (`GET /api/v1/auth/me`,
+// `POST /api/v1/auth/change-password`, `GET|PUT /api/v1/auth/email-preferences`,
+// `PATCH /api/v1/auth/me/preferences`). Nothing here invents a field: the kernel
+// answers `PublicUserDto` and the six email-preference keys by name.
+
+/** `GET /api/v1/auth/me` payload (kernel PublicUserDto). */
+export interface AccountUserView {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
+  plan: string;
+  timezone: string;
+  locale: string;
+  createdAt: string;
+  aiConsent: boolean;
+}
+
+/** The six categories the API stores — named exactly as the server names them. */
+export type EmailPreferenceKey =
+  | "welcome_email"
+  | "security_alerts"
+  | "trade_notifications"
+  | "weekly_report"
+  | "monthly_report"
+  | "achievement_notifications";
+
+export type EmailPreferences = Record<EmailPreferenceKey, 0 | 1>;
+
+export function getMe(): Promise<{ user: AccountUserView }> {
+  return api.request<{ user: AccountUserView }>("/api/v1/auth/me").then((data) => ({
+    // Modern answers numeric ids on this route; the browser session normalizes
+    // ids to strings (client.setSession), so normalize here too rather than let
+    // one surface hold a number and the rest strings.
+    user: { ...data.user, id: String(data.user.id) },
+  }));
+}
+
+export function changePassword(input: { currentPassword: string; newPassword: string }): Promise<{ changed: true; messageKey: string; params: Record<string, never> }> {
+  return api.request("/api/v1/auth/change-password", { method: "POST", body: input });
+}
+
+export function getEmailPreferences(): Promise<{ preferences: EmailPreferences; messageKey?: string }> {
+  return api.request("/api/v1/auth/email-preferences");
+}
+
+/**
+ * Partial update: the server merges the booleans it recognises onto the stored
+ * (or default) row, so an omitted category is never reset — Legacy's merge
+ * semantics, preserved on both sides.
+ */
+export function updateEmailPreferences(patch: Partial<Record<EmailPreferenceKey, boolean>>): Promise<{ updated: true; preferences: EmailPreferences; messageKey?: string }> {
+  return api.request("/api/v1/auth/email-preferences", { method: "PUT", body: patch });
+}
+
+export function updatePreferences(input: { locale?: "fa" | "en"; ai_consent?: boolean }): Promise<{ locale: string; ai_consent: boolean; ai_consent_at: string | null }> {
+  return api.request("/api/v1/auth/me/preferences", { method: "PATCH", body: input });
+}
+
 // --- Accounts ---
 export interface AccountRecord {
   id: string;
