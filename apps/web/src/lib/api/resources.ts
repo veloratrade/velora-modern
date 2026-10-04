@@ -397,3 +397,57 @@ export function getTelegramChannel(): Promise<{ channel: TelegramChannelView | n
 export function unbindTelegramChannel(): Promise<{ channel: null }> {
   return api.request("/api/v1/telegram/channel", { method: "DELETE" });
 }
+
+
+// --- Support (Phase 5: the support center) -----------------------------------
+// Shapes mirror the Modern kernel handlers in `apps/api/src/support/supportRoutes.ts`.
+// The WIRE FIELD IS `message`, not `body` — Legacy's own field name, kept on
+// purpose so the two implementations answer the same request. Status and
+// `waitingFor` are DERIVED SERVER-SIDE; nothing here sends them.
+
+export type SupportStatus = "open" | "pending" | "closed" | "archived";
+export type SupportWaiting = "admin" | "user" | "none";
+
+export interface SupportTicketView {
+  id: string;
+  subject: string;
+  status: SupportStatus;
+  waitingFor: SupportWaiting;
+  lastMessageAt: string;
+  unreadUserCount: number;
+  createdAt: string;
+}
+
+export interface SupportMessageView {
+  id: string;
+  senderType: "user" | "admin" | "system";
+  body: string;
+  createdAt: string;
+}
+
+export interface SupportThreadView {
+  conversation: SupportTicketView;
+  messages: SupportMessageView[];
+}
+
+export function listSupportTickets(status?: SupportStatus): Promise<{ tickets: SupportTicketView[]; total: number; page: number; perPage: number; unreadTotal: number }> {
+  const qs = status === undefined ? "" : `?status=${encodeURIComponent(status)}`;
+  return api.request(`/api/v1/support/tickets${qs}`);
+}
+
+export function createSupportTicket(input: { subject: string; message: string }): Promise<{ ticket: { id: string } }> {
+  return api.request("/api/v1/support/tickets", { method: "POST", body: input });
+}
+
+/** Opening a ticket is also a READ: the server clears the user's unread marker. */
+export function getSupportTicket(id: string): Promise<SupportThreadView> {
+  return api.request(`/api/v1/support/tickets/${encodeURIComponent(id)}`);
+}
+
+export function replySupportTicket(id: string, message: string): Promise<{ message: { id: string; status: SupportStatus; waitingFor: SupportWaiting } }> {
+  return api.request(`/api/v1/support/tickets/${encodeURIComponent(id)}/messages`, { method: "POST", body: { message } });
+}
+
+export function reopenSupportTicket(id: string): Promise<{ status: SupportStatus; waitingFor: SupportWaiting }> {
+  return api.request(`/api/v1/support/tickets/${encodeURIComponent(id)}/reopen`, { method: "POST", body: {} });
+}

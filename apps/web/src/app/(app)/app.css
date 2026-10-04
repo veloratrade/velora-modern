@@ -93,3 +93,30 @@
 .inline-block{display:inline-block}
 .mb-2{margin-bottom:2px}
 .select-locale{min-width:160px}
+
+/* Phase 5 — support center. Same rule the Phase 1 polish established: NO inline
+   `style={{…}}` on the page, because the production CSP ships `style-src 'self'
+   'nonce-…'` and a style ATTRIBUTE is blocked unless `unsafe-hashes` is granted
+   (observed in the browser: the thread's grid/colors silently degraded while the
+   build stayed green). Names extend the existing scale — additive, nothing
+   replaced, and the palette is the app's own gold/green/blue. */
+.clickable{cursor:pointer}
+.ms-auto{margin-inline-start:auto}
+.bubble{padding:12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);}
+.bubble-mine{border-color:rgba(252,227,138,.3)}
+.bubble-support{border-color:rgba(76,211,154,.3)}
+.thread-msg{margin-top:8px;font-size:13px;line-height:1.9;color:#e8eef7;white-space:pre-wrap;}
+.role-mine{color:#fce38a}
+.role-support{color:#4CD39A}
+.kpi-gold{color:#fce38a}
+.kpi-green{color:#4CD39A}
+.kpi-blue{color:#3B82F6}
+/* A MIXED date+time string in a Persian sentence. `.v-latn-num` carries
+   `direction:ltr`, which is right for a NUMBER or a raw ISO stamp (Legacy used it
+   that way) but WRONG for a formatted date: in an LTR embedding the Jalali date
+   and the clock time swap places around the comma (measured in the browser by
+   character position: an RTL paragraph reads it in the natural order, the LTR
+   embedding does not). Latin digits are still guaranteed — `fmtDateLong` runs
+   every formatted value through `toLatin` — so this class only restores the
+   reading order. */
+.ts-mixed{font-variant-numeric:lining-nums}
