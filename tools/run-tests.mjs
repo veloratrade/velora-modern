@@ -15,7 +15,8 @@
 import { execFileSync } from "node:child_process";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { batchVerdict, overallVerdict, parseCount, sigkilledTests } from "./lib/testRunnerVerdict.mjs";
 
 const skip = new Set(["node_modules", ".git", "dist", "out", ".next", "coverage", "infra"]);
 function walk(dir, out) {
@@ -71,48 +72,82 @@ function run(batch, extraArgs) {
  * file killed by a SIGNAL is re-run alone, once. An ASSERTION failure is never
  * retried — that would be hiding a result, not stabilising a harness. Nothing is
  * skipped: a file that fails its retry still fails the run.
+ *
+ * The DECISION itself lives in `tools/lib/testRunnerVerdict.mjs` and is unit
+ * tested (`tools/runTestsVerdict.test.ts`), because the inline version silently
+ * excused a whole red batch (see that file's header).
  */
-function sigkilledFiles(output) {
-  const killed = [];
-  const lines = output.split("\n");
-  let current = null;
-  for (const line of lines) {
-    const subtest = /^not ok \d+ - (.+)$/.exec(line.trim());
-    if (subtest) current = subtest[1].trim();
-    if (current !== null && /signal: 'SIGKILL'/.test(line)) {
-      killed.push(current);
-      current = null;
-    }
+
+/** Map a SIGKILLed TEST NAME back to the file that declared it. */
+function mapKilledToFiles(batch, testNames) {
+  const files = [];
+  let unresolved = 0;
+  for (const name of testNames) {
+    const file = batch.find((f) => {
+      try {
+        return readFileSync(f, "utf8").includes(name);
+      } catch {
+        return false;
+      }
+    });
+    if (file === undefined) unresolved += 1;
+    else if (!files.includes(file)) files.push(file);
   }
-  return killed;
+  return { files, unresolved };
 }
 
-function retrySigkilled(files) {
-  let allPassed = true;
+function decide(label, batch, result) {
+  const killedTests = result.ok ? [] : sigkilledTests(result.output);
+  const mapped = mapKilledToFiles(batch, killedTests);
+  const verdict = batchVerdict({
+    ok: result.ok,
+    output: result.output,
+    killedFiles: mapped.files,
+    unresolvedKills: mapped.unresolved,
+  });
+  const failCount = parseCount(result.output, "fail");
+  console.log(
+    `${label}: exit=${result.ok ? 0 : "non-zero"} tests=${parseCount(result.output, "tests") ?? "?"} ` +
+      `pass=${parseCount(result.output, "pass") ?? "?"} fail=${failCount ?? "?"} ` +
+      `skipped=${parseCount(result.output, "skipped") ?? "?"} killed=${killedTests.length} → ${verdict.decision} (${verdict.reason})`,
+  );
+  return verdict;
+}
+
+function runKilled(label, files) {
+  let ok = true;
   for (const file of files) {
     console.log(`\nRETRY (OOM): ${file} — the previous run was SIGKILLed, not failed; re-running it alone.`);
     const attempt = run([file], ["--test-concurrency=1"]);
-    if (attempt.ok) {
+    const failures = attempt.ok ? 0 : parseCount(attempt.output, "fail");
+    if (attempt.ok && failures === 0) {
       console.log(`RETRY PASS: ${file}`);
     } else {
       console.error(`RETRY FAIL: ${file}`);
-      allPassed = false;
+      ok = false;
     }
   }
-  return allPassed;
+  return ok;
 }
 
-const general = run(rest, []);
-const pglite = run(dbFiles, ["--test-concurrency=1"]);
-let retryOk = true;
-if (!general.ok) retryOk = retrySigkilled(sigkilledFiles(general.output)) && retryOk;
-if (!pglite.ok) retryOk = retrySigkilled(sigkilledFiles(pglite.output)) && retryOk;
+const generalResult = run(rest, []);
+const generalVerdict = decide("general batch", rest, generalResult);
+let generalOk = generalVerdict.decision === "pass";
+if (generalVerdict.decision === "retry") generalOk = runKilled("general batch", generalVerdict.retry);
 
-if (general.ok && pglite.ok) {
-  console.log("ALL TEST FILES PASSED");
-} else if (retryOk) {
-  console.log("ALL TEST FILES PASSED (after re-running OS-killed files individually)");
+const pgliteResult = run(dbFiles, ["--test-concurrency=1"]);
+const pgliteVerdict = decide("PGlite batch", dbFiles, pgliteResult);
+let pgliteOk = pgliteVerdict.decision === "pass";
+if (pgliteVerdict.decision === "retry") pgliteOk = runKilled("PGlite batch", pgliteVerdict.retry);
+
+const verdict = overallVerdict([
+  { name: "general batch", decision: generalOk ? "pass" : "fail", reason: generalVerdict.reason },
+  { name: "PGlite batch", decision: pgliteOk ? "pass" : "fail", reason: pgliteVerdict.reason },
+]);
+if (verdict.ok) {
+  const excused = generalVerdict.decision === "retry" || pgliteVerdict.decision === "retry";
+  console.log(excused ? "ALL TEST FILES PASSED (after re-running OS-killed files individually)" : "ALL TEST FILES PASSED");
 } else {
-  console.error("TEST RUN FAILED", `(general batch ok=${general.ok}, PGlite batch ok=${pglite.ok}, OOM-retries ok=${retryOk})`);
+  console.error(verdict.summary);
   process.exit(1);
 }
