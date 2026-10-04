@@ -109,6 +109,8 @@ export interface ApiConfig {
   readonly tags?: import("../tags/tagService.js").TagStore;
   /** v0.5 trade attachments (screenshots). */
   readonly attachments?: import("../attachments/attachmentService.js").AttachmentService;
+  /** Phase 5: the support ticket capability (Legacy api/src/Support/, migrated). */
+  readonly support?: import("../support/supportService.js").SupportService;
   /** v1.0 subscriptions (Stripe). */
   readonly subscriptions?: import("../billing/subscriptionService.js").SubscriptionStore;
   /** v1.0 AI coach insight store + consent. */
@@ -172,6 +174,10 @@ export const THROTTLED_ROUTES: Readonly<Record<string, RateLimitKey>> = {
   // an ingress that a third party drives. Legacy throttled both at dispatch.
   "POST /api/v1/accounts/detect-server": "accounts:detect-server",
   "POST /api/v1/webhooks/metaapi": "webhooks:metaapi",
+  // Phase 5: support writes (create / reply / reopen). Opening a ticket and
+  // replying are the two operations that can be used to flood the inbox, so they
+  // share one bucket per user. Reads are unbounded but cheap and ownership-scoped.
+  "POST /api/v1/support/tickets": "support:write",
 };
 
 /**
@@ -200,6 +206,11 @@ export const THROTTLED_PATTERN_ROUTES: readonly {
   // route (it enqueues; the WORKER does the provider call) but an unbounded one
   // would let a single user hammer the queue, so the bucket is carried over
   // verbatim now that the route exists.
+  // Phase 5: the id-bearing support writes. `messages` and `reopen` mutate a
+  // ticket's state (and `reopen` is the loop that could be used to re-open a
+  // closed ticket forever), so they carry the same bucket as creation.
+  { method: "POST", pattern: /^\/api\/v1\/support\/tickets\/[^/]+\/(messages|reopen)$/, key: "support:write" },
+  { method: "POST", pattern: /^\/api\/v1\/admin\/communications\/tickets\/[^/]+\/(messages|status)$/, key: "support:write" },
   { method: "POST", pattern: /^\/api\/v1\/accounts\/[^/]+\/sync$/, key: "accounts:sync" },
   { method: "POST", pattern: /^\/api\/v1\/accounts\/[^/]+\/metaapi\/connect$/, key: "accounts:metaapi-connect" },
   // SEC-02: Legacy threw `admin-user-action` (30/300) inside the two handlers

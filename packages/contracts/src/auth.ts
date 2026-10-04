@@ -82,6 +82,13 @@ export const RATE_LIMIT_DEFAULTS = {
   "accounts:sync": { limit: 20, windowSec: 300 },
   "accounts:metaapi-connect": { limit: 5, windowSec: 900 },
   "accounts:detect-server": { limit: 20, windowSec: 900 },
+  // --- Phase 5: support tickets ---------------------------------------------
+  // Legacy throttled the AUTH routes and the provider-touching routes, and left
+  // the ticket endpoints to the generic authenticated surface. Modern keeps one
+  // explicit bucket because a ticket write is the one support operation that
+  // creates durable rows a human must read: 20 writes per 5 minutes is well above
+  // any genuine support conversation and well below a usable flood.
+  "support:write": { limit: 20, windowSec: 300 },
   "webhooks:metaapi": { limit: 120, windowSec: 60 },
   // Legacy also throttled its two admin USER MUTATIONS (`admin-user-action`,
   // 30/300, in Admin/UserManagementController::setStatus + setRole). Modern has

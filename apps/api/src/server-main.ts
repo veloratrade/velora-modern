@@ -78,6 +78,7 @@ import { ManualSyncService, PgManualSyncStore } from "./accounts/manualSyncServi
 import { makeSyncPendingMarker } from "./accounts/syncPending.js";
 import { PgAnalyticsStore } from "./analytics/analyticsStore.js";
 import { PgTagStore } from "./tags/tagService.js";
+import { PgSupportStore, SupportService } from "./support/supportService.js";
 import { AttachmentService, PgAttachmentStore, LocalAttachmentStorage } from "./attachments/attachmentService.js";
 import { PgSubscriptionStore } from "./billing/subscriptionService.js";
 import { PgAiCoachStore } from "./aicoach/aiCoachRoutes.js";
@@ -237,6 +238,7 @@ async function main(): Promise<void> {
     developer?: import("./developer/developerRoutes.js").DeveloperStore;
     developerKeys?: import("./developer/developerAuth.js").DeveloperKeyAuth;
     telegram?: import("./telegram/telegramRoutes.js").TelegramCapability;
+    support?: import("./support/supportService.js").SupportService;
   } = {};
   if (boot.jwtSecret !== undefined) {
     capabilities.auth = new AuthService({
@@ -451,6 +453,10 @@ async function main(): Promise<void> {
     capabilities.ea = new PgEaStore(q);
     capabilities.tenancy = new PgTenancyStore(q);
     capabilities.developer = new PgDeveloperStore(q);
+    // Phase 5: the support ticket capability. The SERVICE wraps the store so the
+    // lifecycle rules (who may reply, what a reopen does, the note-never-moves
+    // rule) live in ONE place — the admin surface in phase 6 reuses it unchanged.
+    capabilities.support = new SupportService({ store: new PgSupportStore(q) });
     // v3.0 developer-key AUTHENTICATION. Its own lookup (hash → live key) and
     // the SAME durable limiter store the auth routes use, so the per-key
     // requests/minute limit holds across processes instead of per instance.

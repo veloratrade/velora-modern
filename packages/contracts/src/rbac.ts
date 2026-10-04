@@ -62,6 +62,15 @@ export const PERMISSIONS = [
    * delegated to `admin`.
    */
   "users.change_role",
+
+  // --- Phase 5 (support). The capability Legacy named `communication.view` /
+  // `communication.reply`. Both are granted to `admin` AND `super_admin` in
+  // Legacy (api/src/Auth/Role.php: lines 107-108 for admin, 130-131 for
+  // super_admin), which is why neither is super-admin-exclusive here.
+  /** Read any user's support tickets (the support inbox). */
+  "support.tickets.view",
+  /** Reply to, close, reopen or archive a support ticket. */
+  "support.tickets.manage",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -73,7 +82,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<AppRole, readonly Permission[]>> 
   // A normal user holds ZERO administrative permissions (Legacy: `user => []`).
   // Ownership of their own resources is a separate mechanism and is unaffected.
   user: ["rbac.self.view"],
-  admin: ["rbac.self.view", "admin.panel.access", "users.view", "users.manage_status"],
+  admin: ["rbac.self.view", "admin.panel.access", "users.view", "users.manage_status", "support.tickets.view", "support.tickets.manage"],
   super_admin: [
     "rbac.self.view",
     "admin.panel.access",
@@ -82,6 +91,8 @@ export const ROLE_PERMISSIONS: Readonly<Record<AppRole, readonly Permission[]>> 
     "users.manage_status",
     // The one user-management permission an `admin` must NOT hold.
     "users.change_role",
+    "support.tickets.view",
+    "support.tickets.manage",
   ],
 };
 

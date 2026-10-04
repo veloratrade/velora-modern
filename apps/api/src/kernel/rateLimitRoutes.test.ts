@@ -79,6 +79,9 @@ test("THROTTLED_ROUTES maps exactly the implemented routes to the C-14 keys", ()
     // SEC-02 — the provider/ingress routes (values pinned by the tests below).
     "POST /api/v1/accounts/detect-server",
     "POST /api/v1/webhooks/metaapi",
+    // Phase 5 — opening a support ticket. The id-bearing support writes
+    // (messages / reopen / admin status) live in the pattern list below.
+    "POST /api/v1/support/tickets",
   ]);
   for (const routeKey of Object.values(THROTTLED_ROUTES)) {
     assert.ok(routeKey in RATE_LIMIT_DEFAULTS);
@@ -90,6 +93,9 @@ test("THROTTLED_ROUTES maps exactly the implemented routes to the C-14 keys", ()
   // dynamic connect path lives in the pattern list below (it carries an id).
   assert.equal(THROTTLED_ROUTES["POST /api/v1/accounts/detect-server"], "accounts:detect-server");
   assert.equal(THROTTLED_ROUTES["POST /api/v1/webhooks/metaapi"], "webhooks:metaapi");
+  // Phase 5: support writes share ONE per-user bucket ("support:write") and
+  // opening a ticket is the route that must carry it.
+  assert.equal(THROTTLED_ROUTES["POST /api/v1/support/tickets"], "support:write");
 
   // OD-14: exactly ONE canonical resend endpoint — the Legacy
   // `/auth/resend-verification-email` alias is deliberately not reproduced.
@@ -258,14 +264,36 @@ test("SEC-02: the provider/ingress buckets carry Legacy's exact numbers", () => 
 });
 
 test("SEC-02: throttle lookup covers the dynamic provisioning path, and only the write", () => {
-  // Every dynamic rule is method-scoped, and the table is exactly the four
-  // resource-id routes throttled here: the user-triggered sync (TRD-06), the
-  // provisioning call, and Legacy's two admin user mutations. A new rule cannot
-  // appear unnoticed.
+  // Every dynamic rule is method-scoped, and the table is exactly the six
+  // resource-id routes throttled here: Phase 5's two support writes (user reply /
+  // reopen and the admin reply / status pair), the user-triggered sync (TRD-06),
+  // the provisioning call, and Legacy's two admin user mutations. A new rule
+  // cannot appear unnoticed.
   assert.deepEqual(
     THROTTLED_PATTERN_ROUTES.map((r) => `${r.method} ${r.key}`),
-    ["POST accounts:sync", "POST accounts:metaapi-connect", "PATCH admin:user-action", "PATCH admin:user-action"],
+    [
+      "POST support:write",
+      "POST support:write",
+      "POST accounts:sync",
+      "POST accounts:metaapi-connect",
+      "PATCH admin:user-action",
+      "PATCH admin:user-action",
+    ],
   );
+  // Phase 5 near-misses: the support bucket covers the WRITES only.
+  assert.equal(throttleKeyFor("POST", "/api/v1/support/tickets/7/messages"), "support:write");
+  assert.equal(throttleKeyFor("POST", "/api/v1/support/tickets/7/reopen"), "support:write");
+  assert.equal(throttleKeyFor("POST", "/api/v1/admin/communications/tickets/7/messages"), "support:write");
+  assert.equal(throttleKeyFor("POST", "/api/v1/admin/communications/tickets/7/status"), "support:write");
+  // …a read of the same thread is not, and neither is the read MARKER: it is a
+  // cheap, ownership-scoped UPDATE that a user may legitimately repeat.
+  assert.equal(throttleKeyFor("GET", "/api/v1/support/tickets/7/messages"), undefined);
+  assert.equal(throttleKeyFor("POST", "/api/v1/support/tickets/7/read"), undefined);
+  assert.equal(throttleKeyFor("GET", "/api/v1/admin/communications/tickets/7/status"), undefined, "the admin queue is a read");
+  // The collection resolves through the EXACT map (no id in the path) — same key,
+  // so a burst spread across create + reply still shares one budget per user.
+  assert.equal(throttleKeyFor("POST", "/api/v1/support/tickets"), "support:write");
+  assert.equal(throttleKeyFor("POST", "/api/v1/support/tickets/7/messages/extra"), undefined);
   assert.equal(throttleKeyFor("POST", "/api/v1/accounts/acc-123/metaapi/connect"), "accounts:metaapi-connect");
   assert.equal(throttleKeyFor("POST", "/api/v1/accounts/42/metaapi/connect"), "accounts:metaapi-connect");
   // A read of the same resource must never be throttled by this rule.
