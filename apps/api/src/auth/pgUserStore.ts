@@ -32,6 +32,8 @@ interface UserRow {
   full_name: string;
   timezone: string;
   locale: string;
+  locale_source: string;
+  locale_updated_at: Date | string | null;
   role: string;
   plan: string;
   status: string;
@@ -49,6 +51,10 @@ function mapUser(r: UserRow): UserRecord {
     fullName: r.full_name,
     timezone: r.timezone,
     locale: r.locale === "en" ? "en" : "fa",
+    // Legacy `locale_source` / `locale_updated_at` (add_user_locale_preference):
+    // the stored provenance of the language choice, not a public field.
+    localeSource: r.locale_source,
+    localeUpdatedAt: isoOrNull(r.locale_updated_at),
     // Phase 3B-3: normalizeRole maps any value outside the frozen OD-9 set to
     // the LEAST privileged role. The previous ternary silently collapsed
     // 'super_admin' to 'user' (a privilege DOWNGRADE that would have become
@@ -301,6 +307,11 @@ export class PgUserStore implements UserStore {
     const rows = await this.q(
       `UPDATE users SET
          locale = COALESCE($1, locale),
+         -- Legacy parity (UserRepository::updateLocalePreference): an explicit
+         -- choice records WHERE the locale came from and WHEN. An ai_consent-only
+         -- update must not touch either column.
+         locale_source = CASE WHEN $1::text IS NOT NULL THEN 'user' ELSE locale_source END,
+         locale_updated_at = CASE WHEN $1::text IS NOT NULL THEN $4 ELSE locale_updated_at END,
          ai_consent_at = CASE WHEN $2::timestamptz IS NOT NULL THEN $2::timestamptz
                               WHEN $3 THEN NULL ELSE ai_consent_at END,
          updated_at = $4

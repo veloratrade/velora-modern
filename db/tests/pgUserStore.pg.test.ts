@@ -200,9 +200,22 @@ test("PG: preferences — locale patch, aiConsentAt set/null-clear, email prefs 
     // explicit null CLEARS ai_consent_at (the CASE pair — null-clear law)
     const set2 = await h.store.updateUserPreferences(u.id, { aiConsentAt: null }, T2);
     assert.equal(set2!.aiConsentAt, null);
-    // locale flip
+    // locale flip — and the PROVENANCE columns Legacy wrote with it
+    // (UserRepository::updateLocalePreference): source='user' + stamped moment.
+    // Asserted against the raw row, not only the mapper, so a mapper-only fix
+    // could not fake it.
     const set3 = await h.store.updateUserPreferences(u.id, { locale: "en" }, T2);
     assert.equal(set3!.locale, "en");
+    assert.equal(set3!.localeSource, "user");
+    assert.equal(set3!.localeUpdatedAt, T2.toISOString());
+    const raw = await h.pool.query("SELECT locale, locale_source, locale_updated_at FROM users WHERE id = $1", [u.id]);
+    assert.deepEqual(raw.rows[0].locale_source, "user");
+    assert.equal(new Date(raw.rows[0].locale_updated_at).toISOString(), T2.toISOString());
+
+    // …and an AI-consent-only update must NOT restamp the language provenance.
+    const set4 = await h.store.updateUserPreferences(u.id, { aiConsentAt: T1.toISOString() }, T1);
+    assert.equal(set4!.localeSource, "user", "consent-only update keeps the source");
+    assert.equal(set4!.localeUpdatedAt, T2.toISOString(), "consent-only update keeps the original timestamp");
     assert.equal(await h.store.updateUserPreferences("999999999", { locale: "en" }, T2), null);
 
     // email preferences: default-ON when no row; upsert round-trips

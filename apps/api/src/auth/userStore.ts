@@ -19,6 +19,16 @@ export interface UserRecord {
   readonly fullName: string;
   readonly timezone: string;
   readonly locale: "fa" | "en";
+  /**
+   * How `locale` was established — Legacy's `locale_source` vocabulary
+   * (default|browser|cookie|user). Modern writes 'user' when the account holder
+   * picked it (register-with-locale or PATCH /auth/me/preferences) and leaves
+   * 'default' otherwise. Never exposed on the public DTO; it exists so the
+   * provenance survives, exactly as Legacy's `add_user_locale_preference` intended.
+   */
+  readonly localeSource: string;
+  /** When the user last set the locale explicitly (NULL until they do). */
+  readonly localeUpdatedAt: string | null;
   /** Application role (OD-9). NOT a PostgreSQL identity — see contracts/rbac.ts. */
   readonly role: AppRoleName;
   readonly plan: string;
@@ -100,6 +110,8 @@ export interface UserStore {
     fullName: string;
     timezone: string;
     locale: "fa" | "en";
+    /** 'user' when the registration carried an explicit UI locale, else 'default'. */
+    localeSource?: "user" | "default";
     now: Date;
   }): Promise<UserRecord>;
   findUserByEmail(email: string): Promise<UserRecord | null>;

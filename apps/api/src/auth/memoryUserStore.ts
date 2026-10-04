@@ -32,6 +32,7 @@ export class MemoryUserStore implements UserStore {
     fullName: string;
     timezone: string;
     locale: "fa" | "en";
+    localeSource?: "user" | "default";
     now: Date;
   }): Promise<UserRecord> {
     for (const u of this.users.values()) {
@@ -45,6 +46,8 @@ export class MemoryUserStore implements UserStore {
       fullName: input.fullName,
       timezone: input.timezone,
       locale: input.locale,
+      localeSource: input.localeSource ?? "default",
+      localeUpdatedAt: input.localeSource === "user" ? iso(input.now) : null,
       role: "user",
       plan: "free",
       status: "active",
@@ -243,7 +246,9 @@ export class MemoryUserStore implements UserStore {
     if (u === undefined) return null;
     const updated: UserRecord = {
       ...u,
-      ...(patch.locale !== undefined ? { locale: patch.locale } : {}),
+      ...(patch.locale !== undefined
+        ? { locale: patch.locale, localeSource: "user", localeUpdatedAt: iso(now) }
+        : {}),
       ...(patch.aiConsentAt !== undefined ? { aiConsentAt: patch.aiConsentAt } : {}),
       updatedAt: iso(now),
     };

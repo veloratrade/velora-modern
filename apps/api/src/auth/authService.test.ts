@@ -393,3 +393,56 @@ test("preferences + email preferences service contracts", async () => {
   assert.equal(merged.preferences.trade_notifications, 0);
   assert.equal(merged.preferences.weekly_report, 1); // no reset
 });
+
+// ---------------------------------------------------------------------------
+// Legacy parity: locale PROVENANCE (users.locale_source / locale_updated_at)
+//
+// Legacy `UserRepository::updateLocalePreference` wrote `locale_source='user'`
+// and `locale_updated_at=now` whenever the account holder picked a language, and
+// `AuthService` did the same at registration when the request carried one. Modern
+// had the columns (migration 0022) but never wrote them, so the provenance of a
+// language choice was lost. These assertions pin the restored behavior — including
+// the negative case: an AI-consent-only update must not touch either column.
+// ---------------------------------------------------------------------------
+test("locale provenance: an explicit change records source 'user' + a timestamp", async () => {
+  const h = makeService();
+  await registerVerifiedUser(h, "locale-prov@velora.example", "a-strong-password-123");
+  const userId = (await h.store.findUserByEmail("locale-prov@velora.example"))!.id;
+
+  const before = (await h.store.findUserById(userId))!;
+  assert.equal(before.localeSource, "default", "a registration without a locale keeps the column default");
+  assert.equal(before.localeUpdatedAt, null);
+
+  await h.service.updatePreferences(userId, { locale: "en" });
+
+  const after = (await h.store.findUserById(userId))!;
+  assert.equal(after.locale, "en");
+  assert.equal(after.localeSource, "user");
+  assert.notEqual(after.localeUpdatedAt, null, "the moment of the choice is recorded");
+});
+
+test("locale provenance: an AI-consent-only update leaves locale_source and locale_updated_at alone", async () => {
+  const h = makeService();
+  await registerVerifiedUser(h, "locale-prov2@velora.example", "a-strong-password-123");
+  const userId = (await h.store.findUserByEmail("locale-prov2@velora.example"))!.id;
+
+  await h.service.updatePreferences(userId, { locale: "en" });
+  const chosen = (await h.store.findUserById(userId))!;
+
+  await h.service.updatePreferences(userId, { ai_consent: true });
+  const afterConsent = (await h.store.findUserById(userId))!;
+
+  assert.equal(afterConsent.aiConsentAt !== null, true);
+  assert.equal(afterConsent.localeSource, "user");
+  assert.equal(afterConsent.localeUpdatedAt, chosen.localeUpdatedAt, "an unrelated preference must not restamp the provenance");
+  assert.equal(afterConsent.locale, "en");
+});
+
+test("locale provenance: registration that carries a locale records source 'user' (Legacy AuthService)", async () => {
+  const h = makeService();
+  await h.service.register({ email: "locale-at-signup@velora.example", password: "a-strong-password-123", locale: "en" });
+  const user = (await h.store.findUserByEmail("locale-at-signup@velora.example"))!;
+  assert.equal(user.locale, "en");
+  assert.equal(user.localeSource, "user");
+  assert.notEqual(user.localeUpdatedAt, null);
+});

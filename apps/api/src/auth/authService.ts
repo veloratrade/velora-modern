@@ -199,6 +199,9 @@ export class AuthService {
       fullName: (input.fullName ?? "").trim(),
       timezone: input.timezone ?? "UTC",
       locale: input.locale ?? "fa",
+      // Legacy AuthService: a registration that carried an explicit UI locale
+      // records locale_source='user'; otherwise the column default stands.
+      ...(input.locale !== undefined ? { localeSource: "user" as const } : {}),
       now,
     });
     const token = this.newVerificationToken();
