@@ -259,3 +259,9 @@ fixture + evidence) · docs commit.
 
 **Nothing was removed.** No legacy table, column or row was dropped, rewritten or
 archived; no user capability was taken away.
+
+**Push status:** these commits are LOCAL. `git ls-remote` reads the public remote
+anonymously (it confirmed `main` = `0e9c4d7e`), but pushing needs a token and none is
+stored anywhere (the previous PATs were used inline once and discarded). The remote
+branch tip is therefore still `e2849ac`, and no delivery state above COMMITTED is
+claimed for AC-13. A fresh PAT pushes the backlog in one command.
