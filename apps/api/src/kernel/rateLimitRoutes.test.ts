@@ -258,12 +258,13 @@ test("SEC-02: the provider/ingress buckets carry Legacy's exact numbers", () => 
 });
 
 test("SEC-02: throttle lookup covers the dynamic provisioning path, and only the write", () => {
-  // Every dynamic rule is method-scoped, and the table is exactly the three
-  // resource-id routes SEC-02 throttles: the provisioning call plus Legacy's two
-  // admin user mutations. A new rule cannot appear unnoticed.
+  // Every dynamic rule is method-scoped, and the table is exactly the four
+  // resource-id routes throttled here: the user-triggered sync (TRD-06), the
+  // provisioning call, and Legacy's two admin user mutations. A new rule cannot
+  // appear unnoticed.
   assert.deepEqual(
     THROTTLED_PATTERN_ROUTES.map((r) => `${r.method} ${r.key}`),
-    ["POST accounts:metaapi-connect", "PATCH admin:user-action", "PATCH admin:user-action"],
+    ["POST accounts:sync", "POST accounts:metaapi-connect", "PATCH admin:user-action", "PATCH admin:user-action"],
   );
   assert.equal(throttleKeyFor("POST", "/api/v1/accounts/acc-123/metaapi/connect"), "accounts:metaapi-connect");
   assert.equal(throttleKeyFor("POST", "/api/v1/accounts/42/metaapi/connect"), "accounts:metaapi-connect");
@@ -274,6 +275,13 @@ test("SEC-02: throttle lookup covers the dynamic provisioning path, and only the
   assert.equal(throttleKeyFor("POST", "/api/v1/accounts/metaapi/connect"), undefined);
   assert.equal(throttleKeyFor("POST", "/api/v1/accounts/acc-123/metaapi/connect/extra"), undefined);
   // Exact matches still win and unrelated routes stay unthrottled.
+  // TRD-06: the user-triggered sync — POST only, and only for a resource id.
+  assert.equal(throttleKeyFor("POST", "/api/v1/accounts/7/sync"), "accounts:sync");
+  assert.equal(throttleKeyFor("POST", "/api/v1/accounts/acc-123/sync"), "accounts:sync");
+  assert.equal(throttleKeyFor("GET", "/api/v1/accounts/7/sync"), undefined, "sync-status is a read and stays unthrottled by this rule");
+  assert.equal(throttleKeyFor("POST", "/api/v1/accounts/7/sync-status"), undefined);
+  assert.equal(throttleKeyFor("POST", "/api/v1/accounts/sync"), undefined);
+  assert.equal(throttleKeyFor("POST", "/api/v1/accounts/7/sync/extra"), undefined);
   assert.equal(throttleKeyFor("POST", "/api/v1/accounts/detect-server"), "accounts:detect-server");
   assert.equal(throttleKeyFor("POST", "/api/v1/webhooks/metaapi"), "webhooks:metaapi");
   assert.equal(throttleKeyFor("POST", "/api/v1/accounts"), undefined);
@@ -310,6 +318,27 @@ test("SEC-02: detect-server and the webhook ingress are throttled at their Legac
       assert.equal(r.status, 503);
     }
     assert.equal((await post(base, "/api/v1/webhooks/metaapi", {})).status, 429);
+  });
+});
+
+test("TRD-06: the user-triggered sync carries Legacy's metaapi-sync limit (20/300)", () => {
+  // Legacy: RateLimiter::hit('metaapi-sync', 20, 300) at dispatch for
+  // POST /accounts/{id}/sync. The route now exists in Modern, so the number has
+  // an owner again instead of being a documented gap.
+  assert.deepEqual(RATE_LIMIT_DEFAULTS["accounts:sync"], { limit: 20, windowSec: 300 });
+
+  // Behaviour, not just the table: with the capability unwired the first 20
+  // attempts reach the fail-closed 503 (limiter runs BEFORE capability checks)
+  // and the 21st is refused with a Retry-After.
+  return withServer(async (base) => {
+    for (let i = 0; i < 20; i++) {
+      const r = await post(base, "/api/v1/accounts/7/sync", {});
+      assert.equal(r.status, 503, `attempt ${i + 1} should reach the unconfigured-capability 503`);
+    }
+    const blocked = await post(base, "/api/v1/accounts/7/sync", {});
+    assert.equal(blocked.status, 429);
+    assert.equal((blocked.body as Envelope).error?.code, "TOO_MANY_REQUESTS");
+    assert.ok(blocked.retryAfter !== null, "429 must advertise Retry-After");
   });
 });
 
