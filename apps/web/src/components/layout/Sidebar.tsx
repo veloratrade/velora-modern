@@ -20,9 +20,14 @@ const NAV: NavItem[] = [
   { href: "/support", icon: "support", key: "common.support.152185b4", fallback: "پشتیبانی" },
   { href: "/intelligence", icon: "intel", key: "common.tradingIntelligence", fallback: "هوش معامله" },
   { href: "/wallet", icon: "wallet", key: "common.wallet.cd1a64bc", fallback: "کیف پول" },
-  // Settings hosts the WEB-FIRST Telegram linking screen (ADR-018). Label comes
-  // from the telegram catalog so the Legacy byte-copy catalogs stay untouched.
-  { href: "/settings", icon: "settings", key: "telegram.title", fallback: "تنظیمات" },
+  // Settings is the ACCOUNT surface, and it hosts the web-first Telegram linking
+  // screen (ADR-018) as its "connected accounts" section. The label is the
+  // PAGE's own name, not the feature's: a nav item called "Telegram connection"
+  // would be a second, feature-shaped way into the same screen and would put
+  // Telegram beside Dashboard/Journal instead of inside the account area, which
+  // is the opposite of "one canonical location". Telegram is still reachable in
+  // one click — from here — and nothing about the route or the screen changed.
+  { href: "/settings", icon: "settings", key: "telegram.settings.title", fallback: "تنظیمات" },
 ];
 
 function getLocaleFromPath(path: string): Locale {
@@ -90,16 +95,36 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             </Link>
           ) : null}
         </nav>
-        <div className="sb-user">
-          <div className="sb-av-wrap">
-            <div className="sb-av" id="userAv">{initial}</div>
-            <span className="sb-online" aria-hidden="true" />
+        {/* The account card is the SECOND door to the account surface, and the
+            natural one: a signed-in user looks at their own name to change
+            anything about their own account. The markup inside is untouched
+            (same classes, same avatar, same online dot, same two lines) — only
+            the wrapper becomes a link, so the visual language and the density
+            are identical. Signed-out visitors get no link: they have no
+            account screen. */}
+        {signedIn ? (
+          <Link className="sb-user" href={prefix + "/settings"} onClick={onClose} aria-label={t("telegram.settings.title", null, "Settings")}>
+            <div className="sb-av-wrap">
+              <div className="sb-av" id="userAv">{initial}</div>
+              <span className="sb-online" aria-hidden="true" />
+            </div>
+            <div className="sb-user-meta">
+              <div className="sb-name v-latn-num">{name}</div>
+              <div className="sb-email v-latn-num">{email}</div>
+            </div>
+          </Link>
+        ) : (
+          <div className="sb-user">
+            <div className="sb-av-wrap">
+              <div className="sb-av" id="userAv">{initial}</div>
+              <span className="sb-online" aria-hidden="true" />
+            </div>
+            <div className="sb-user-meta">
+              <div className="sb-name v-latn-num">{name}</div>
+              <div className="sb-email v-latn-num">{email}</div>
+            </div>
           </div>
-          <div className="sb-user-meta">
-            <div className="sb-name v-latn-num">{name}</div>
-            <div className="sb-email v-latn-num">{email}</div>
-          </div>
-        </div>
+        )}
         {signedIn ? (
           <button className="sb-logout" onClick={onLogout} type="button">
             <span>{locale === "fa" ? "خروج" : "Sign out"}</span>

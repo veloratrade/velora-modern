@@ -1,6 +1,9 @@
-{"locale":"fa","version":"2026.10.03.1","feature":"telegram","messages":{
+{"locale":"fa","version":"2026.10.04.1","feature":"telegram","messages":{
   "telegram.title":"اتصال تلگرام",
   "telegram.subtitle":"ژورنال معاملات خود را از تلگرام ثبت کنید — همان حساب، همان ژورنال، همان تحلیل‌ها.",
+  "telegram.settings.title":"تنظیمات",
+  "telegram.settings.subtitle":"حساب، اتصال‌ها و ترجیحات شما.",
+  "telegram.section.connectedAccounts":"حساب‌های متصل",
   "telegram.state.disconnected":"متصل نیست",
   "telegram.state.connecting":"در انتظار اتصال",
   "telegram.state.connected":"متصل",

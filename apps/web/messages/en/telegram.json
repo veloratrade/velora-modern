@@ -1,6 +1,9 @@
-{"locale":"en","version":"2026.10.03.1","feature":"telegram","messages":{
+{"locale":"en","version":"2026.10.04.1","feature":"telegram","messages":{
   "telegram.title":"Telegram connection",
   "telegram.subtitle":"Journal from Telegram — same account, same journal, same analysis.",
+  "telegram.settings.title":"Settings",
+  "telegram.settings.subtitle":"Your account, connections and preferences.",
+  "telegram.section.connectedAccounts":"Connected accounts",
   "telegram.state.disconnected":"Not connected",
   "telegram.state.connecting":"Awaiting connection",
   "telegram.state.connected":"Connected",

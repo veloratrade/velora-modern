@@ -145,8 +145,11 @@ export default function SettingsPage() {
     <div>
       <div className="page-head">
         <div>
-          <h1 className="page-title">{t("telegram.title", null, fa ? "اتصال تلگرام" : "Telegram connection")}</h1>
-          <p className="page-sub">{t("telegram.subtitle", null, "")}</p>
+          {/* The page is the ACCOUNT surface; Telegram is one connected account
+              inside it. Titling the page after the feature would make Telegram
+              the subject of the screen rather than a section of it. */}
+          <h1 className="page-title">{t("telegram.settings.title", null, fa ? "تنظیمات" : "Settings")}</h1>
+          <p className="page-sub">{t("telegram.settings.subtitle", null, "")}</p>
         </div>
         {phase === "ready" && status !== null ? (
           <span className={`badge ${stateBadge.cls}`}>{t(stateBadge.key, null, stateBadge.fallback)}</span>
@@ -172,7 +175,10 @@ export default function SettingsPage() {
       ) : null}
 
       {phase === "ready" && status !== null ? (
-        <div className="grid-gap-12">
+        <section aria-labelledby="connected-accounts" className="grid-gap-12">
+          <h2 className="label" id="connected-accounts" style={{ marginTop: 4 }}>
+            {t("telegram.section.connectedAccounts", null, fa ? "حساب‌های متصل" : "Connected accounts")}
+          </h2>
           <div className="card">
             <div className="flex-between flex-wrap">
               <div>
@@ -268,7 +274,7 @@ export default function SettingsPage() {
               ) : null}
             </div>
           </div>
-        </div>
+        </section>
       ) : null}
     </div>
   );
