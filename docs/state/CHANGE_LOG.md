@@ -359,3 +359,44 @@ delivery. A commit cannot contain the result of its own push, so the VERIFIED re
 tip (read back with `git fetch` + `git rev-parse`) is recorded in the small
 push-verification commit that follows this one — until that commit exists, no state
 above COMMITTED is claimed for AC-14.
+
+## AC-15 — 2026-10-04 · push verification for phases 3–5 (the branch is on GitHub)
+
+**Why this entry exists.** AC-9…AC-14 each recorded work as local, because each push
+until now needed a fresh single-use token. The owner restored the phase-by-phase
+directive (push after every phase, keep going to the last phase) and supplied a token
+in-conversation, so the backlog went up in this delivery. A commit cannot contain the
+result of its own push, so the result is recorded here, in the commit that follows it.
+
+**Verified transcript** (token redacted; the token is used inline and stored nowhere —
+no file, no git config, no credential helper, no commit):
+
+```
+local HEAD before push : 69d132e8e385d6c4c363837472ede0902319d326
+--- git push ---
+To https://github.com/veloratrade/velora-modern.git
+   1f6c4bb..69d132e  HEAD -> feat/telegram-journal-client
+--- git fetch (verification, not the push's own output) ---
+remote tip (FETCH_HEAD) : 69d132e8e385d6c4c363837472ede0902319d326
+--- git ls-remote (independent) ---
+69d132e8e385d6c4c363837472ede0902319d326  refs/heads/feat/telegram-journal-client
+0e9c4d7e6e1f984287490ce02f5681c208e35c7a  refs/heads/main
+checked at (UTC)       : 2026-10-04T17:47:25Z
+```
+
+**Reading of that transcript, stated conservatively.**
+- The remote branch moved `1f6c4bb → 69d132e`. That single range contains the phase-3,
+  phase-4 and phase-5 deliveries: `1f6c4bb` was already the phase-4 tip, so phases 3
+  and 4 were on the remote before this push and this push carried **phase 5** —
+  `eb1646b` (API/DB), `d36c022` (web), `69d132e` (evidence + state).
+- `69d132e` is confirmed by a **fresh fetch** and by an independent `git ls-remote`,
+  not by the push's own stdout.
+- `main` is untouched at `0e9c4d7e` — the branch is **not merged**, and nothing is
+  claimed about any deployed environment (see §"delivery states" in the phase-5
+  report: DEPLOYED is `NOT_CLAIMED`).
+- AC-15's own commit becomes the new tip; its SHA is recorded in the phase-6 push
+  transcript. This recursion is the honest form of "record the tip" — a commit cannot
+  name itself.
+
+**Delivery states after this push:** phases 1–5 = **PUSHED**. Not merged, not deployed,
+no PR merge. PR #9 still open against `main`.

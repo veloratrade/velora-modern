@@ -101,11 +101,11 @@
     "entry": "AC-14 (Phase 5 — support)",
     "branch": "feat/telegram-journal-client",
     "base": "0e9c4d7e6e1f984287490ce02f5681c208e35c7a (main)",
-    "head": "phase-5 commits on this branch (tip recorded in the push-verification commit that follows AC-14)",
+    "head": "69d132e8e385d6c4c363837472ede0902319d326 (phase-5 tip, VERIFIED pushed 2026-10-04T17:47:25Z via git fetch + git ls-remote — AC-15)",
     "commits": "phase 5: migration 0026 + support service/routes + wiring + tests + web surface + QA harness",
     "capability": "Support — the ticket center (SUP-01/SUP-02): two server-derived axes, derived counters, first_reply_at sentinel, real-PG-enforced lifecycle, super_admin-only internal notes that move nothing",
     "pushed": true,
-    "pushed_at": "2026-10-04 (recorded in the push-verification commit, read back with git fetch + git rev-parse — never assumed)"
+    "pushed_at": "2026-10-04T17:47:25Z (read back from the remote with git fetch + git ls-remote; transcript in CHANGE_LOG AC-15)"
   },
   "last_battery": {
     "result": "1127/1127 local (1064 general + 63 PGlite, 0 fail / 0 cancelled / 0 skipped, EXIT=0); tsc 0 errors (5 projects); secret-scan PASS (0 findings); next build exit 0 with /support + /en/support real; REAL-PG batteries 29 files / 58 runs / 0 failures incl. supportTickets 14/14; support service 15/15; support routes 10/10; throttle guard 18/18; browser QA 29/29 (docs/audits/phase5-ui/)."
