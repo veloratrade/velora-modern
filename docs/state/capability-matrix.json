@@ -18,99 +18,14 @@
     "INTENTIONALLY_NOT_MIGRATED"
   ],
   "counts": {
-    "VERIFIED": {
-      "count": 10,
-      "ids": [
-        "ACC-01",
-        "ACC-04",
-        "ACC-05",
-        "ACC-07",
-        "ACC-08",
-        "ACC-09",
-        "PLT-01",
-        "SEC-03",
-        "SEC-04",
-        "TRD-01"
-      ]
-    },
-    "IMPLEMENTED": {
-      "count": 5,
-      "ids": [
-        "ACC-02",
-        "ACC-03",
-        "PLT-08",
-        "TRD-06",
-        "TRD-12"
-      ]
-    },
-    "PARTIAL": {
-      "count": 12,
-      "ids": [
-        "ACC-06",
-        "ADM-01",
-        "PLT-03",
-        "PLT-05",
-        "PLT-06",
-        "PLT-11",
-        "SEC-01",
-        "SEC-02",
-        "TRD-02",
-        "TRD-04",
-        "TRD-05",
-        "TRD-07"
-      ]
-    },
-    "BACKEND_ONLY": {
-      "count": 2,
-      "ids": [
-        "AI-05",
-        "PLT-14"
-      ]
-    },
-    "UI_ONLY": {
-      "count": 2,
-      "ids": [
-        "ADM-04",
-        "TRD-09"
-      ]
-    },
-    "MISSING": {
-      "count": 18,
-      "ids": [
-        "ACC-10",
-        "ACC-11",
-        "ADM-02",
-        "ADM-03",
-        "AI-01",
-        "AI-02",
-        "AI-03",
-        "AI-04",
-        "PLT-02",
-        "PLT-04",
-        "PLT-07",
-        "PLT-09",
-        "PLT-10",
-        "PLT-12",
-        "SUP-01",
-        "SUP-02",
-        "TRD-03",
-        "TRD-08"
-      ]
-    },
-    "LEGACY_ONLY": {
-      "count": 2,
-      "ids": [
-        "TRD-10",
-        "TRD-11"
-      ]
-    },
-    "INTENTIONALLY_NOT_MIGRATED": {
-      "count": 2,
-      "ids": [
-        "PLT-13",
-        "TRD-13"
-      ]
-    }
+    "VERIFIED": 10,
+    "IMPLEMENTED": 7,
+    "PARTIAL": 12,
+    "MISSING": 16,
+    "UI_ONLY": 2,
+    "LEGACY_ONLY": 2,
+    "INTENTIONALLY_NOT_MIGRATED": 2,
+    "BACKEND_ONLY": 2
   },
   "capabilities": [
     {
@@ -470,17 +385,17 @@
       "capability": "PostgreSQL single source of truth",
       "status": "VERIFIED",
       "legacy_evidence": "MySQL 46 tables",
-      "modern_evidence": "23 migrations, pg driver, PG stores; db/tests 32 files; 70 real-PG tests at HEAD",
+      "modern_evidence": "25 migrations, pg driver, PG stores; db/tests 32 files; 70 real-PG tests at HEAD",
       "next_action": "none"
     },
     {
       "id": "PLT-02",
       "area": "platform",
       "capability": "Legacy data migration/cutover",
-      "status": "MISSING",
+      "status": "IMPLEMENTED",
       "legacy_evidence": "ADR-004 sampling blocked; unmapped tables",
-      "modern_evidence": "no cutover rehearsal; MG-SCHEMA-MAPPING",
-      "next_action": "Mapping table + rehearsal (MG-DATA-MIGRATION)"
+      "modern_evidence": "0025 financial guards (9 real-PG tests, fail-loud proof); tools/load_rehearsal.ts + A12 field-mapping gate (12 tests); rehearsal EXECUTED 2026-10-04 on a disposable PG: A-gates MAPPED/QUARANTINE/RECORDED, id-preserving load, exact row+money parity, gate 6 PnL recomputation 5/5",
+      "next_action": "real export + ADR-004 sampling decision (owner) → run the same harness"
     },
     {
       "id": "PLT-03",
@@ -495,10 +410,10 @@
       "id": "PLT-04",
       "area": "platform",
       "capability": "Backup/restore + ops tooling",
-      "status": "MISSING",
+      "status": "IMPLEMENTED",
       "legacy_evidence": "tools/ 86 PHP ops scripts",
-      "modern_evidence": "no backup, no restore drill, no probes",
-      "next_action": "MG-BACKUP-RESTORE, MG-OPS-TOOLING"
+      "modern_evidence": "ops/backup/restore_drill.mjs + core (13 tests): real artifact db-backup-staging-20261004095454-bb023e0cab03 (32 926 B, sha256 b289558f…), restored in 343 ms, parity PASS 44 tables/49 numeric columns, smoke 11/11 against the restored copy → RESTORE_VERIFIED",
+      "next_action": "offsite upload + storage re-hash, then a scheduled drill on staging (MG-BACKUP-RESTORE)"
     },
     {
       "id": "PLT-05",

@@ -205,3 +205,57 @@ judgment, recorded here so the next session does not re-derive it).
 - **Also fixed (harness):** `tools/run-tests.mjs` re-runs a test FILE that died by SIGKILL once, alone — the container OOM-killing an in-process WASM PostgreSQL is not a test result, and assertion failures are still never retried.
 - **Gaps:** `MG-METAAPI-CADENCE` narrows to the cadence decision alone (manual trigger closed); `MG-WORKER-DEPLOY` gains runtime evidence that the queue path works and has no production consumer; `MG-AI-OCR` gains the TRD-03 recon result (the endpoint's deterministic half needs a real OCR engine — fail-closed, not stubbed).
 - **What is NOT claimed:** nothing pushed, nothing deployed, no live MetaAPI call (no platform token), no OCR engine (none on this host), no Telegram verification.
+
+## AC-13 — Phase 4: data integrity & migration (2026-10-04)
+
+**Commits (phase start `e2849ac`):** `492e3f5` (MG-RMULTIPLE-SCALE parity rule) ·
+`ec2f94a` (0025 financial guards + 10 fixture alignments) · `1c847b8` (test-runner
+verdict fix) · `a02a38d` (restore drill + evidence) · `b301596` (load rehearsal +
+fixture + evidence) · docs commit.
+
+**What this delivery establishes**
+
+1. **`r_multiple` scale (MG-RMULTIPLE-SCALE) — CLOSED.** `packages/domain/src/legacyParity.ts`
+   (+8 tests) fixes the comparison rule: imported values preserved BY VALUE, a
+   historical recomputation compared at the legacy scale (4) with the legacy mode
+   (`bcmath-truncate`). The mode is load-bearing: `1.000099999` truncates to
+   `1.0000` but half-even rounds to `1.0001`.
+2. **Financial invariants enforced by the database (PLT-02).** `db/migrations/0025_trade_financial_guards.sql`
+   translates Legacy's `v0.3` guard list to the modern column set; a real-PG battery
+   (9 tests) proves the migration ABORTS on a database holding a stale unresolved row
+   (not recorded as applied, no half-guard left). Runtime probe 8/8 against the live
+   API. 10 test files' fixtures were aligned (OPEN where no financial outcome was
+   claimed, complete CLOSED where the real writer produces one) — no assertion weakened.
+3. **A red suite can no longer be reported green.** The OOM-retry logic excused a
+   batch that failed with zero OS kills; `tools/lib/testRunnerVerdict.mjs` (+9 tests)
+   now requires every failure to be accounted for by a SIGKILLed, mappable file. Found
+   because the 0025 run was `# fail 7` + `ALL TEST FILES PASSED` + `EXIT=0`.
+4. **A real backup, restored and verified (MG-BACKUP-RESTORE → PARTIAL).**
+   `ops/backup/restore_drill.mjs` (+13 tests): artifact 32 926 B / sha256 `b289558f…`,
+   restored into a disposable database, parity PASS (44 tables, 49 numeric columns,
+   exact decimal sums), smoke 11/11 on the restored copy → `RESTORE_VERIFIED`.
+   The FIRST run failed and is kept as evidence (the smoke asserted a fresh apply,
+   the wrong claim for a restored copy); `tools/pg-smoke.ts` gained
+   `PG_SMOKE_SCHEMA=restored` asserting the ledger instead, and S2's incomplete trade
+   fixture was completed. Offsite storage + production drill + RPO/RTO remain open.
+5. **The load rehearsal runs and refuses (MG-DATA-MIGRATION → PARTIAL).**
+   `tools/load_rehearsal.ts` + `tools/lib/legacyLoadGates.ts` (+12 tests) execute
+   `docs/migration-strategy.md` §6: A-gates (vocabularies, money digits, symbol
+   canonicalisation, time census, canonical-email uniqueness, referential integrity,
+   v0.3 guards, and **A12**: every exported column declared or the load refuses),
+   an id-preserving load, B-gates, and gate 6 (PnL recomputation under the legacy
+   mode). Executed on a labelled SYNTHETIC fixture: exact row- and money-parity,
+   quarantine recorded (never invented), 5/5 recomputations matched.
+   **Finding:** Modern `subscriptions` (0017) is the Stripe object and is NOT a target
+   for Legacy's provider-less lifecycle → those columns are recorded as unmapped with
+   the reason; the decision is `OD-AC-SUBMAP`.
+6. **Gates:** `npm test` 999+63 / 0 fail · real-PG batteries 27→**28 files** / 56 runs
+   / 0 failures · typecheck clean · secret-scan PASS · smoke 11/11 in both modes.
+
+**Evidence files:** `ops/backup/evidence/restore-drill-staging-20261004T095454Z.json`
+(+ the failed run `…T095423Z.json`), `ops/backup/evidence/load-rehearsal-20261004T095828Z.json`,
+`ops/backup/evidence/quarantine-legacy-export.FIXTURE.jsonl`,
+`docs/audits/2026-10-04-PHASE4-STATUS.md`.
+
+**Nothing was removed.** No legacy table, column or row was dropped, rewritten or
+archived; no user capability was taken away.

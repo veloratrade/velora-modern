@@ -61,7 +61,9 @@
       "decisions": [
         "OD-AC-SUBMAP"
       ],
-      "closure_criteria": "MG-SCHEMA-MAPPING closed"
+      "closure_criteria": "MG-SCHEMA-MAPPING closed",
+      "last_updated": "2026-10-04",
+      "closure_note": "Phase 4 progress 2026-10-04: schema mapping now enforced per column (A12) and the load rehearsal is executable"
     },
     {
       "id": "MG-G04",
@@ -232,9 +234,9 @@
       "id": "MG-G13",
       "section": "A",
       "title": "Operational tooling, backup and restore proven",
-      "status": "OPEN",
+      "status": "PARTIAL",
       "priority": "P1",
-      "verification_state": "NOT_VERIFIED",
+      "verification_state": "CURRENT_RUNTIME_VERIFIED",
       "audit_refs": [
         "§19.1 gate 13",
         "§17.2"
@@ -247,7 +249,9 @@
       "decisions": [
         "OD-AC-RPORTO"
       ],
-      "closure_criteria": "MG-BACKUP-RESTORE closed"
+      "closure_criteria": "MG-BACKUP-RESTORE closed",
+      "last_updated": "2026-10-04",
+      "closure_note": "Phase 4 progress 2026-10-04: a real backup + restore drill was executed and verified (see MG-BACKUP-RESTORE); offsite storage verification and the production drill remain"
     },
     {
       "id": "MG-G14",
@@ -454,20 +458,26 @@
       "id": "MG-BACKUP-RESTORE",
       "section": "B",
       "title": "No real backup taken; no restore drill run",
-      "status": "OPEN",
+      "status": "PARTIAL",
       "priority": "P1",
-      "verification_state": "NOT_VERIFIED",
+      "verification_state": "CURRENT_RUNTIME_VERIFIED",
       "audit_refs": [
         "§17.2"
       ],
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
-        "infra/backup/DR-RUNBOOK.md"
+        "infra/backup/DR-RUNBOOK.md",
+        "ops/backup/restore_drill.mjs",
+        "ops/backup/restoreDrillCore.mjs",
+        "ops/backup/tests/restoreDrill.test.ts",
+        "ops/backup/evidence/restore-drill-staging-20261004T095454Z.json"
       ],
       "decisions": [
         "OD-AC-RPORTO"
       ],
-      "closure_criteria": "One real backup + one restore drill, evidence captured"
+      "closure_criteria": "One real backup + one restore drill, evidence captured",
+      "closure_note": "PARTIAL 2026-10-04 (Phase 4). A REAL backup was produced by the project's own producer (db-backup-staging-20261004095454-bb023e0cab03, 32 926 bytes, sha256 b289558f...), restored with pg_restore into a disposable database (343 ms), and verified: parity PASS across 44 tables and 49 numeric columns (table set, row counts, exact decimal SUMs), schema_migrations head 0025, and the application smoke 11/11 (S1a..S9) against the RESTORED copy. Integrity is recorded as storage_status=NONE and the ADR-012 gate still REJECTS the record (release_tag absent, storage not verified) — the drill uploads nothing and claims nothing. REMAINING for closure: (1) an offsite upload through ops/backup/upload_backup.py to veloratrade/velora-backups with a re-hash of the STORED bytes (needs a storage credential); (2) the same drill against staging/production data; (3) RPO/RTO targets (owner decision).",
+      "last_updated": "2026-10-04"
     },
     {
       "id": "MG-API-MISSING-ROUTES",
@@ -517,12 +527,17 @@
       ],
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
-        "db/migrations/0022_legacy_contract_parity.sql"
+        "db/migrations/0022_legacy_contract_parity.sql",
+        "db/MIGRATION_MAP.md",
+        "tools/lib/legacyLoadGates.ts",
+        "db/data-step/fixtures/legacy-export.FIXTURE/decisions.json"
       ],
       "decisions": [
         "OD-AC-SUBMAP"
       ],
-      "closure_criteria": "Explicit mapping decision per table/column"
+      "closure_criteria": "Explicit mapping decision per table/column",
+      "closure_note": "PARTIAL 2026-10-04 (Phase 4). Unmapped data is no longer a written-off list: A12 requires every exported column to be declared either with a target column or with target:null + a reason, and an undeclared column now FAILS the load. db/MIGRATION_MAP.md carries the per-table/per-column record for the tables in the rehearsal, and the fixtures' decisions file demonstrates the shape. A REAL FINDING from writing it down: Modern subscriptions (0017) is the Stripe object (provider CHECK = 'stripe', plan pro|enterprise, partial UNIQUE on active rows) and is NOT a target for the legacy provider-less lifecycle (none|active|past_due|grace|expired|cancelled + plan_started_at/plan_expires_at/plan_updated_at); those columns are recorded, not loaded, and the user-visible fact survives in users.plan. Still open: a mapping decision for that lifecycle, and targets for the tables owned by later phases (support_tickets, ai_*, user_achievements, content_translations, system_logs, integration_health, notifications) — each phase closes its own rows.",
+      "last_updated": "2026-10-04"
     },
     {
       "id": "MG-FRONTEND-SURFACES",
@@ -635,17 +650,22 @@
       "id": "MG-RMULTIPLE-SCALE",
       "section": "B",
       "title": "r_multiple scale 4 (legacy) vs 8 (modern)",
-      "status": "OPEN",
+      "status": "CLOSED",
       "priority": "P2",
-      "verification_state": "STATIC",
+      "verification_state": "CURRENT_RUNTIME_VERIFIED",
       "audit_refs": [
         "§9.1"
       ],
       "evidence": [
-        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "packages/domain/src/legacyParity.ts",
+        "packages/domain/src/legacyParity.test.ts",
+        "tools/load_rehearsal.ts"
       ],
       "decisions": [],
-      "closure_criteria": "Scale decision recorded + migration mapping"
+      "closure_criteria": "Scale decision recorded + migration mapping",
+      "closure_note": "CLOSED 2026-10-04 (Phase 4). The storage side was already decided (ADR-001 §3: numeric(20,8), 'storing at higher precision than display never loses parity'); what was missing was the COMPARISON rule, now in packages/domain/src/legacyParity.ts: imported values are preserved BY VALUE (the column normalises '1.6450' -> 1.64500000 and nothing rounds them again), and a historical recomputation is compared at the legacy scale (4) with the legacy rounding mode (bcmath-truncate). The mode is load-bearing: 1.000099999 truncates to '1.0000' but half-even rounds to '1.0001', so a recomputation using the modern default would fail ~1 in 10,000 non-terminating quotients. Truncation is toward zero and idempotent (the migration's own property). Verified by 8 unit tests and by the load rehearsal's gate 6, which recomputed 5 migrated trades with the production computePnl and matched both net PnL and R at scale 4.",
+      "last_updated": "2026-10-04"
     },
     {
       "id": "MG-RANGE-GUARD",
@@ -699,21 +719,28 @@
       "id": "MG-DATA-MIGRATION",
       "section": "B",
       "title": "ADR-004 sampling blocked; no cutover rehearsal; unmapped tables = data loss risk",
-      "status": "OPEN",
+      "status": "PARTIAL",
       "priority": "P1",
-      "verification_state": "NOT_VERIFIED",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§14"
       ],
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
-        "docs/migration-strategy.md"
+        "docs/migration-strategy.md",
+        "tools/load_rehearsal.ts",
+        "tools/lib/legacyLoadGates.ts",
+        "tools/legacyLoadGates.test.ts",
+        "db/data-step/fixtures/legacy-export.FIXTURE/",
+        "ops/backup/evidence/load-rehearsal-20261004T095828Z.json"
       ],
       "decisions": [
         "OD-AC-ADR004",
         "OD-AC-SUBMAP"
       ],
-      "closure_criteria": "Sampling decided; rehearsal executed with full validation gates"
+      "closure_criteria": "Sampling decided; rehearsal executed with full validation gates",
+      "closure_note": "PARTIAL 2026-10-04 (Phase 4). The gates are now executable and refusing: tools/load_rehearsal.ts runs the A-gates (source/locale/leverage/direction vocabularies, money fraction digits, symbol canonicalisation, time census, canonical-email uniqueness, referential integrity, the v0.3 financial guards, and A12 field-level mapping), loads id-preservingly, then runs the B-gates plus gate 6 (PnL golden recomputation under the legacy rounding mode). A rehearsal was EXECUTED against a disposable PostgreSQL on the synthetic fixture: A-gates reported MAPPED/QUARANTINE/RECORDED, the load preserved ids (4 users / 3 accounts / 5 trades / 2 exits), row-count and money parity matched exactly (commission 16.50, swap -1.00, net 1484.50) and all 5 trades recomputed to their stored values including R at scale 4. BLOCKED on the owner (unchanged): (a) the ADR-004 naive-datetime sampling decision — unresolved rows were QUARANTINED, never interpreted; (b) a REAL export produced by the transform tool, which needs the read-only source access the audit registers as an owner decision. Also open: the legacy plan/subscription lifecycle has no target (see MG-SCHEMA-MAPPING).",
+      "last_updated": "2026-10-04"
     },
     {
       "id": "MG-DOC-1",

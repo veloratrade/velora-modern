@@ -1,7 +1,7 @@
 # VELORA-MODERN — Current Project State (Canonical)
 
 **System:** Agent Context System (ADR-017) · **Schema version:** 1
-**Last updated:** 2026-10-04 (Asia/Tehran) — entries AC-1…AC-12 (… AC-8: PR #8 merged to main, verified baseline `ab0eed7`; **AC-9/AC-10: Telegram journal client (ADR-018) on branch `feat/telegram-journal-client` — NOT pushed, NOT merged**; AC-11: phases 1–2 (account surface, auth/security, RBAC map); **AC-12: phase 3 — TRD-04 list contract, the dashboard/journal web surfaces on the real analytics API, and TRD-06 user-triggered sync** — see §2a)
+**Last updated:** 2026-10-04 (Asia/Tehran) — entries AC-1…AC-13 (… AC-8: PR #8 merged to main, verified baseline `ab0eed7`; **AC-9/AC-10: Telegram journal client (ADR-018) on branch `feat/telegram-journal-client` — NOT pushed, NOT merged**; AC-11: phases 1–2 (account surface, auth/security, RBAC map); AC-12: phase 3 — TRD-04 list contract, the dashboard/journal web surfaces on the real analytics API, and TRD-06 user-triggered sync; **AC-13: phase 4 — data integrity & migration: the r_multiple parity rule, DB-enforced financial guards (0025), the test-runner verdict fix, an EXECUTED restore drill, and an executable load rehearsal** — see §2a)
 **Machine-readable twin:** `docs/state/current-state.json` (read by `tools/agent-context.mjs`; the two must be updated in the same change)
 **Mode:** GOVERNANCE STATE RECORD — this file records *what is verified*, never what is hoped.
 
@@ -45,10 +45,10 @@ divergence must be traceable through `CHANGE_LOG.md` entries.
 | Field | Value |
 |---|---|
 | Branch | `feat/telegram-journal-client` (from `main` @ `0e9c4d7`) |
-| Branch HEAD | advances with each AC entry — at AC-12 the tip is the `feat(web): request a sync now…` commit; see `git log --oneline ab0eed7..HEAD` for the exact SHA |
+| Branch HEAD | advances with each AC entry — at AC-13 the tip is the phase-4 delivery (`492e3f5` → `b301596` → docs); see `git log --oneline ab0eed7..HEAD` for the exact SHA |
 | State | **UNPUSHED / UNMERGED.** `main` is untouched; `current_verified.modern_sha` stays `ab0eed7` by design |
 | Capability | Telegram journal client (ADR-018) + phases 1–3 of the Legacy→Modern migration (account surface, auth/security/RBAC, core trading) — same users, same PostgreSQL schema, same journal domain (`TradeService` / ADR-002 ledger), same AI boundary (`AiProvider` + `ai_coaching_logs`) |
-| Evidence (AC-12, latest) | `npm test` **991 + 63 = 1054**, 0 fail / 0 skip · `npm run typecheck` clean · `secret-scan` PASS · `next build --webpack` ✓ · real-PG batteries **27 files × 2 orders, 0 fail** · TRD-06 runtime battery **16/16** on real PostgreSQL + real queue · phase-3 web regression **33/33** · TRD-06 UI **10/10** |
+| Evidence (AC-13, latest) | `npm test` **999 + 63**, 0 fail / 0 skip · `npm run typecheck` clean · `secret-scan` PASS · real-PG batteries **28 files × 2 orders (56 runs), 0 fail** · restore drill **PASSED** (`RESTORE_VERIFIED`: 44 tables/49 numeric columns parity + smoke 11/11 on the restored copy) · load rehearsal **REHEARSAL_PASSED** on a labelled synthetic fixture (exact row+money parity, gate 6 5/5) · 51 new test assertions · 25 migrations |
 | Gaps opened | `MG-TG-1` (no live Telegram/Gemini round trip), `MG-TG-2` (n8n relay not implemented), `MG-TG-3` (no worker path), `MG-WORKER-DEPLOY` strengthened with runtime evidence |
 | Tool verdict | `tools/agent-context.mjs` reports `DRIFTED` **while this branch is checked out** — expected: the tool compares HEAD against the verified `main` SHA, and this work is deliberately not on `main` |
 

@@ -42,7 +42,8 @@
     "legacy_sha": "edede313280f2f0e298f5ccbf5bbdd4d676c80bd",
     "verified_at": "2026-09-26",
     "verification": "STATIC (git). PR #8 merged to main via merge commit ab0eed7 (parents ffcb0e9 + 75ddf5c); branch history preserved. Intervening commits since 59047b8 are governance-only + merge bookkeeping (AC-4..AC-8) — no application-path change except the reviewed comment-only citation fix (MG-DOC-4) already carried by the merged branch. AC-9 (2026-10-04) deliberately does NOT advance this SHA: the Telegram journal client is an UNPUSHED feature branch, so main's verified state is unchanged.",
-    "notes": "modern_sha advances only through CHANGE_LOG-logged, classified commits. Chain: 59047b8 (AC-2) -> d85a589 (AC-4) -> 5140098 (AC-5) -> 3135da9/23aa83f/9d26aa0/1819397 (AC-6 curation) -> 75ddf5c (AC-7) -> ab0eed7 (PR #8 merge) -> AC-8 curation commit. AC-9 (branch feat/telegram-journal-client) is recorded in branch_work below and is NOT part of this chain until it is merged. AC-11/AC-12 (2026-10-04): phases 1–3 recorded — account surface, auth/security/RBAC, TRD-04 list contract, the web dashboard/journal on the real analytics API, and TRD-06 user-triggered sync. All on the branch; `modern_sha` stays `ab0eed7` until `main` moves."
+    "notes": "Phase 4 (data integrity & migration) delivered on the branch: 25 migrations; r_multiple parity rule (MG-RMULTIPLE-SCALE CLOSED); DB-enforced financial guards (0025, fail-loud proven); test-runner verdict fix (a red suite can no longer print green); restore drill EXECUTED and verified (MG-BACKUP-RESTORE PARTIAL); load rehearsal executable + executed on a labelled synthetic fixture (MG-DATA-MIGRATION PARTIAL). Open owner decisions: ADR-004 sampling, OD-AC-SUBMAP, OD-AC-RPORTO, offsite backup storage credential.",
+    "modern_head": "b301596"
   },
   "artifacts": {
     "current_state_md": "docs/state/CURRENT_STATE.md",
