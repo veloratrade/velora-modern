@@ -13,16 +13,18 @@ import { LOCALE_REGISTRY } from "./registry";
 import { interpolate } from "./latinDigits";
 import faCommon from "../../messages/fa/common.json";
 import faErrors from "../../messages/fa/errors.json";
+import faTelegram from "../../messages/fa/telegram.json";
 import faAuth from "../../messages/fa/auth.json";
 import faLanding from "../../messages/fa/landing.json";
 import faLandingInteractive from "../../messages/fa/landing-interactive.json";
 import enCommon from "../../messages/en/common.json";
 import enErrors from "../../messages/en/errors.json";
+import enTelegram from "../../messages/en/telegram.json";
 import enAuth from "../../messages/en/auth.json";
 import enLanding from "../../messages/en/landing.json";
 import enLandingInteractive from "../../messages/en/landing-interactive.json";
 
-export type Feature = "common" | "errors" | "auth" | "landing" | "landing-interactive";
+export type Feature = "common" | "errors" | "auth" | "landing" | "landing-interactive" | "telegram";
 export type Messages = Readonly<Record<string, string>>;
 
 interface ChunkFile {
@@ -33,8 +35,8 @@ interface ChunkFile {
 }
 
 export const CATALOG_FILES: Readonly<Record<Locale, Readonly<Record<Feature, ChunkFile>>>> = {
-  fa: { common: faCommon, errors: faErrors, auth: faAuth, landing: faLanding, "landing-interactive": faLandingInteractive },
-  en: { common: enCommon, errors: enErrors, auth: enAuth, landing: enLanding, "landing-interactive": enLandingInteractive },
+  fa: { common: faCommon, errors: faErrors, auth: faAuth, landing: faLanding, "landing-interactive": faLandingInteractive, telegram: faTelegram },
+  en: { common: enCommon, errors: enErrors, auth: enAuth, landing: enLanding, "landing-interactive": enLandingInteractive, telegram: enTelegram },
 };
 
 const merged = new Map<string, Messages>();

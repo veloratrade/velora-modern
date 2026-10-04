@@ -198,3 +198,59 @@ export function getBySymbol(params?: Record<string, string>): Promise<{ symbols:
   const qs = params ? "?" + new URLSearchParams(params).toString() : "";
   return api.request(`/api/v1/analytics/by-symbol${qs}`);
 }
+
+// --- Telegram (journal client, ADR-018) ---
+// Mirrors the shapes `apps/api/src/telegram/telegramRoutes.ts` answers. The web
+// app never sends a user id, an account id or a Telegram id: the API resolves all
+// three from the bearer claims, and this surface only ever describes the RESULT.
+
+/** The six states the Settings screen must be able to tell apart. */
+export type TelegramLinkState = "NOT_LINKED" | "LINK_PENDING" | "LINKED" | "LINK_EXPIRED" | "LINK_REVOKED" | "LINK_ERROR";
+
+export interface TelegramIdentityView {
+  /** Last four digits only — the API never sends the full Telegram id. */
+  maskedTelegramUserId: string;
+  username: string | null;
+  linkedAt: string;
+  lastSeenAt: string | null;
+}
+
+export interface TelegramChannelView {
+  title: string;
+  chatType: string;
+  status: string;
+  canPost: boolean;
+  verifiedAt: string | null;
+}
+
+export interface TelegramStatusView {
+  bot: { username: string | null; deepLinkAvailable: boolean };
+  updateMode: "off" | "polling" | "webhook";
+  state: TelegramLinkState;
+  identity: TelegramIdentityView | null;
+  pendingLinkExpiresAt: string | null;
+  channel: TelegramChannelView | null;
+}
+
+export function getTelegramStatus(): Promise<TelegramStatusView> {
+  return api.request("/api/v1/telegram/status");
+}
+
+/** Mint the one-time deep link. The returned token is opaque and single-use. */
+export function startTelegramLink(): Promise<{ deepLink: string; expiresAt: string }> {
+  return api.request("/api/v1/telegram/link/start", { method: "POST", body: {} });
+}
+
+export function unlinkTelegram(): Promise<{ unlinked: boolean }> {
+  return api.request("/api/v1/telegram/link/unlink", { method: "POST", body: {} });
+}
+
+export function getTelegramChannel(): Promise<{ channel: TelegramChannelView | null }> {
+  return api.request("/api/v1/telegram/channel");
+}
+
+/** Channel BINDING is Telegram-only (the server verifies posting rights); the web
+ *  can only unbind something the caller owns. */
+export function unbindTelegramChannel(): Promise<{ channel: null }> {
+  return api.request("/api/v1/telegram/channel", { method: "DELETE" });
+}

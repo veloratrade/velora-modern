@@ -20,6 +20,9 @@ const NAV: NavItem[] = [
   { href: "/support", icon: "support", key: "common.support.152185b4", fallback: "پشتیبانی" },
   { href: "/intelligence", icon: "intel", key: "common.tradingIntelligence", fallback: "هوش معامله" },
   { href: "/wallet", icon: "wallet", key: "common.wallet.cd1a64bc", fallback: "کیف پول" },
+  // Settings hosts the WEB-FIRST Telegram linking screen (ADR-018). Label comes
+  // from the telegram catalog so the Legacy byte-copy catalogs stay untouched.
+  { href: "/settings", icon: "settings", key: "telegram.title", fallback: "تنظیمات" },
 ];
 
 function getLocaleFromPath(path: string): Locale {
@@ -30,7 +33,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const pathname = usePathname() || "";
   const { user, logout, authenticated, status } = useSession();
   const locale: Locale = getLocaleFromPath(pathname);
-  const t = createTranslator(locale, ["common", "errors"]);
+  const t = createTranslator(locale, ["common", "errors", "telegram"]);
   const isAdmin = user?.role === "admin" || user?.role === "super_admin" || user?.role === "system_owner";
   const name = user?.fullName?.trim() || t("common.user.cfadc9e3", null, "کاربر");
   const email = user?.email || "";
