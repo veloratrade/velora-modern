@@ -36,7 +36,7 @@ TypeError: Cannot read properties of undefined (reading 'slice')
 ## 3. Fix (MG-OBS-7)
 
 - `apps/worker/src/queue/pgBossAdapter.ts` — `schedule()` now passes a complete maintenance-policy `JobDescriptor` (`jobClass`, `priorityClass: "maintenance"`, `idempotencyKey: tick:<jobClass>`, full `DEFAULT_JOB_POLICIES.maintenance`) as the schedule's `data`, so cron-fired jobs are first-class descriptors. Cadence/debounce stays pg-boss-owned.
-- `apps/worker/src/runner.ts` — a job whose data is not a descriptor (foreign/malformed producer) now dead-letters with `NO_HANDLER` instead of crashing the process.
+- `apps/worker/src/runner.ts` — a job whose data is not a descriptor (foreign/malformed producer) is now routed to the no-handler/DLQ **path** (`queue.deadLetter(id, reason)` → adapter `boss.fail(name, id, {dlq: true, reason})`) instead of crashing the process. See the DLQ-precision note in §6 for exactly what is and is not proven about persistence.
 - `apps/worker/src/observability/safeError.ts` — `safeDlqReason` accepts a missing jobClass and emits the fixed token `unknown` (bounded at the persistence boundary).
 
 **Tests added:**
@@ -48,7 +48,7 @@ TypeError: Cannot read properties of undefined (reading 'slice')
 ## 4. Post-fix runtime proof (executed 2026-10-03, same cluster)
 
 1. Worker booted with the fix: `worker.started count=4`; both schedules now stored **with descriptors** (`schedule: analytics.recompute-tick | cron: 20 * * * * | data.jobClass: analytics.recompute-tick | timeoutMs: 120000`; same for `fx.ecb-tick`).
-2. **Crash-shape repro (malformed job inserted directly into the existing `analytics.recompute-tick` queue):** the worker logged `job.no_handler jobClass=unknown` and **kept running** (pre-fix: process death).
+2. **Crash-shape repro (malformed job inserted directly into the existing `analytics.recompute-tick` queue):** the worker logged `job.no_handler jobClass=unknown` and **kept running** (pre-fix: process death). The job's own final state was not inspected on the live cluster — see the DLQ-precision note in §6 before citing persistence.
 3. **Real cron fire:** the analytics schedule's cron was accelerated to `* * * * *` via `boss.schedule` upsert **preserving the adapter-written data verbatim**; pg-boss's real timekeeper then fired it. Observed chain:
 
 ```
@@ -71,5 +71,9 @@ TypeError: Cannot read properties of undefined (reading 'slice')
 
 ## 6. What this does and does not claim
 
+- **DLQ precision (owner-directed correction, 2026-10-04) — three distinct facts, never conflated:**
+  1. **No-handler/error path executed (live evidence):** the worker logged `{"level":"error","event":"job.no_handler","jobClass":"unknown"}` for the malformed job.
+  2. **Process survival (live evidence):** the worker kept processing after the malformed job; the subsequent real cron fire ran to completion in the same process.
+  3. **Physical persistence into the `velora.dlq` queue: NOT claimed and NOT proven for the live malformed job.** Its final state was not inspected on the live cluster. What the real-PG integration test proves by direct SQL (`db/tests/pgBossAdapter.pg.test.ts`, "a malformed job (empty data) is failed with a bounded reason…"): the raw-inserted job ends `state='failed'` with `output = {dlq: true, reason: "NO_HANDLER:unknown"}` **on its own queue's partition**, never redelivered — terminal failure *in place*, because a raw row carries no `dead_letter` target (pg-boss stamps that at `send()` time from the queue config). Physical routing into `velora.dlq` is proven **only for `send()`-enqueued jobs**, by the pre-existing "exhausted jobs land on the dead-letter queue" test. The unit test (`runner.test.ts`, MemoryQueue) proves the runner's `deadLetter()` call physically moves the job to that queue's DLQ with reason `NO_HANDLER:unknown` — that is the MemoryQueue implementation, not pg-boss.
 - **Claims:** the analytics scheduler's one-tick chain runs for real against real PostgreSQL + real pg-boss 10.4.2 timekeeper, with no credentials and no external calls; the pre-fix crash defect is fixed with regression tests at both the unit and real-PG integration level.
 - **Does NOT claim:** deployment (MG-WORKER-DEPLOY stays OPEN — OD-AC-WORKER owner-gated), the FX tick executing (would call the ECB — charter-excluded; its registration/schedule-upsert IS proven at boot), the MetaAPI sync tick (token-gated), the copy tick (no transport), least-privilege role execution (superuser used, see §1), or PG16 behavior.
