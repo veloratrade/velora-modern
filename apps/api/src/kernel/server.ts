@@ -378,7 +378,6 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
     `${REFRESH_COOKIE_NAME}=${token}; ${REFRESH_COOKIE_ATTRS}; Max-Age=${REFRESH_COOKIE_MAX_AGE}`;
   const extractRefreshToken = (
     cookieHeader: string | undefined,
-    body: Record<string, unknown>,
   ): string | undefined => {
     if (cookieHeader !== undefined) {
       for (const part of cookieHeader.split(";")) {
@@ -388,9 +387,11 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
         }
       }
     }
-    const fromBody = body.refreshToken;
-    return typeof fromBody === "string" && fromBody !== "" ? fromBody : undefined;
+    return undefined;
   };
+  /** Legacy refreshTokenFromRequest: tokens longer than 128 chars are invalid,
+   *  never routed to the store (AuthController.php:346, VERIFIED @ edede31). */
+  const REFRESH_TOKEN_MAX_LENGTH = 128;
   const authRouteResult = (fn: (auth: AuthService) => Promise<RouteResult>): Promise<RouteResult> => {
     if (config.auth === undefined) {
       return Promise.resolve({
@@ -466,7 +467,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
   // that they are not authenticated.
   if (method === "GET" && path === "/api/v1/auth/session") {
     return authRouteResult(async (auth) => {
-      const probe = await auth.sessionProbe(extractRefreshToken(req.headers.cookie, {}) ?? "");
+      const probe = await auth.sessionProbe(extractRefreshToken(req.headers.cookie) ?? "");
       return {
         status: 200,
         body: ok(probe.authenticated ? { authenticated: true, role: probe.role } : { authenticated: false, role: null }),
@@ -482,9 +483,10 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
       return { status: 403, body: fail("ORIGIN_REJECTED", "origin not allowed", sec.requestId) };
     }
     return authRouteResult(async (auth) => {
-      const body = await parseJsonBody(req);
-      const refreshToken = extractRefreshToken(req.headers.cookie, body);
-      if (refreshToken !== undefined) await auth.logout(refreshToken);
+      const refreshToken = extractRefreshToken(req.headers.cookie);
+      if (refreshToken !== undefined && refreshToken.length <= REFRESH_TOKEN_MAX_LENGTH) {
+        await auth.logout(refreshToken);
+      }
       return {
         status: 200,
         body: ok({ loggedOut: true }),
@@ -587,12 +589,23 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
 
   if (method === "POST" && path === "/api/v1/auth/refresh") {
     return authRouteResult(async (auth) => {
-      const body = await parseJsonBody(req);
-      const refreshToken = extractRefreshToken(req.headers.cookie, body);
+      // S1 closure: the refresh credential is accepted ONLY from the HttpOnly
+      // cookie — the request body is never a token source. Legacy's body
+      // exchange was a time-boxed 7-day migration window
+      // (auth.legacy_body_refresh_enabled, AuthController.php:352-386) that has
+      // long expired; its standing behavior is cookie-only, and so is this.
+      const refreshToken = extractRefreshToken(req.headers.cookie);
       if (refreshToken === undefined) {
         return {
           status: 401,
           body: fail("REFRESH_COOKIE_MISSING", "Refresh cookie is missing.", sec.requestId),
+          headers: { "Set-Cookie": [REFRESH_COOKIE_CLEAR, LEGACY_REFRESH_COOKIE_CLEAR] },
+        };
+      }
+      if (refreshToken.length > REFRESH_TOKEN_MAX_LENGTH) {
+        return {
+          status: 401,
+          body: fail("INVALID_TOKEN", "Invalid token.", sec.requestId),
           headers: { "Set-Cookie": [REFRESH_COOKIE_CLEAR, LEGACY_REFRESH_COOKIE_CLEAR] },
         };
       }

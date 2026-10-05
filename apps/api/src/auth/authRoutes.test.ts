@@ -232,6 +232,55 @@ test("refresh: missing cookie/body → 401 REFRESH_COOKIE_MISSING + clearing coo
   });
 });
 
+test("refresh S1: a token supplied in the REQUEST BODY is never accepted (cookie-only)", async () => {
+  await withAuthServer(async (base, tokens) => {
+    // Register + verify + login to obtain a genuinely valid refresh cookie.
+    const reg = await fetch(`${base}/api/v1/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "s1-body@velora.example", password: "a-strong-password-123", fullName: "S One" }),
+    });
+    assert.equal(reg.status, 201);
+    const verificationToken = tokens.shift();
+    const verify = await fetch(`${base}/api/v1/auth/verify-email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: verificationToken }),
+    });
+    assert.equal(verify.status, 200);
+    const login = await fetch(`${base}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "s1-body@velora.example", password: "a-strong-password-123" }),
+    });
+    assert.equal(login.status, 200);
+    const cookie = (login.headers.get("set-cookie") ?? "").match(/__Host-velora_refresh=([^;]+)/)?.[1] ?? "";
+    assert.ok(cookie !== "", "fixture: login issued the refresh cookie");
+
+    // The SAME valid token, sent ONLY in the body (no cookie), must be
+    // refused: the body is not a credential source (audit §10.2 S1; Legacy's
+    // body exchange was a time-boxed migration window that has expired).
+    const bodyOnly = await fetch(`${base}/api/v1/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken: cookie }),
+    });
+    assert.equal(bodyOnly.status, 401);
+    assert.equal(((await bodyOnly.json()) as Envelope<null>).error?.code, "REFRESH_COOKIE_MISSING",
+      "a body-only token is indistinguishable from no token");
+
+    // And a cookie-borne token LONGER than Legacy's 128-char cap is invalid
+    // without ever reaching the store (AuthController.php:346).
+    const tooLong = "x".repeat(129);
+    const oversize = await fetch(`${base}/api/v1/auth/refresh`, {
+      method: "POST",
+      headers: { Cookie: `__Host-velora_refresh=${tooLong}` },
+    });
+    assert.equal(oversize.status, 401);
+    assert.equal(((await oversize.json()) as Envelope<null>).error?.code, "INVALID_TOKEN");
+  });
+});
+
 test("logout: origin guard preserved (403 ORIGIN_REJECTED / 200 + cleared cookie)", async () => {
   await withAuthServer(async (base) => {
     const evil = await fetch(`${base}/api/v1/auth/logout`, {

@@ -126,12 +126,19 @@ export async function proxy(request: NextRequest) {
   }
 
   // Generate nonce for this request (Node crypto is available in proxy runtime).
+  // S2 (audit §10.2): FAIL CLOSED. A CSP nonce is a security token — if a
+  // cryptographically random value cannot be produced, we do NOT fall back to
+  // Math.random() (predictable → nonce-guessing bypass). The request is
+  // refused with 503 instead of being served under a forgeable policy.
   let nonce: string;
   try {
     const uuid = crypto.randomUUID();
     nonce = typeof Buffer !== "undefined" ? Buffer.from(uuid).toString("base64") : btoa(uuid);
   } catch {
-    nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    return new NextResponse("Service temporarily unavailable.", {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "30" },
+    });
   }
 
   const isDev = process.env.NODE_ENV === "development";
