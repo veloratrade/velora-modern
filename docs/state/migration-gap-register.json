@@ -436,19 +436,23 @@
       "id": "MG-SEC-HSTS",
       "section": "B",
       "title": "HSTS absent from proxy; must be confirmed at the edge (S4)",
-      "status": "OPEN",
+      "status": "PARTIAL",
       "priority": "P2",
-      "verification_state": "NOT_VERIFIED",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§10.2 S4"
       ],
       "evidence": [
-        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+        "apps/api/src/kernel/security.ts",
+        "apps/web/src/proxy.ts",
+        "apps/api/src/kernel/server.test.ts",
+        "apps/web/src/proxy.headers.test.ts"
       ],
       "decisions": [],
       "closure_criteria": "HSTS verified at the deployed edge",
       "related": [],
-      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/NOT_VERIFIED, domain=OPEN/NOT_VERIFIED."
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/NOT_VERIFIED, domain=OPEN/NOT_VERIFIED.",
+      "notes": "RE-AUDITED 2026-10-05 (AC-29): the audit-time claim ('absent from proxy.ts by design') was stale — the telegram lineage's SEC-04 work added Legacy's exact value (max-age=31536000, no includeSubDomains/preload) to the API SECURITY_HEADERS (every API response) and to the proxy's served-page and edge-gate-denial paths. This change closes the last app-layer hole: redirect-normalization responses (e.g. /en → 308 /en/) now carry HSTS too — Legacy's .htaccess `Header always set` applies to every response, redirects included. Unit-pinned on both sides (server.test.ts + proxy.headers.test.ts incl. the fail-closed gate and the S2 503 refusal). Remaining NOT_VERIFIED: behavior at the DEPLOYED edge/reverse proxy (Railway) — deploy-gated, same class as MG-WORKER-DEPLOY evidence."
     },
     {
       "id": "MG-SEC-EDGE-AUTHZ",

@@ -153,6 +153,11 @@ test("CSP (S7): exact directive policy — strict, no weakening", async () => {
     assert.equal(res.headers.get("X-Content-Type-Options"), "nosniff");
     assert.equal(res.headers.get("X-Frame-Options"), "DENY");
     assert.equal(res.headers.get("Referrer-Policy"), "strict-origin-when-cross-origin");
+    // HSTS (audit §10.2 S4 / MG-SEC-HSTS): Legacy's exact .htaccess value
+    // (`Header always set Strict-Transport-Security "max-age=31536000"` — no
+    // includeSubDomains, no preload: commitments Legacy never made). Plain-HTTP
+    // clients ignore the header; it exists for the TLS deployment.
+    assert.equal(res.headers.get("Strict-Transport-Security"), "max-age=31536000");
     assert.ok((res.headers.get("X-Request-Id") ?? "").length > 0);
   });
 });

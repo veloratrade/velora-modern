@@ -111,10 +111,14 @@ export async function proxy(request: NextRequest) {
     // Build absolute URL via WHATWG URL (not NextURL) to preserve trailing slash.
     const dest = new URL(decision.location, request.url).toString();
     const res = NextResponse.redirect(dest, decision.status);
-    // Security headers even on redirect.
+    // Security headers even on redirect. HSTS included (S4/MG-SEC-HSTS):
+    // Legacy's `Header always set Strict-Transport-Security …` in .htaccess
+    // applies to EVERY response Apache emits — redirects included — so a
+    // redirect must never be the downgrade/SSL-strip surface.
     res.headers.set("X-Content-Type-Options", "nosniff");
     res.headers.set("X-Frame-Options", "DENY");
     res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.headers.set("Strict-Transport-Security", "max-age=31536000");
     return res;
   }
 
