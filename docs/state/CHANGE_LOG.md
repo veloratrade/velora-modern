@@ -400,3 +400,98 @@ checked at (UTC)       : 2026-10-04T17:47:25Z
 
 **Delivery states after this push:** phases 1–5 = **PUSHED**. Not merged, not deployed,
 no PR merge. PR #9 still open against `main`.
+
+## AC-16 — Phase 6: admin console (2026-10-05)
+
+**Commit(s):** `caf16bf` (API/DB + contracts) · `ec4e8e9` (web + i18n) · the evidence/docs/state commit
+that follows, all on `feat/telegram-journal-client` (phase start `73fc5ee`, the AC-15
+push-verification commit).
+
+**What this delivery establishes**
+
+1. **`/admin` is a console, not a 34-line shell (MG-ADMIN → PARTIAL; ADM-01, ADM-04,
+   SUP-02 → VERIFIED).** Seven permission-driven tabs — overview, user 360, support
+   queue, audit, security & access, system & health, analytics & revenue — on a real
+   console API, in fa (rtl) and en (ltr), rendered from `apps/web/messages/{fa,en}/admin.json`.
+2. **A reproducible Legacy inventory replaces an unreproducible one.** Parsing every
+   `$router` statement in Legacy `api/index.php` lines 109–251 (method + path +
+   permission constant, multi-line included) yields **75 `/api/v1/admin/*` routes across
+   19 path segments**. The audit's "59/62 endpoints, 38 modules" figure is superseded by
+   that count, and the method is written down
+   (`docs/audits/2026-10-04-PHASE6-ADMIN-CAPABILITY-MAP.md` §1) so anyone can re-run it.
+3. **14 console routes + the extended per-user admin API**, with divergences recorded
+   rather than silently accepted (§3.2 of the map): ONE `session-revocations` path
+   instead of Legacy's two; per-user audit via `/admin/audit-logs?targetUserId=` so there
+   is exactly one implementation of "read the trail"; `PATCH` rather than `POST` for
+   status/role; `/admin/permissions` → `/admin/rbac/matrix` (`rbac.matrix.view`,
+   super_admin-only); Legacy's `/admin/analytics/overview` → the composed Overview tab;
+   `/admin/users/{id}/activity` → the audit trail plus separately authorized blocks.
+4. **Sensitive data is OMITTED, not nulled.** `ConsoleSecurityEventView` removes
+   `ipAddress`/`userAgent` from the response body for a caller without
+   `audit.view_sensitive`, and the console *labels* the omission («بدون مجوز … نمایش داده
+   نمی‌شود») instead of showing a blank cell — a null and a withheld field must not look
+   the same to an operator.
+5. **Health attestation is honest.** Nine components are attested with latency
+   thresholds; the ones Modern has not built (worker, e-mail, AI provider, MetaAPI, n8n
+   relay) report `not_applicable` **with the phase that owns them** — never a green
+   check. The expected-migration count is read from the manifest the process can actually
+   see, and reported UNKNOWN when it cannot, rather than invented.
+6. **The audit trail now carries `before_state`/`after_state`** (found by this phase's
+   real-PG battery: the console renders "what changed" but the store never selected the
+   columns), and migration `0027` closes the action vocabulary — an unknown action is now
+   a `23514` CHECK violation, not a silent row. 15 actions total, including the two this
+   phase adds (`USER_SESSIONS_REVOKED`, `USER_EMAIL_VERIFIED`).
+7. **The user-mutation guard order is frozen and tested**: self-action 403 →
+   `USER_NOT_FOUND` 404 → System Owner protected → privileged target → super_admin peer →
+   privilege-escalation denial → no-op without revoking sessions → `LAST_SUPER_ADMIN` 409.
+   A no-op verify-e-mail returns `changed:false` and writes **no** audit row, because
+   nothing changed.
+8. **Localization reuses Legacy's own words.** 148 keys per locale = 29 authored
+   (`adminConsole.*` + `admin.status.active`) + **119 byte copies** of Legacy's admin
+   vocabulary at `edede31`; a guard asserts the copies are byte-identical, that every key
+   the page can render resolves in both locales, that fa renders Persian and en English
+   *on rendered values*, and that **every CSS class the page applies exists in the
+   stylesheet** (that last check caught three invented classes).
+9. **The RBAC map moved from 6 to 12 of 24 Legacy permissions ENFORCED** (rows 1, 7, 9,
+   10, 11, 15, 16, 22), each with its real enforcement point and test; its guard
+   (`rbacCapabilityMap.test.ts` 5/5) fails if a row claims a permission that does not
+   exist in code, so the document cannot drift ahead of the implementation.
+10. **Browser QA found three defects and all three were fixed in this phase** (first pass
+    49/56 → final **62/62**): wide tables widened the page on mobile (123 px at 390,
+    193 px at 320, 515 px on the audit tab → now 0 at 1440/390/320 in both locales, using
+    the canonical `.overflow-auto` wrapper the journal already uses); raw enums (`open`,
+    `admin`) leaked into the Persian console while the filter above them spoke Persian;
+    and the ticket thread offered transitions the service refuses (close on closed = 409,
+    archive on open = 422, reply to archived = 422) while `close` dismissed the record,
+    making `archive` — legal only from `closed` — unreachable. Three further failures were
+    **harness expectations that were wrong**, and the product behaviour was the stronger
+    one: numerals render Latin by product rule, a no-op writes no audit row, and a
+    signed-in non-admin is *redirected* away from `/admin` by the proxy rather than shown
+    an in-page refusal.
+
+**Gates (exact results, this session)**
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (contracts, domain, api, worker, web) |
+| `npm test` | **1106 node + 63 PGlite**, 0 fail / 0 skip, EXIT=0 |
+| Real-PostgreSQL batteries | **30 files × 2 orders = 60 runs, 0 failures** — `REAL-PG EVIDENCE: PASS` (PostgreSQL 17.11, migrations at head `0027`) |
+| Phase-6 tests | `adminConsoleRoutes` 17/17 · `adminConsoleService` 16/16 · `db/tests/adminConsole.pg` 14/14 · `i18n/adminSurface` 8/8 · `i18n/supportSurface` 7/7 · `extendedCapabilities.pg` 15/15 · `rbacCapabilityMap` 5/5 |
+| `next build` | `✓ Compiled successfully` — 38 routes, `/admin` and `/en/admin` both real |
+| Secret scan | PASS, 0 findings |
+| Visual / responsive QA | **62/62** in Chromium 153 against the production build + live API on PostgreSQL — 20 screenshots + `visual-qa-results.json` in `docs/audits/phase6-ui/`, harness `tools/visual-qa/phase6-admin.mjs` |
+
+**Delivery states (mission §23) — claimed only as far as the evidence reaches**
+
+`AUDITED` → `IMPLEMENTED` → `TESTED` → **`COMMITTED`** for the seven console modules.
+`PUSHED` is claimed only in the push-verification entry that follows this one (a commit
+cannot contain the result of its own push). **Nothing here is `DEPLOYED` or
+`LIVE VERIFIED`**: no environment was touched, and the QA run's accounts
+(`adm-qa-*@velora.test`) are local test data in a disposable cluster.
+
+**Still open, each with a named owner (never stubbed):** AI admin module (14 routes) →
+phase 7 · integrations admin (12) + worker/e-mail + A2 logs → phase 8 · settings (3),
+feature flags (2), log viewer (1), billing (2) and the ai/operations/revenue analytics
+blocks → phase 9 or until a reader exists · user creation + invitations (2) → **owner
+decision** on invite policy (TTL, who may invite) · per-user login history (1) → phase-6
+follow-up. No existing user capability was removed.

@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-04",
+  "generated_at": "2026-10-05",
   "source_audit": "docs/audits/2026-10-04-CAPABILITY-AUDIT-legacy-to-modern.md",
   "git": {
-    "modern_head": "1f6c4bb (phase-5 branch work pending its own commits)",
+    "modern_head": "ec4e8e9 (phase 6 — admin console: caf16bf API/DB + contracts, ec4e8e9 web + i18n, and the evidence/state commit that follows)",
     "modern_branch": "feat/telegram-journal-client",
     "legacy_ref": "edede31"
   },
@@ -18,11 +18,11 @@
     "INTENTIONALLY_NOT_MIGRATED"
   ],
   "counts": {
-    "VERIFIED": 10,
-    "IMPLEMENTED": 9,
-    "PARTIAL": 12,
-    "MISSING": 14,
-    "UI_ONLY": 2,
+    "VERIFIED": 13,
+    "IMPLEMENTED": 8,
+    "PARTIAL": 13,
+    "MISSING": 12,
+    "UI_ONLY": 1,
     "LEGACY_ONLY": 2,
     "INTENTIONALLY_NOT_MIGRATED": 2,
     "BACKEND_ONLY": 2
@@ -133,8 +133,8 @@
       "capability": "RBAC vocabulary + enforcement",
       "status": "PARTIAL",
       "legacy_evidence": "24 P_* permissions in Role.php (18 admin / 24 super_admin), enforced per route, fail-closed can()",
-      "modern_evidence": "docs/security/RBAC-CAPABILITY-MAP.md answers for all 24 with meaning/owner/enforcement/evidence + guard test rbacCapabilityMap.test.ts 5/5; 6 of 24 ENFORCED in code (overview→admin.panel.access, users.view, suspend+activate merged→users.manage_status, change_role, audit.view_sensitive via SEC-03) + 3 Modern-only permissions",
-      "next_action": "A capability brings its permission with it: each later phase adds the permission + grant row + enforcement point + test in the same commit and moves its map row to ENFORCED (phases 5/6/7 own support/admin/AI)."
+      "modern_evidence": "docs/security/RBAC-CAPABILITY-MAP.md answers for all 24 with meaning/owner/enforcement/evidence + guard test rbacCapabilityMap.test.ts 5/5; **12 of 24 ENFORCED** in code after phases 5-6 (overview.view, users.view, suspend+activate merged→users.manage_status, users.change_role, users.verify_email, audit.view (split: security feeds on audit.view, the trail read on admin.panel.access so there is ONE implementation), audit.view_sensitive, system.health.view, communication.view→support.tickets.view, communication.reply→support.tickets.manage, analytics.view) + 3 Modern-only permissions (rbac.self.view, admin.panel.access, rbac.matrix.view). The other 12 are PARTIAL (users.manage_subscription, users.create, billing.view, integrations.view), MISSING (system.logs.view) or NOT DECLARED because Modern has no substrate to guard yet (settings ×2, feature_flags ×2, integrations.manage, aiManage, aiRouteManage) — a permission with nothing to guard would be a fabricated authorization surface.",
+      "next_action": "A capability brings its permission with it: phase 7 (AI) declares aiManage/aiRouteManage, phase 8 declares integrations.*, phase 9 declares feature_flags.* + settings.* + billing.view, each with its grant row, enforcement point and test in the same commit, moving its map row to ENFORCED."
     },
     {
       "id": "SEC-02",
@@ -338,46 +338,46 @@
       "id": "SUP-02",
       "area": "support",
       "capability": "Admin communication centre",
-      "status": "IMPLEMENTED",
+      "status": "VERIFIED",
       "legacy_evidence": "7 admin routes + translations + copilot draft",
-      "modern_evidence": "GET /api/v1/admin/communications/tickets (+?status&waiting_for&unread&q&page), GET /{id}, POST /{id}/messages {message, internal}, POST /{id}/status {action}; RBAC-gated support.tickets.view/manage; queue counters; real-PG battery covers filters, ILIKE escaping and CAS conflicts. The two AI routes (/translate, /copilot) are NOT wired here — phase 7 owns them and they must never be a stub.",
+      "modern_evidence": "GET /api/v1/admin/communications/tickets (+?status&waiting_for&unread&q&page), GET /{id}, POST /{id}/messages {message, internal}, POST /{id}/status {action}; RBAC-gated support.tickets.view/manage; queue counters; real-PG battery covers filters, ILIKE escaping and CAS conflicts. The two AI routes (/translate, /copilot) are NOT wired here — phase 7 owns them and they must never be a stub. Re-proved in this session in a real browser against the production build + live API on PostgreSQL: queue → thread → operator reply → close → archive, with the thread offering only the transitions the service allows (docs/audits/phase6-ui/ 07-08).",
       "next_action": "Translations + copilot draft land with the AI phase (they call a provider; a stub would fabricate output)."
     },
     {
       "id": "ADM-01",
       "area": "admin",
       "capability": "Admin user management",
-      "status": "PARTIAL",
-      "legacy_evidence": "GET/POST /admin/users + 8 routes, P_USERS_*",
-      "modern_evidence": "GET /admin/users, GET /admin/users/{id}, PATCH role|status; users.view gated",
-      "next_action": "Extend to sessions/devices/verify/invite"
+      "status": "VERIFIED",
+      "legacy_evidence": "17 /admin/users* routes @edede31 (list, get, role, status, verify-email, sessions, devices, activity, create, invite, subscription, …), P_USERS_VIEW/SUSPEND/ACTIVATE/CHANGE_ROLE/VERIFY_EMAIL/CREATE",
+      "modern_evidence": "GET /api/v1/admin/users (filters+paging), GET /{id} (user360: identity, plans, telegram, sessions, devices, audit trail, support), PATCH /{id}/role, PATCH /{id}/status, POST /{id}/session-revocations (optional sessionId), POST /{id}/verify-email; AdminUserService guard order frozen (self→404→system_owner→privileged→super-admin peer→escalation→no-op→last super admin 409); RBAC users.view/manage_status/change_role/verify_email; adminConsoleRoutes 17/17, adminConsoleService 16/16, db/tests/adminConsole.pg.test.ts 14/14 Re-proved in this session against real PostgreSQL (db/tests/adminConsole.pg.test.ts 14/14, extendedCapabilities.pg 15/15) and in a real browser against the production build (docs/audits/phase6-ui/, 62/62): suspension, reactivation, e-mail verification and session revocation were driven through the UI and read back from the server.",
+      "next_action": "User creation/invitation stays NOT MIGRATED (invite policy = owner decision); per-user login history is a phase-6 follow-up. See docs/audits/2026-10-04-PHASE6-ADMIN-CAPABILITY-MAP.md §4."
     },
     {
       "id": "ADM-02",
       "area": "admin",
       "capability": "Admin analytics/overview/billing",
-      "status": "MISSING",
-      "legacy_evidence": "admin analytics x6, overview, billing",
-      "modern_evidence": "GET /admin/metrics, GET /admin/audit-logs",
-      "next_action": "Admin slice 2"
+      "status": "PARTIAL",
+      "legacy_evidence": "6 analytics routes (users/trading/ai/operations/revenue), /admin/overview, 2 billing routes, 1 per-user subscription; P_ANALYTICS_VIEW, P_BILLING_VIEW",
+      "modern_evidence": "GET /api/v1/admin/overview (composed Overview tab) + GET /api/v1/admin/analytics with five range presets (today/7d/30d/90d/all) over users, trading, telegram and support; RBAC overview.view + analytics.view; counts only — no money is invented where Modern has no ledger (Legacy's own revenueUnavailable() precedent)",
+      "next_action": "Billing/revenue/subscription surfaces + the ai/operations/revenue analytics blocks are phase 9 (no subscription ledger view in Modern yet)."
     },
     {
       "id": "ADM-03",
       "area": "admin",
       "capability": "Admin system surface",
-      "status": "MISSING",
-      "legacy_evidence": "40+ routes: health, diagnostics, logs, settings, feature flags, integrations, AI routing/credentials",
-      "modern_evidence": "—",
-      "next_action": "Admin slice 3 (MG-ADMIN)"
+      "status": "PARTIAL",
+      "legacy_evidence": "75 /api/v1/admin/* route statements across 19 segments @edede31 (reproducible parse of api/index.php 109–251): users 17, integrations 12, ai 10, communications 7, analytics 6, settings 3, system 3, billing 2, feature-flags 2, logs 2, providers 2, security 2, ai-usage 1, config 1, me 1, overview 1, permissions 1, trades 1, trading-accounts 1",
+      "modern_evidence": "Migrated: audit logs (filters + before/after state), security feeds (signups/logins, sensitive-gated by audit.view_sensitive), system health (nine attested components; unbuilt = not_applicable + phase reason, never a green check), RBAC matrix (rbac.matrix.view, super_admin-only), metrics. NOT migrated with owners: AI (phase 7), integrations/worker/e-mail + A2 logs (phase 8), flags/settings/billing/log viewer (phase 9 or no reader yet), user create+invite (owner decision)",
+      "next_action": "Phase 7 (AI) → phase 8 (integrations/worker/e-mail) → phase 9 (flags/settings/billing). Each stays recorded as not-migrated with its dependency; never widened silently (AC-14 precedent)."
     },
     {
       "id": "ADM-04",
       "area": "admin",
       "capability": "Admin console UI",
-      "status": "UI_ONLY",
-      "legacy_evidence": "admin/index.html 145 KB, 15 modules; admin/v2",
-      "modern_evidence": "/admin 34-line shell",
-      "next_action": "Rebuild console module by module"
+      "status": "VERIFIED",
+      "legacy_evidence": "admin/v2/index.html + admin/index.html, 15 modules, fa admin chunk 454 keys (user360 85, ai 80, analytics 69, integrations 37, billing 35, flags 33, system 29, logs 21, security 14, relay 13)",
+      "modern_evidence": "apps/web/src/app/(app)/admin/page.tsx — seven tabs (overview, users 360, support queue, audit, security, system health, analytics) on the real console API; messages/{fa,en}/admin.json 148 keys each (119 byte copies of Legacy's own admin vocabulary + 29 authored adminConsole.*); canonical classes only (card/kpi/btn-*/badge*/table/empty), no inline styles, enum labels mapped with raw fallback; i18n+design guard apps/web/src/i18n/adminSurface.test.ts 8/8; next build renders /admin and /en/admin Re-proved in this session in a real browser against the production build + live API on PostgreSQL 17 (docs/audits/phase6-ui/, 62/62 checks, 20 screenshots): permission-driven tabs for super_admin and admin, sensitive fields omitted AND labelled, honest not_applicable health states, fa/rtl + en/ltr, zero overflow at 1440/390/320, keyboard focus, 503 → localized failure. Three defects the run found were fixed before the phase was called done (mobile table overflow, raw enums in the Persian console, thread actions the service refuses).",
+      "next_action": "Modules whose substrate does not exist yet (AI, integrations, flags, settings, billing) are absent by design and named in the UI; they arrive with phases 7–9."
     },
     {
       "id": "PLT-01",
@@ -484,8 +484,8 @@
       "capability": "The eight badged shells become real",
       "status": "MISSING",
       "legacy_evidence": "n/a",
-      "modern_evidence": "/profile /settings /trades /dashboard real; /support real (Phase 5); /admin /intelligence /markets /news /performance /wallet still shells",
-      "next_action": "Admin console is phase 6; the rest per S15"
+      "modern_evidence": "/profile /settings /trades /dashboard real; /support real (Phase 5); /admin real (Phase 6: seven permission-driven tabs on the console API, fa+en, 62/62 browser QA); /intelligence /markets /news /performance /wallet still shells",
+      "next_action": "/intelligence is phase 7 (AI); /performance + /wallet are phase 9; /markets + /news are LEGACY_ONLY content (TRD-11)"
     },
     {
       "id": "PLT-13",

@@ -418,21 +418,35 @@
     {
       "id": "MG-ADMIN",
       "section": "B",
-      "title": "Admin console 93% absent (59/62 endpoints, 38 modules)",
-      "status": "OPEN",
+      "title": "Admin console: 75 Legacy routes / 19 segments — core operator surface migrated, AI+integrations+settings/flags/billing still open",
+      "status": "PARTIAL",
       "priority": "P1",
-      "verification_state": "STATIC",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§4.2",
         "§6.2"
       ],
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "docs/audits/2026-10-04-PHASE6-ADMIN-CAPABILITY-MAP.md",
+        "docs/audits/2026-10-04-PHASE6-STATUS.md",
+        "apps/api/src/admin/adminConsoleRoutes.ts",
+        "apps/api/src/admin/adminConsoleRoutes.test.ts",
+        "apps/api/src/admin/adminConsoleService.test.ts",
+        "db/migrations/0027_admin_console.sql",
+        "db/tests/adminConsole.pg.test.ts",
+        "apps/web/src/app/(app)/admin/page.tsx",
+        "apps/web/src/i18n/adminSurface.test.ts",
         "apps/api/src/kernel/adminUserRoutes.test.ts",
-        "apps/web/src/app/(app)/admin"
+        "docs/audits/phase6-ui/visual-qa-results.json",
+        "docs/audits/phase6-ui/README.md",
+        "tools/visual-qa/phase6-admin.mjs",
+        "docs/security/RBAC-CAPABILITY-MAP.md"
       ],
       "decisions": [],
-      "closure_criteria": "Admin surface ported or owner-scoped"
+      "closure_criteria": "Admin surface ported or owner-scoped",
+      "closure_note": "PARTIAL 2026-10-04 (Phase 6). The audit's \"59/62 endpoints, 38 modules\" figure is superseded by a reproducible inventory: parsing every $router statement in Legacy api/index.php 109-251 (method + path + permission constant, multi-line included) yields 75 /api/v1/admin/* routes across 19 path segments (method in docs/audits/2026-10-04-PHASE6-ADMIN-CAPABILITY-MAP.md §1). Migrated and verified this phase: overview, users 360 (list/filters/paging, role, status, verify-email, session revocation, sessions, devices, audit trail, support), the admin support queue (phase 5), audit logs with before/after state and six filters, security feeds (signups/logins) gated by audit.view_sensitive, system health over nine attested components (unbuilt subsystems report not_applicable with the phase reason — never a green check), analytics over five range presets, and the RBAC matrix. 14 console routes + the extended per-user admin API; 17/17 route tests, 16/16 service tests, 14/14 real-PG, 8/8 i18n+design guard, and a 62/62 browser QA run against the production build on live PostgreSQL (docs/audits/phase6-ui/) that found three defects which were fixed in the same phase — wide tables widened the page on mobile (123px at 390, 515px on the audit tab; now 0 at 1440/390/320 in both locales), raw enums (`open`, `admin`) leaked into the Persian console, and the ticket thread offered transitions the service refuses while dismissing the record on close; the /admin page is no longer a 34-line shell (seven tabs, fa+en, 148 catalog keys of which 119 are byte copies of Legacy's own admin vocabulary). STILL OPEN, each with a named dependency and never stubbed: AI module (14 routes) → phase 7; integrations (12) + worker/e-mail + A2 logs → phase 8; settings (3), feature flags (2), log viewer (1), billing (2) and the ai/operations/revenue analytics blocks → phase 9 or until a reader exists (a table with no consumer would be speculative infrastructure); user creation + invitations (2) → owner decision on invite policy; per-user login history (1) → phase-6 follow-up. Device tracking has no writer in Modern (MG-DEVICE-TRACKING), so that panel is legitimately empty.",
+      "last_updated": "2026-10-05"
     },
     {
       "id": "MG-AI-OCR",
@@ -555,14 +569,16 @@
         "db/tests/supportTickets.pg.test.ts",
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
         "docs/audits/2026-10-04-PHASE5-STATUS.md",
-        "docs/audits/phase5-ui/visual-qa-results.json"
+        "docs/audits/phase5-ui/visual-qa-results.json",
+        "docs/audits/2026-10-04-PHASE6-STATUS.md",
+        "apps/web/src/app/(app)/admin/page.tsx"
       ],
       "decisions": [
         "OD-AC-R8"
       ],
       "closure_criteria": "Surfaces implemented or owner-scoped",
-      "closure_note": "PARTIAL 2026-10-04 (Phase 5). `/support` is no longer a PLANNED shell: the ticket center is implemented end to end (0026 + SupportService/SupportRoutes + the page), verified by a real-PG battery, an HTTP route battery and a 29/29 browser QA run (docs/audits/phase5-ui/). Still open in this row: performance, wallet, intelligence, blog, privacy, terms, checkout (R8 / MG-FRONTEND-SURFACES), and the admin console, which is phase 6.",
-      "last_updated": "2026-10-04"
+      "closure_note": "PARTIAL 2026-10-05 (Phases 5-6). Two more badged shells became real surfaces: `/support` (Phase 5 — 0026 + SupportService/SupportRoutes + the page, verified by a real-PG battery, an HTTP route battery and a 29/29 browser QA run, docs/audits/phase5-ui/) and `/admin` (Phase 6 — 0027 + the console API + seven permission-driven tabs, verified by 17/17 route, 16/16 service, 14/14 real-PG tests and a 62/62 browser QA run, docs/audits/phase6-ui/). `/profile`, `/settings`, `/trades` and `/dashboard` were already real. Still open in this row: `/performance` and `/wallet` (phase 9), `/intelligence` (phase 7, AI), blog/privacy/terms (TRD-10 content) and checkout (PLT-11). `/markets` and `/news` are LEGACY_ONLY content surfaces (TRD-11), not shells to fill.",
+      "last_updated": "2026-10-05"
     },
     {
       "id": "MG-I18N-COVERAGE",
