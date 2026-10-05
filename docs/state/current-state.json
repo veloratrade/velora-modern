@@ -41,9 +41,9 @@
     "modern_sha": "ab0eed790fa8ffc160bc53e34264a61b02ffaedb",
     "legacy_sha": "edede313280f2f0e298f5ccbf5bbdd4d676c80bd",
     "verified_at": "2026-09-26",
-    "verification": "STATIC (git). PR #8 merged to main via merge commit ab0eed7 (parents ffcb0e9 + 75ddf5c); branch history preserved. Intervening commits since 59047b8 are governance-only + merge bookkeeping (AC-4..AC-8) — no application-path change except the reviewed comment-only citation fix (MG-DOC-4) already carried by the merged branch. AC-9 (2026-10-04) deliberately does NOT advance this SHA: the Telegram journal client is an UNPUSHED feature branch, so main's verified state is unchanged.",
-    "notes": "Phase 6 (admin console) delivered on the branch: migration 0027 (audit-action vocabulary CLOSED, three indexes), 14 console routes + the extended per-user admin API, AdminConsoleService with an injected clock and a memory store for tests, PgAdminConsoleStore for the real database, contracts/rbac extended with Legacy's own permission identifiers (overview.view, analytics.view, system.health.view, audit.view, audit.view_sensitive, users.verify_email), and the seven-tab web surface with messages/{fa,en}/admin.json (148 keys per locale, 119 of them byte copies of Legacy's admin vocabulary). Three defects found by the phase's own loop were fixed inside it (mobile table overflow, raw enums in the Persian console, thread actions the service refuses). Open owner decisions unchanged: ADR-004 sampling, OD-AC-SUBMAP, OD-AC-RPORTO, offsite backup storage credential, plus the phase-6 addition — admin user creation/invitation policy (invite TTL and who may invite). Push status: phases 1–5 PUSHED (AC-15); phase 6 COMMITTED locally, PUSHED only when its transcript is recorded.",
-    "modern_head": "b301596"
+    "verification": "STATIC (git). PR #8 merged to main via merge commit ab0eed7 (parents ffcb0e9 + 75ddf5c); branch history preserved. AC-9..AC-28 deliberately do NOT advance this SHA: they are feature/integration branch work, so main's verified state is unchanged (main = 0e9c4d7, remote-verified). The integrated tree integration/reconcile-lineages @ b500525ead8d (AC-27 merges of both lineages + AC-28 assembly/security) is LOCAL-ONLY: push and merge to main are owner-gated. Local main was fast-forwarded to the integration tip 2026-10-05 (no push; remote main untouched).",
+    "notes": "AC-27 (2026-10-05): both unmerged session lineages (feat/telegram-journal-client AC-9..18, feat/mg-domain-legacy-only-achievements AC-19..26) integrated onto integration/reconcile-lineages with colliding AC numbering reconciled (domain renumbered AC-19..26) and the gap register unioned per-gap (more advanced status wins, reconciled_2026_10_05 provenance). AC-28 (2026-10-05): MG-METAAPI-ASSEMBLY implemented (one trade per POSITION: pos-<positionId> key, VWAP scale-8, sync_position_state companion 0029, self-healing, in-tx reconciliation, ops retire tool) — PARTIAL/RECORDED_RUNTIME, live provider round trip NOT_VERIFIED, OD-M-PA-1/2/3 adopted per recorded recommendations pending ratification; MG-SEC-COOKIE CLOSED (S1: cookie-only refresh + 128-char cap, human review flagged); MG-SEC-CSP PARTIAL (S2: Math.random nonce fallback removed, fail-closed 503; release pinning model owner-gated); stale register rows MG-SEC-EDGE-AUTHZ and MG-AUTH-EVENTS re-audited on the integrated tree → PARTIAL. Open owner decisions now include MG-AI-ANONYMIZE (AC-18) and OD-M-PA-1..3 ratification (AC-28).",
+    "modern_head": "b500525ead8d"
   },
   "artifacts": {
     "current_state_md": "docs/state/CURRENT_STATE.md",
@@ -81,35 +81,47 @@
       "ADR-004 naive-datetime sampling",
       "RPO/RTO targets",
       "subscription status vocabulary mapping",
-      "worker service definition"
+      "worker service definition",
+      "MG-AI-ANONYMIZE: image dependency for anonymizer, or external vision stays off (AC-18)",
+      "OD-M-PA-1/2/3: assembly design decisions — ratification pending (adopted per recorded recommendations, AC-28)",
+      "CSP release pinning/manifest model (S2 remainder)"
     ],
     "highest_priority_open_gaps": [
-      "MG-METAAPI-ASSEMBLY",
+      "MG-METAAPI-CADENCE (scheduled sync loop; manual trigger exists)",
       "MG-WORKER-DEPLOY",
-      "MG-SEC-COOKIE",
-      "MG-SEC-CSP",
-      "MG-SEC-EDGE-AUTHZ",
-      "MG-AI-OCR (PARTIAL: API slice done, web surfaces + a live provider round trip open)",
-      "MG-AI-ANONYMIZE (owner decision: an image dependency, or external vision stays off)",
-      "MG-BACKUP-RESTORE",
-      "MG-ADMIN (PARTIAL after phase 6; the AI admin module landed in phase 7)"
+      "MG-SEC-HSTS (S4)",
+      "MG-SEC-CSP pinning remainder (S2)",
+      "MG-SEC-EDGE-AUTHZ R8 decision + browser verification (S5)",
+      "MG-API-MISSING-ROUTES",
+      "MG-SCHEMA-MAPPING",
+      "MG-FRONTEND-SURFACES",
+      "MG-I18N-COVERAGE",
+      "MG-EMAIL-TYPES",
+      "MG-RBAC-VOCAB (12/24 enforced → 24)",
+      "MG-OPS-TOOLING",
+      "MG-DATA-MIGRATION",
+      "MG-BACKUP-RESTORE (drill done; scheduled/offsite owner-gated)",
+      "MG-AI-OCR web surfaces + live provider round trip",
+      "MG-ADMIN remaining blocks (per AC-16 inventory)"
     ],
     "closed_this_phase": [
-      "AI capability's server side implemented and tested (Phase 7 API slice, d5710fe): chains/quotas/flags, the n8n relay on Legacy's contract, the local Tesseract OCR proved against the real binary, the three user routes, 21 admin routes and the three support assists. MG-TG-2 OPEN → PARTIAL; MG-AI-OCR OPEN → PARTIAL; AI-01/02/03 MISSING → BACKEND_ONLY; MG-AI-ANONYMIZE opened with its owner decision named."
+      "AC-27 (2026-10-05): lineage reconciliation — both unmerged branches integrated into one verified tree (1282/1282 local, 32-file/64-run real-PG set, pgRoles 23/23 under superuser prerequisite), register unioned, AC collisions renumbered.",
+      "AC-28 (2026-10-05): MG-METAAPI-ASSEMBLY OPEN→PARTIAL (19/19 golden vectors, assembly 8/8 + metaapiSync 13/13 + pgRoles 23/23 on real PG 17.11 @ migration head 0029, tool E2E, npm test 1282/1282, web build OK, pg-smoke 11/11 incl. 0029); MG-SEC-COOKIE→CLOSED (S1, human review flagged); MG-SEC-CSP→PARTIAL (S2 fail-closed nonce); MG-SEC-EDGE-AUTHZ + MG-AUTH-EVENTS stale rows re-audited→PARTIAL. Register now 17 OPEN / 27 PARTIAL / 12 CLOSED."
     ]
   },
   "branch_work": {
-    "entry": "AC-18 (Phase 7 — the AI capability, API slice)",
-    "branch": "feat/telegram-journal-client",
+    "entry": "AC-27 + AC-28 (lineage reconciliation; MetaAPI position assembly; S1/S2 security closures)",
+    "branch": "integration/reconcile-lineages",
     "base": "0e9c4d7e6e1f984287490ce02f5681c208e35c7a (main)",
-    "head": "d5710fe05db209a0aba37a8827469e362f7d8a97 — VERIFIED pushed 2026-10-05T05:26:28Z by an independent git ls-remote",
-    "commits": "phase 7 (API slice): migration 0028 + the ai/ module (catalog, config store, secrets, route resolver, n8n relay transport, tesseract provider, feature router, rollout guard, fail-closed anonymizer, chain-walking manager, analysis service, user routes, admin service/routes, ledger reader) + the support AI assists + contracts (aiManage/aiRouteManage, three rate-limit buckets) + wiring + 54 new tests",
-    "capability": "AI — provider chains with quotas and flags, the n8n Gemini relay, the local Tesseract OCR fallback, analyze-trades / weekly-report / feedback, 21 admin AI routes, and the support translates/copilot assists. All fail closed: no credential means a typed refusal recorded in the ledger, never invented content",
-    "pushed": true,
-    "pushed_at": "2026-10-05T05:26:28Z (git ls-remote; phases 1-6 verified earlier, AC-15/AC-17). main untouched at 0e9c4d7e — not merged, not deployed"
+    "head": "b500525ead8d + the AC-28 state-sync commit — LOCAL ONLY, NOT PUSHED",
+    "commits": "ce78ad07467b (merge domain lineage) + af782f4745b2 (merge telegram lineage) + 06fd3a99673a (PnlResult merge fallout) + 761227b36d24 (assembly: packages/domain assembler 19/19, 0029 sync_position_state, roles.sql revokes, positionReconciler, importBatch rework, metaapiAssembly 8/8 + metaapiSync 13/13 + pgRoles P19 23/23 batteries, ops/metaapi/retirePerFillTrades tool, evidence doc) + dde116cfa595 (S1 cookie-only refresh + 128-char cap + S1 proof test 12/12; S2 fail-closed CSP nonce) + b500525ead8d (register + CHANGE_LOG sync)",
+    "capability": "Both prior lineages' work (Telegram journal, phases 1-7 incl. AI capability; domain ports range-guard/Jalali/TradingSession/achievements, backup drill, pg-smoke fix) on ONE tree, plus the audit's largest behavioural divergence closed: MetaAPI sync now produces one trade per POSITION with true entry/exit prices and a durable reconciliation state machine, and the S1/S2 security regressions are fixed.",
+    "pushed": false,
+    "pushed_at": null,
+    "push_note": "push + merge to main OWNER-GATED (no credentials here; repo intentionally public — pre-push secret-scan required, currently PASS). Local main fast-forwarded to the integration tip 2026-10-05; remote main untouched at 0e9c4d7."
   },
   "last_battery": {
-    "result": "1211/1211 local (1148 general + 63 PGlite, 0 fail / 0 cancelled / 0 skipped, EXIT=0); tsc 0 errors (5 projects); secret-scan PASS (0 findings); REAL-PG batteries 31 files / 62 runs / 0 failures on PostgreSQL 17.11 at migration head 0028; phase-7 units aiCapability 23/23, aiRoutes 19/19 through the real kernel, aiCapability.pg 12/12, rbacCapabilityMap 5/5, rateLimitRoutes 18/18; the whole chain 0001→0028 applied from scratch after a sandbox restore wiped the toolchain."
+    "result": "RE-CAPTURED 2026-10-05 on integration/reconcile-lineages @ b500525ead8d (after the AC-28 pendingPositionIds/upsert rework): npm test 1282/1282 (1219 general + 63 PGlite, 0 fail / 0 skip, EXIT=0) · tsc 0 errors · secret-scan PASS (0 findings) · real-PG 17.11 targeted re-verification at migration head 0029: metaapiAssembly 8/8, metaapiSync 13/13, pgRoles 23/23 (superuser prerequisite), retirePerFillTrades tool E2E on a scratch DB · full 32-file/64-run real-PG battery set passed on the pre-AC-28 tree · apps/web next build exit 0 (all routes incl. /admin, /support, fa/en pairs) · tools/pg-smoke.ts ALL 11 CHECKS PASSED (migrations 0001→0029 applied fresh, 29 files)."
   },
   "distribution": {
     "branch": "governance/agent-context",
