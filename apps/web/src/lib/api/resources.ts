@@ -399,6 +399,376 @@ export function unbindTelegramChannel(): Promise<{ channel: null }> {
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin console (Phase 6)
+//
+// ONE client surface for the operator's capabilities. The shapes mirror the
+// server contracts exactly (admin/adminConsoleRoutes.ts + admin/adminRoutes.ts)
+// and the permissions come from the SERVER (`/admin/rbac/self`) — the console
+// hides a tab a caller cannot use, but every route enforces it again, because a
+// hidden control is never an authorization boundary.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface AdminSelfView {
+  role: string;
+  isSystemOwner: boolean;
+  permissions: string[];
+}
+
+/** The operator dashboard: named groups, never a flat bag of numbers. */
+export interface AdminOverviewView {
+  users: {
+    total: number;
+    active: number;
+    suspended: number;
+    verified: number;
+    admins: number;
+    superAdmins: number;
+    byPlan: { key: string; count: number }[];
+    byLocale: { key: string; count: number }[];
+    newLast7Days: number;
+  };
+  trading: {
+    accounts: number;
+    connectedAccounts: number;
+    accountsWithSyncError: number;
+    trades: number;
+    openTrades: number;
+    closedTrades: number;
+    tradesLast7Days: number;
+    netPnl: string;
+    equity: string;
+  };
+  subscriptions: { active: number; trialing: number; pastDue: number; canceled: number; byPlan: { key: string; count: number }[] };
+  support: { open: number; pending: number; closed: number; archived: number; unreadForAdmins: number };
+  telegram: { linkedAccounts: number; activeChannels: number };
+}
+
+export type AdminComponentStatus =
+  | "healthy"
+  | "degraded"
+  | "unhealthy"
+  | "not_configured"
+  | "not_applicable"
+  | "unknown";
+
+export interface AdminHealthView {
+  checkedAt: string;
+  overall: "healthy" | "degraded" | "unhealthy" | "unknown";
+  components: { key: string; status: AdminComponentStatus; detail: string | null; latencyMs?: number }[];
+  facts: {
+    appliedMigrations: number;
+    expectedMigrations: number | null;
+    migrationHead: string | null;
+    tables: number;
+    rateLimitBuckets: number;
+    auditRows: number;
+    authEvents: number;
+    processUptimeSeconds: number;
+    nodeVersion: string;
+  };
+}
+
+export interface AdminRangeView {
+  from: string;
+  to: string;
+  preset: string | null;
+}
+
+export interface AdminUsersAnalyticsView {
+  range: AdminRangeView;
+  totals: { total: number; newInRange: number; active: number; suspended: number; verified: number };
+  byRole: { key: string; count: number }[];
+  byLocale: { key: string; count: number }[];
+  byPlan: { key: string; count: number }[];
+  byStatus: { key: string; count: number }[];
+  registrationTrend: { day: string; count: number }[];
+}
+
+export interface AdminTradingAnalyticsView {
+  range: AdminRangeView;
+  totals: {
+    trades: number;
+    openTrades: number;
+    closedTrades: number;
+    volume: string;
+    netPnl: string;
+    wins: number;
+    losses: number;
+    breakEven: number;
+    distinctTraders: number;
+  };
+  bySymbol: { key: string; count: number }[];
+  byDirection: { key: string; count: number }[];
+  pnlTrend: { day: string; netPnl: string; count: number }[];
+}
+
+export interface AdminUserRow {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
+  status: string;
+  plan: string;
+  locale: string;
+  timezone: string;
+  emailVerifiedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminSessionRow {
+  id: string;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  /** Present ONLY for a caller holding audit.view_sensitive. */
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}
+
+export interface AdminDeviceRow {
+  id: string;
+  fingerprint: string;
+  firstSeen: string;
+  lastSeen: string;
+}
+
+export interface AdminAccountRow {
+  id: string;
+  userId: string;
+  ownerEmail: string;
+  label: string;
+  provider: string;
+  platform: string;
+  brokerServer: string | null;
+  accountNumberMasked: string;
+  currency: string;
+  syncStatus: string;
+  status: string;
+  balance: string;
+  equity: string;
+  lastError: string | null;
+  lastIncrementalAt: string | null;
+  createdAt: string;
+}
+
+export interface AdminTradeRow {
+  id: string;
+  userId: string;
+  ownerEmail: string;
+  accountId: string | null;
+  symbol: string;
+  direction: string;
+  status: string;
+  volume: string;
+  entryPrice: string;
+  exitPrice: string | null;
+  netPnl: string | null;
+  rMultiple: string | null;
+  occurredAt: string;
+  closedAt: string | null;
+  createdAt: string;
+}
+
+export interface AdminAuditRow {
+  id: string;
+  occurredAt: string;
+  action: string;
+  outcome: string;
+  actorUserId: string;
+  actorEmail?: string | null;
+  targetUserId: string | null;
+  targetEmail?: string | null;
+  beforeState?: string | null;
+  afterState?: string | null;
+  requestId: string | null;
+}
+
+export interface AdminSecurityRow {
+  id: string;
+  occurredAt: string;
+  userId: string | null;
+  email: string | null;
+  eventType: string;
+  result: string;
+  reason: string | null;
+  /** Present ONLY for a caller holding audit.view_sensitive. */
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}
+
+export interface AdminPage<T> {
+  items: T[];
+  total: number;
+  page?: number;
+  perPage?: number;
+  limit?: number;
+}
+
+function qs(params: Record<string, string | number | undefined>): string {
+  const usable = Object.entries(params).filter(([, v]) => v !== undefined && v !== "");
+  if (usable.length === 0) return "";
+  return `?${usable.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&")}`;
+}
+
+/** The caller's effective role, ownership flag and permission set. */
+export function getAdminSelf(): Promise<AdminSelfView> {
+  return api.request("/api/v1/admin/rbac/self");
+}
+
+export function getAdminOverview(): Promise<AdminOverviewView> {
+  return api.request("/api/v1/admin/overview");
+}
+
+export function getAdminHealth(): Promise<AdminHealthView> {
+  return api.request("/api/v1/admin/system/health");
+}
+
+export function getAdminUsersAnalytics(range: string): Promise<AdminUsersAnalyticsView> {
+  return api.request(`/api/v1/admin/analytics/users${qs({ range })}`);
+}
+
+export function getAdminTradingAnalytics(range: string): Promise<AdminTradingAnalyticsView> {
+  return api.request(`/api/v1/admin/analytics/trading${qs({ range })}`);
+}
+
+export function listAdminUsers(filter: { search?: string; role?: string; status?: string; page?: number }): Promise<{
+  items: AdminUserRow[];
+  total: number;
+  page: number;
+  perPage: number;
+}> {
+  return api.request(`/api/v1/admin/users${qs(filter)}`);
+}
+
+export function getUserSessions(id: string, perPage = 25): Promise<AdminPage<AdminSessionRow> & { sensitive: boolean }> {
+  return api.request(`/api/v1/admin/users/${encodeURIComponent(id)}/sessions${qs({ perPage })}`);
+}
+
+export function getUserDevices(id: string): Promise<AdminPage<AdminDeviceRow>> {
+  return api.request(`/api/v1/admin/users/${encodeURIComponent(id)}/devices`);
+}
+
+export function getUserAccounts(id: string, perPage = 25): Promise<AdminPage<AdminAccountRow>> {
+  return api.request(`/api/v1/admin/users/${encodeURIComponent(id)}/accounts${qs({ perPage })}`);
+}
+
+export function getUserTrades(id: string, perPage = 25): Promise<AdminPage<AdminTradeRow>> {
+  return api.request(`/api/v1/admin/users/${encodeURIComponent(id)}/trades${qs({ perPage })}`);
+}
+
+export function revokeUserSessions(id: string, sessionId?: string): Promise<{ revoked: number; scope: string; sessionId?: string }> {
+  return api.request(`/api/v1/admin/users/${encodeURIComponent(id)}/session-revocations`, {
+    method: "POST",
+    body: sessionId === undefined ? {} : { sessionId },
+  });
+}
+
+export function verifyUserEmail(id: string): Promise<{ user: AdminUserRow; changed: boolean }> {
+  return api.request(`/api/v1/admin/users/${encodeURIComponent(id)}/email-verification`, { method: "POST", body: {} });
+}
+
+export function setUserRole(id: string, role: string): Promise<{ user: AdminUserRow; sessionsRevoked: boolean }> {
+  return api.request(`/api/v1/admin/users/${encodeURIComponent(id)}/role`, { method: "PATCH", body: { role } });
+}
+
+export function setUserStatus(id: string, status: string): Promise<{ user: AdminUserRow; sessionsRevoked: boolean }> {
+  return api.request(`/api/v1/admin/users/${encodeURIComponent(id)}/status`, { method: "PATCH", body: { status } });
+}
+
+export function listAuditLog(filter: {
+  action?: string;
+  actorUserId?: string;
+  targetUserId?: string;
+  since?: string;
+  until?: string;
+  limit?: number;
+}): Promise<{ entries: AdminAuditRow[]; total: number; limit: number }> {
+  return api.request(`/api/v1/admin/audit-logs${qs(filter)}`);
+}
+
+export function listSecurityFeed(
+  kind: "signups" | "logins",
+  filter: { result?: string; since?: string; until?: string; limit?: number } = {},
+): Promise<AdminPage<AdminSecurityRow> & { sensitive: boolean }> {
+  return api.request(`/api/v1/admin/security/${kind}${qs(filter)}`);
+}
+
+export function listPlatformTrades(filter: {
+  userId?: string;
+  status?: string;
+  symbol?: string;
+  page?: number;
+  perPage?: number;
+}): Promise<AdminPage<AdminTradeRow>> {
+  return api.request(`/api/v1/admin/trades${qs(filter)}`);
+}
+
+export function listPlatformAccounts(filter: {
+  userId?: string;
+  syncStatus?: string;
+  page?: number;
+  perPage?: number;
+}): Promise<AdminPage<AdminAccountRow>> {
+  return api.request(`/api/v1/admin/trading-accounts${qs(filter)}`);
+}
+
+// ── The support queue (the ADMIN side of the Phase 5 capability) ─────────────
+
+/**
+ * A queue row. The server's admin projection is the SAME ticket shape the user
+ * sees (`SupportTicketRecord`), which is why there is no separate owner e-mail
+ * here: the modern ticket carries its owner id, and inventing a field the API
+ * does not return would put a fabricated column in the console.
+ */
+export interface SupportQueueTicketView {
+  id: string;
+  subject: string;
+  status: SupportStatus;
+  waitingFor: SupportWaiting;
+  unreadAdminCount: number;
+  lastMessageAt: string;
+  createdAt: string;
+}
+
+export interface SupportQueueView {
+  tickets: SupportQueueTicketView[];
+  total: number;
+  page: number;
+  perPage: number;
+  counters: { open: number; pending: number; unread: number };
+}
+
+export function listSupportQueue(status?: SupportStatus): Promise<SupportQueueView> {
+  return api.request(`/api/v1/admin/communications/tickets${qs({ status })}`);
+}
+
+export function getSupportQueueTicket(id: string): Promise<SupportThreadView> {
+  return api.request(`/api/v1/admin/communications/tickets/${encodeURIComponent(id)}`);
+}
+
+export function replySupportQueueTicket(
+  id: string,
+  message: string,
+  internal = false,
+): Promise<{ message: { id: string; status: SupportStatus; waitingFor: SupportWaiting; firstReply?: boolean } }> {
+  return api.request(`/api/v1/admin/communications/tickets/${encodeURIComponent(id)}/messages`, {
+    method: "POST",
+    body: { message, internal },
+  });
+}
+
+export function actOnSupportQueueTicket(
+  id: string,
+  action: "close" | "reopen" | "archive",
+): Promise<{ status: SupportStatus; waitingFor: SupportWaiting }> {
+  return api.request(`/api/v1/admin/communications/tickets/${encodeURIComponent(id)}/status`, {
+    method: "POST",
+    body: { action },
+  });
+}
+
 // --- Support (Phase 5: the support center) -----------------------------------
 // Shapes mirror the Modern kernel handlers in `apps/api/src/support/supportRoutes.ts`.
 // The WIRE FIELD IS `message`, not `body` — Legacy's own field name, kept on

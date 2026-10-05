@@ -30,6 +30,7 @@ import faSettings from "../../messages/fa/settings.json";
 import faTrades from "../../messages/fa/trades.json";
 import faDashboard from "../../messages/fa/dashboard.json";
 import faSupport from "../../messages/fa/support.json";
+import faAdmin from "../../messages/fa/admin.json";
 import enCommon from "../../messages/en/common.json";
 import enErrors from "../../messages/en/errors.json";
 import enTelegram from "../../messages/en/telegram.json";
@@ -40,6 +41,7 @@ import enSettings from "../../messages/en/settings.json";
 import enTrades from "../../messages/en/trades.json";
 import enDashboard from "../../messages/en/dashboard.json";
 import enSupport from "../../messages/en/support.json";
+import enAdmin from "../../messages/en/admin.json";
 
 // `settings` is the account surface's catalog (Phase 1 — profile + settings).
 // PROVENANCE: 23 of its keys are byte copies of Legacy `public/locales/{fa,en}.json`
@@ -61,7 +63,24 @@ import enSupport from "../../messages/en/support.json";
 // because Legacy had no words for them. Server-side validation copy is NOT
 // duplicated here: the page maps the API's error CODES onto the existing
 // `errors.support.*` keys in the `errors` chunk.
-export type Feature = "common" | "errors" | "auth" | "landing" | "landing-interactive" | "telegram" | "settings" | "trades" | "dashboard" | "support";
+// `admin` is the Phase 6 operator console. PROVENANCE: 119 of its 148 keys per
+// locale are byte copies of Legacy `public/locales/{fa,en}.json` +
+// `chunks/{fa,en}/admin.json` @edede31 — the console reuses Legacy's OWN admin
+// vocabulary (`admin.user360.*`, `admin.analytics.*`, `admin.system.*`,
+// `admin.security.*`, `admin.logs.*`) rather than paraphrasing it, so an operator
+// coming from the Legacy panel reads the same labels, and a label can never drift
+// from the capability it names. The other 29 are authored and letter-prefixed
+// (`adminConsole.*`, plus `admin.status.active`, a status Legacy used but never
+// labelled): the tab strip, the capability-absent wording, the two subsystems
+// Legacy had no panel for (`component.migrations`, `component.rate_limiter`), and
+// the values Legacy only had in an unnamespaced place (`accounts.balance`).
+//
+// The page ALSO reads keys from three sibling chunks through the same translator
+// (`common.admin.41ae8044`, `errors.rateLimited`/`errors.unauthorized`, and the
+// ticket words in `pages.support.*`). Those are deliberately NOT duplicated here:
+// one string, one home. `apps/web/src/i18n/adminSurface.test.ts` proves that every
+// key the page can render resolves in one of the four chunks it loads.
+export type Feature = "common" | "errors" | "auth" | "landing" | "landing-interactive" | "telegram" | "settings" | "trades" | "dashboard" | "support" | "admin";
 export type Messages = Readonly<Record<string, string>>;
 
 interface ChunkFile {
@@ -72,8 +91,8 @@ interface ChunkFile {
 }
 
 export const CATALOG_FILES: Readonly<Record<Locale, Readonly<Record<Feature, ChunkFile>>>> = {
-  fa: { common: faCommon, errors: faErrors, auth: faAuth, landing: faLanding, "landing-interactive": faLandingInteractive, telegram: faTelegram, settings: faSettings, trades: faTrades, dashboard: faDashboard, support: faSupport },
-  en: { common: enCommon, errors: enErrors, auth: enAuth, landing: enLanding, "landing-interactive": enLandingInteractive, telegram: enTelegram, settings: enSettings, trades: enTrades, dashboard: enDashboard, support: enSupport },
+  fa: { common: faCommon, errors: faErrors, auth: faAuth, landing: faLanding, "landing-interactive": faLandingInteractive, telegram: faTelegram, settings: faSettings, trades: faTrades, dashboard: faDashboard, support: faSupport, admin: faAdmin },
+  en: { common: enCommon, errors: enErrors, auth: enAuth, landing: enLanding, "landing-interactive": enLandingInteractive, telegram: enTelegram, settings: enSettings, trades: enTrades, dashboard: enDashboard, support: enSupport, admin: enAdmin },
 };
 
 const merged = new Map<string, Messages>();
