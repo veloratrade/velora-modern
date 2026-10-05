@@ -495,3 +495,39 @@ feature flags (2), log viewer (1), billing (2) and the ai/operations/revenue ana
 blocks → phase 9 or until a reader exists · user creation + invitations (2) → **owner
 decision** on invite policy (TTL, who may invite) · per-user login history (1) → phase-6
 follow-up. No existing user capability was removed.
+
+## AC-17 — 2026-10-05 · push verification for phase 6 (the admin console is on GitHub)
+
+**Why this entry exists.** AC-16 recorded phase 6 as `COMMITTED` and claimed nothing above
+it, because a commit cannot contain the result of its own push. The owner supplied a token
+in-conversation (used inline, stored nowhere — no file, no git config, no credential
+helper, no commit), the push ran, and the result is recorded here.
+
+**Verified transcript** (token redacted):
+
+```
+local HEAD before push : 83be9c4c2ee83c86165ab585e27da6cf57db8b15
+--- git push ---
+To https://github.com/veloratrade/velora-modern.git
+   73fc5ee..83be9c4  HEAD -> feat/telegram-journal-client
+--- git ls-remote (independent read-back, not the push's own stdout) ---
+83be9c4c2ee83c86165ab585e27da6cf57db8b15  refs/heads/feat/telegram-journal-client
+0e9c4d7e6e1f984287490ce02f5681c208e35c7a  refs/heads/main
+checked at (UTC)       : 2026-10-05T03:22:35Z
+```
+
+**Reading of that transcript, stated conservatively.**
+- The remote branch moved `73fc5ee → 83be9c4`, carrying exactly this phase's three
+  commits: `caf16bf` (API/DB + contracts), `ec4e8e9` (web + i18n), `83be9c4`
+  (evidence + docs + state).
+- The tip is confirmed by an independent `git ls-remote`, and equals the local HEAD.
+- `main` is untouched at `0e9c4d7e` — the branch is **not merged**. PR #9 remains open
+  against `main`; nothing here is a property of `main`, of production, or of any deployed
+  environment. No deploy was attempted and no webhook, worker or external service was
+  exercised: the phase-6 QA run drove a local production build against a local API on a
+  disposable PostgreSQL 17 cluster.
+- AC-17's own commit becomes the new tip; its SHA is recorded in the next push transcript.
+  This recursion is the honest form of "record the tip" — a commit cannot name itself.
+
+**Delivery states after this push:** phases 1–6 = **PUSHED**. Not merged, not deployed,
+not live-verified. `DEPLOYED` and `LIVE VERIFIED` remain `NOT_CLAIMED`.

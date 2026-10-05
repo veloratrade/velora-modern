@@ -98,14 +98,14 @@
     ]
   },
   "branch_work": {
-    "entry": "AC-16 (Phase 6 — admin console)",
+    "entry": "AC-16 (Phase 6 — admin console) + AC-17 (its push verification)",
     "branch": "feat/telegram-journal-client",
     "base": "0e9c4d7e6e1f984287490ce02f5681c208e35c7a (main)",
-    "head": "ec4e8e9 — phase 6 committed locally in three commits on top of 73fc5ee: caf16bf (API/DB + contracts), ec4e8e9 (web + i18n), and the evidence/docs/state commit that follows. The pushed tip is read back with git fetch + git ls-remote and recorded in the push-verification entry after AC-16 in CHANGE_LOG.md; until then phase 6 is COMMITTED, not PUSHED",
+    "head": "83be9c4c2ee83c86165ab585e27da6cf57db8b15 — VERIFIED pushed 2026-10-05T03:22:35Z by an independent git ls-remote (AC-17). Phase 6 = caf16bf (API/DB + contracts) + ec4e8e9 (web + i18n) + 83be9c4 (evidence/docs/state); the AC-17 push-verification commit follows and its SHA is recorded in the next transcript",
     "commits": "phase 6: migration 0027 (audit vocabulary CLOSED + indexes) + the admin console service/routes/store + the extended per-user admin API + contracts/rbac + the seven-tab web surface + messages/{fa,en}/admin.json + the i18n/design guard + the browser QA harness and its evidence",
     "capability": "Admin console — the operator surface (ADM-01, ADM-04, SUP-02 → VERIFIED): overview, user 360, support queue, audit trail with before/after state, security feeds with sensitive fields omitted-and-labelled, system health over nine honestly attested components, analytics over five bounded range presets, RBAC matrix (super_admin-only)",
-    "pushed": false,
-    "pushed_at": "pending — phases 1–5 are PUSHED (verified 2026-10-04T17:47:25Z, AC-15); phase 6 becomes PUSHED only when its transcript is recorded"
+    "pushed": true,
+    "pushed_at": "2026-10-05T03:22:35Z (read back with git ls-remote; transcript in CHANGE_LOG AC-17). main untouched at 0e9c4d7e — not merged, not deployed"
   },
   "last_battery": {
     "result": "1169/1169 local (1106 general + 63 PGlite, 0 fail / 0 cancelled / 0 skipped, EXIT=0); tsc 0 errors (5 projects); secret-scan PASS (0 findings); next build exit 0 with /admin + /en/admin real (38 routes); REAL-PG batteries 30 files / 60 runs / 0 failures — REAL-PG EVIDENCE: PASS on PostgreSQL 17.11 at migration head 0027; phase-6 units adminConsoleRoutes 17/17, adminConsoleService 16/16, adminConsole.pg 14/14, i18n/adminSurface 8/8, i18n/supportSurface 7/7, extendedCapabilities.pg 15/15, rbacCapabilityMap 5/5; browser QA 62/62 in Chromium 153 against the production build + live API (docs/audits/phase6-ui/, 20 screenshots)."
