@@ -51,6 +51,22 @@ export interface SessionRecord {
   readonly createdAt: string;
 }
 
+/**
+ * A device fingerprint seen for an account (0001_core.sql `user_devices`).
+ *
+ * Phase 6 (admin console) reads this table for the operator's user detail. The
+ * table has existed since 0001 but NOTHING in Modern writes to it yet, so the
+ * console renders a real, empty state rather than a fabricated list — the
+ * finding is recorded in the phase-6 report as MG-DEVICE-TRACKING.
+ */
+export interface DeviceRecord {
+  readonly id: string;
+  readonly userId: string;
+  readonly fingerprint: string;
+  readonly firstSeen: string;
+  readonly lastSeen: string;
+}
+
 export interface VerificationRecord {
   readonly id: string;
   readonly userId: string;
@@ -248,4 +264,68 @@ export interface UserStore {
   getEmailPreferences(userId: string): Promise<EmailPreferences>;
   /** Upsert the full preference set (partial merge happens above the port). */
   upsertEmailPreferences(userId: string, prefs: EmailPreferences, now: Date): Promise<void>;
+
+  // --- Phase 6: the admin console's account operations -----------------------
+  // Same rule as the Phase 3B-4 block above: authorization happens in the
+  // service/route layer, never here.
+
+  /**
+   * Page a user's sessions, newest first, including REVOKED ones.
+   *
+   * Revoked rows are part of the answer on purpose: "this account was signed out
+   * at 14:02" is exactly what an operator investigating a compromise needs to
+   * see, and hiding them would make a session list that only ever appears empty
+   * after a revocation.
+   */
+  listSessions(
+    userId: string,
+    limit: number,
+    offset: number,
+  ): Promise<{ items: readonly SessionRecord[]; total: number }>;
+
+  /**
+   * Revoke ONE session of ONE user, conditionally.
+   *
+   * Returns false when the session does not exist, belongs to another user, or
+   * is already revoked — the `user_id` predicate is what makes a mismatched id
+   * unactionable instead of a cross-user write. With `audit`, the UPDATE and the
+   * audit INSERT share one transaction (C-34), and a false result writes nothing.
+   */
+  revokeUserSession(
+    userId: string,
+    sessionId: string,
+    revokedAt: Date,
+    audit?: AuditWrite,
+  ): Promise<boolean>;
+
+  /**
+   * Revoke every LIVE session of a user, reporting how many were live.
+   *
+   * The count is the difference between "the account had three sessions and now
+   * has none" and "there was nothing to revoke": the console reports it, and the
+   * audit entry records it. `audit` follows the same transactional contract.
+   */
+  revokeAllUserSessions(
+    userId: string,
+    revokedAt: Date,
+    audit?: AuditWrite,
+  ): Promise<number>;
+
+  /**
+   * Admin-triggered e-mail verification (Legacy `users.verify_email`).
+   *
+   * SINGLE-SHOT by construction: the UPDATE carries `email_verified_at IS NULL`,
+   * so a second call — including one racing the first — changes nothing and
+   * returns null. That is what lets the service distinguish "verified now"
+   * (audited) from "already verified" (silent no-op) without a read-then-write
+   * window in which two admins could each claim credit for the same grant.
+   */
+  verifyEmailOnce(
+    userId: string,
+    verifiedAt: Date,
+    audit?: AuditWrite,
+  ): Promise<UserRecord | null>;
+
+  /** A user's known device fingerprints (empty until device tracking lands). */
+  listDevices(userId: string): Promise<readonly DeviceRecord[]>;
 }

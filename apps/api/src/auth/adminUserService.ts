@@ -23,7 +23,7 @@
 // silently reach an API response.
 import { normalizeRole, type AppRole } from "@velora/contracts";
 import { AuthError } from "./authService.js";
-import type { UserRecord, UserStore, AppRoleName } from "./userStore.js";
+import type { DeviceRecord, SessionRecord, UserRecord, UserStore, AppRoleName } from "./userStore.js";
 import type { AuditStore, AuditEntry, AuditTx } from "./auditStore.js";
 
 /** Account states (0007_user_status.sql; Legacy parity: enum('active','suspended')). */
@@ -76,6 +76,52 @@ export function toAdminUser(u: UserRecord): AdminUserView {
     emailVerifiedAt: u.emailVerifiedAt,
     createdAt: u.createdAt,
     updatedAt: u.updatedAt,
+  };
+}
+
+/**
+ * The admin-facing projection of a session (Phase 6).
+ *
+ * `refreshTokenHash`/`accessTokenHash` are NOT here and never will be: a hash is
+ * still a credential-equivalent value, and the console needs the lifecycle, not
+ * the token. `ipAddress`/`userAgent` ARE here but are stripped by the ROUTE for
+ * callers without `audit.view_sensitive` — the projection is complete so that
+ * the sensitive-field rule lives in exactly one place (the route layer) instead
+ * of being spread across the store, the service and the UI.
+ */
+export interface AdminSessionView {
+  readonly id: string;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+  readonly revokedAt: string | null;
+  readonly ipAddress: string | null;
+  readonly userAgent: string | null;
+}
+
+export interface AdminDeviceView {
+  readonly id: string;
+  readonly fingerprint: string;
+  readonly firstSeen: string;
+  readonly lastSeen: string;
+}
+
+export function toAdminSession(s: SessionRecord): AdminSessionView {
+  return {
+    id: s.id,
+    createdAt: s.createdAt,
+    expiresAt: s.expiresAt,
+    revokedAt: s.revokedAt,
+    ipAddress: s.ipAddress,
+    userAgent: s.userAgent,
+  };
+}
+
+export function toAdminDevice(d: DeviceRecord): AdminDeviceView {
+  return {
+    id: d.id,
+    fingerprint: d.fingerprint,
+    firstSeen: d.firstSeen,
+    lastSeen: d.lastSeen,
   };
 }
 
@@ -338,6 +384,162 @@ export class AdminUserService {
       return { user: toAdminUser(updated), sessionsRevoked: true };
     }
     return { user: toAdminUser(updated), sessionsRevoked: false };
+  }
+
+  // --- Phase 6 (admin console): account operations ---------------------------
+  // Same two-layer model as setRole/setStatus: the ROUTE decides whether the
+  // caller may reach the operation at all (`users.view` / `users.manage_status`
+  // / `users.verify_email`), and the guards below enforce the actor/target pair
+  // rules that a permission bit cannot express.
+
+  /** A user's session history, newest first. Caller must hold users.view. */
+  async listSessions(
+    targetId: string,
+    page: { page?: number; perPage?: number } = {},
+  ): Promise<{ items: readonly AdminSessionView[]; total: number; page: number; perPage: number }> {
+    const user = await this.deps.store.findUserById(targetId);
+    if (user === null) throw notFound();
+    const page_ = Math.max(1, Math.trunc(page.page ?? 1));
+    const perPage = Math.min(
+      ADMIN_USER_PAGE_SIZE_MAX,
+      Math.max(1, Math.trunc(page.perPage ?? ADMIN_USER_PAGE_SIZE_DEFAULT)),
+    );
+    const { items, total } = await this.deps.store.listSessions(
+      targetId,
+      perPage,
+      (page_ - 1) * perPage,
+    );
+    return { items: items.map(toAdminSession), total, page: page_, perPage };
+  }
+
+  /** A user's known devices. Caller must hold users.view. */
+  async listDevices(targetId: string): Promise<readonly AdminDeviceView[]> {
+    const user = await this.deps.store.findUserById(targetId);
+    if (user === null) throw notFound();
+    return (await this.deps.store.listDevices(targetId)).map(toAdminDevice);
+  }
+
+  /**
+   * Revoke one session, or every session, of a user.
+   * Requires users.manage_status at the route layer.
+   *
+   * WHY THE SAME PAIR GUARDS AS setStatus. Ending someone's sessions is the
+   * consequence of a suspension (`setStatus` already does it), so exposing it
+   * directly must not become the way AROUND the suspension rules: without the
+   * checks below, an `admin` could sign the System Owner out of every device —
+   * the exact denial the owner-immutability rule exists to prevent — and peer
+   * protection would be equally bypassable against another super_admin.
+   *
+   * SELF-ACTION IS DENIED, deliberately: this surface targets OTHER accounts,
+   * and "revoke my own sessions" is a logout, which already exists. Allowing it
+   * here would let an operator lock themselves out of the console mid-incident
+   * and would make the audit row ambiguous (actor == target).
+   */
+  async revokeSessions(
+    targetId: string,
+    actor: ActorContext,
+    sessionId?: string,
+  ): Promise<{ revoked: number; scope: "session" | "all" }> {
+    if (targetId === actor.id) {
+      throw new AuthError(403, "SELF_ACTION_DENIED", "Action on your own account is not allowed.");
+    }
+    const target = await this.deps.store.findUserById(targetId);
+    if (target === null) throw notFound();
+    await this.assertNotSystemOwner(targetId);
+    if (!hasSuperAuthority(actor) && isPrivilegedRole(target.role)) {
+      throw new AuthError(403, "PRIVILEGED_TARGET", "Cannot modify a privileged user.");
+    }
+    if (target.role === "super_admin") {
+      throw new AuthError(
+        403,
+        "SUPER_ADMIN_PEER_PROTECTED",
+        "A super admin cannot modify another super admin.",
+      );
+    }
+
+    const now = this.now();
+    // How many sessions are live RIGHT NOW, read through the same port the
+    // console uses. Bounded to one page (100): a user with more live sessions
+    // than that gets a lower bound in the audit row rather than an inflated
+    // number, and the count that is reported back to the caller is the store's
+    // own `revoked` count, which is exact.
+    const page = await this.deps.store.listSessions(targetId, 100, 0);
+    const liveBefore = page.items.filter((x) => x.revokedAt === null).length;
+    const audit = (tx: AuditTx | undefined): Promise<void> =>
+      this.recordAudit(tx, {
+        action: "USER_SESSIONS_REVOKED",
+        actorUserId: actor.id,
+        targetUserId: targetId,
+        // A count, not a role: the columns carry the DIRECTION of the change,
+        // which for this action is "N sessions were live, now 0".
+        beforeState: `live:${liveBefore}`,
+        afterState: "live:0",
+        requestId: actor.requestId ?? null,
+        occurredAt: now,
+      });
+
+    if (sessionId !== undefined) {
+      const revoked = await this.deps.store.revokeUserSession(targetId, sessionId, now, audit);
+      // A session that does not exist, belongs to another user, or is already
+      // revoked is NOT an error to report as success: the caller asked for a
+      // state that is not reachable through this id.
+      if (!revoked) {
+        throw new AuthError(404, "SESSION_NOT_FOUND", "Session not found.");
+      }
+      return { revoked: 1, scope: "session" };
+    }
+    const revoked = await this.deps.store.revokeAllUserSessions(targetId, now, audit);
+    return { revoked, scope: "all" };
+  }
+
+  /**
+   * Admin-triggered e-mail verification (Legacy `users.verify_email`).
+   * Requires users.verify_email at the route layer.
+   *
+   * PAIR RULES: the System Owner is excluded like every other mutation here —
+   * not because verification harms them, but because "which administrative
+   * operations may touch the owner" is answered uniformly in this service rather
+   * than re-argued per endpoint. Self-action IS allowed: verifying your own
+   * address grants no authority, and an operator whose own verification e-mail
+   * never arrived is exactly the person who needs it.
+   *
+   * IDEMPOTENT: an already-verified account returns the current record with
+   * `changed: false` and writes no audit row, so the trail only ever contains
+   * verification GRANTS.
+   */
+  async verifyEmail(
+    targetId: string,
+    actor: ActorContext,
+  ): Promise<{ user: AdminUserView; changed: boolean }> {
+    const target = await this.deps.store.findUserById(targetId);
+    if (target === null) throw notFound();
+    await this.assertNotSystemOwner(targetId);
+    if (!hasSuperAuthority(actor) && isPrivilegedRole(target.role)) {
+      throw new AuthError(403, "PRIVILEGED_TARGET", "Cannot modify a privileged user.");
+    }
+    if (target.emailVerifiedAt !== null) {
+      return { user: toAdminUser(target), changed: false };
+    }
+    const now = this.now();
+    const updated = await this.deps.store.verifyEmailOnce(targetId, now, (tx) =>
+      this.recordAudit(tx, {
+        action: "USER_EMAIL_VERIFIED",
+        actorUserId: actor.id,
+        targetUserId: targetId,
+        beforeState: "unverified",
+        afterState: "verified",
+        requestId: actor.requestId ?? null,
+        occurredAt: now,
+      }),
+    );
+    // Lost the race against another verification: report the CURRENT record,
+    // and claim no change (the other caller's audit row is the record of it).
+    if (updated === null) {
+      const current = await this.deps.store.findUserById(targetId);
+      if (current === null) throw notFound();
+      return { user: toAdminUser(current), changed: false };
+    }
+    return { user: toAdminUser(updated), changed: true };
   }
 
   /**

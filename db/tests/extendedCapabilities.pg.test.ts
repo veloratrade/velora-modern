@@ -381,9 +381,13 @@ test("admin metrics count real rows", { skip: SKIP }, async () => {
     assert.ok(metrics.users >= 2);
     assert.ok(metrics.tradingAccounts >= 1);
     assert.equal(typeof metrics.trades, "number");
-    // The audit trail is readable and ordered newest-first.
-    const entries = await store.auditLog(5, null);
-    assert.ok(Array.isArray(entries));
+    // The audit trail is readable and ordered newest-first. Since Phase 6 it
+    // returns a PAGE (`{items,total}`) because the console filters it and needs
+    // the count; the assertion follows the new contract and checks both halves.
+    const entries = await store.auditLog({ limit: 5, before: null });
+    assert.ok(Array.isArray(entries.items));
+    assert.ok(entries.items.length <= 5);
+    assert.equal(typeof entries.total, "number");
   } finally {
     await ctx.close();
   }

@@ -117,6 +117,16 @@ export interface ApiConfig {
   readonly aiCoach?: import("../aicoach/aiCoachRoutes.js").AiCoachStore;
   /** v1.0 admin read surface (audit trail + platform KPIs). */
   readonly admin?: import("../admin/adminRoutes.js").AdminStore;
+  /**
+   * Phase 6 admin console (overview, analytics, system health, security feeds,
+   * the per-user account operations and the platform-wide lists).
+   *
+   * Absent → every console route answers the documented fail-closed 503. It is a
+   * SEPARATE slot from `admin` above because the two have different lifetimes: the
+   * audit/KPI store is a leaf read port, while the console composes that store's
+   * neighbourhood with the admin user service and the ownership resolver.
+   */
+  readonly adminConsole?: import("../admin/adminConsoleRoutes.js").AdminConsoleCapability;
   /** v1.5 portfolio / prop drawdown / FX reads. */
   readonly portfolio?: import("../portfolio/portfolioRoutes.js").PortfolioStore;
   /**

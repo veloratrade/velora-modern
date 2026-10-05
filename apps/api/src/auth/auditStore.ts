@@ -68,7 +68,16 @@ export type AuditAction =
   | "TELEGRAM_LINK_FAILED"
   | "TELEGRAM_UNLINKED"
   | "TELEGRAM_CHANNEL_BOUND"
-  | "TELEGRAM_CHANNEL_UNBOUND";
+  | "TELEGRAM_CHANNEL_UNBOUND"
+  // Phase 6 (migration 0027). Both act on ANOTHER user's account without
+  // changing their role or status, which is precisely the class of operation
+  // that would otherwise leave no trace at all: a revoked session looks to the
+  // user like an unexplained logout, and an admin-granted verification is an
+  // authorization grant. `beforeState`/`afterState` carry the direction (how
+  // many sessions were live) and the prior verification state, so neither needs
+  // a second action name.
+  | "USER_SESSIONS_REVOKED"
+  | "USER_EMAIL_VERIFIED";
 
 /**
  * Result of the audited attempt. Mirrors the 0011 outcome CHECK.

@@ -18,6 +18,7 @@ import type {
   UserRecord,
   AppRoleName,
   SessionRecord,
+  DeviceRecord,
   VerificationRecord,
   EmailPreferences,
   PasswordResetRecord,
@@ -439,6 +440,117 @@ export class PgUserStore implements UserStore {
       [role, excludeUserId ?? null],
     );
     return Number(rows[0]?.n ?? 0);
+  }
+
+  // --- Phase 6: the admin console's account operations -----------------------
+
+  async listSessions(
+    userId: string,
+    limit: number,
+    offset: number,
+  ): Promise<{ items: readonly SessionRecord[]; total: number }> {
+    // Newest-first by (created_at, id): created_at alone is not a total order
+    // when a login and its rotation land in the same microsecond, and an
+    // unstable page would silently repeat or skip rows.
+    const rows = await this.q(
+      `SELECT * FROM user_sessions
+        WHERE user_id = $1
+        ORDER BY created_at DESC, id DESC
+        LIMIT $2 OFFSET $3`,
+      [userId, limit, offset],
+    );
+    const counted = await this.q(
+      "SELECT COUNT(*)::int AS n FROM user_sessions WHERE user_id = $1",
+      [userId],
+    );
+    return {
+      items: rows.map(mapSession),
+      total: Number(counted[0]?.n ?? 0),
+    };
+  }
+
+  async revokeUserSession(
+    userId: string,
+    sessionId: string,
+    revokedAt: Date,
+    audit?: AuditWrite,
+  ): Promise<boolean> {
+    // `user_id = $2 AND revoked_at IS NULL` is the whole authorization of the
+    // write: a session id belonging to somebody else matches nothing, and an
+    // already-revoked session is not re-revoked (which would move revoked_at
+    // and rewrite history). A non-numeric id can never match a BIGINT column —
+    // PostgreSQL would raise on the cast, so the predicate is written to make
+    // an unparseable id a clean `false` instead of a 500.
+    if (!/^\d+$/.test(sessionId)) return false;
+    const sql = `UPDATE user_sessions SET revoked_at = $1
+                  WHERE id = $2::bigint AND user_id = $3 AND revoked_at IS NULL
+                  RETURNING id`;
+    if (audit === undefined) {
+      const rows = await this.q(sql, [revokedAt, sessionId, userId]);
+      return rows.length > 0;
+    }
+    return withTransaction(this.pool, async (q) => {
+      const rows = await q(sql, [revokedAt, sessionId, userId]);
+      if (rows.length === 0) return false;
+      await audit(q);
+      return true;
+    });
+  }
+
+  async revokeAllUserSessions(
+    userId: string,
+    revokedAt: Date,
+    audit?: AuditWrite,
+  ): Promise<number> {
+    // RETURNING * so the caller learns HOW MANY sessions were live. Reporting
+    // the count is what makes the console's answer honest: "revoked" on an
+    // account with no sessions is a different fact from "revoked 3".
+    const sql = `UPDATE user_sessions SET revoked_at = $1
+                  WHERE user_id = $2 AND revoked_at IS NULL
+                  RETURNING id`;
+    if (audit === undefined) {
+      const rows = await this.q(sql, [revokedAt, userId]);
+      return rows.length;
+    }
+    return withTransaction(this.pool, async (q) => {
+      const rows = await q(sql, [revokedAt, userId]);
+      // The audit row is written even when nothing was live: "an administrator
+      // pressed revoke-all on this account at this time" is itself the fact an
+      // investigation needs, and it is recorded in after_state.
+      await audit(q);
+      return rows.length;
+    });
+  }
+
+  async verifyEmailOnce(
+    userId: string,
+    verifiedAt: Date,
+    audit?: AuditWrite,
+  ): Promise<UserRecord | null> {
+    return this.mutateUser(
+      `UPDATE users SET email_verified_at = $1, updated_at = $1
+        WHERE id = $2 AND email_verified_at IS NULL
+        RETURNING *`,
+      [verifiedAt, userId],
+      audit,
+    );
+  }
+
+  async listDevices(userId: string): Promise<readonly DeviceRecord[]> {
+    const rows = await this.q(
+      `SELECT id::text, user_id::text, fingerprint, first_seen, last_seen
+         FROM user_devices
+        WHERE user_id = $1
+        ORDER BY last_seen DESC, id DESC`,
+      [userId],
+    );
+    return rows.map((r: Record<string, unknown>) => ({
+      id: String(r["id"]),
+      userId: String(r["user_id"]),
+      fingerprint: String(r["fingerprint"]),
+      firstSeen: iso(r["first_seen"] as Date | string),
+      lastSeen: iso(r["last_seen"] as Date | string),
+    }));
   }
 
   async getEmailPreferences(userId: string): Promise<EmailPreferences> {

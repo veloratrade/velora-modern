@@ -26,6 +26,7 @@ import { handleAttachmentRoutes } from "../attachments/attachmentRoutes.js";
 import { handleBillingRoutes } from "../billing/billingRoutes.js";
 import { handleAiCoachRoutes } from "../aicoach/aiCoachRoutes.js";
 import { handleAdminRoutes } from "../admin/adminRoutes.js";
+import { handleAdminConsoleRoutes } from "../admin/adminConsoleRoutes.js";
 import { handlePortfolioRoutes } from "../portfolio/portfolioRoutes.js";
 import { handleEaRoutes } from "../ea/eaRoutes.js";
 import { handleTenancyRoutes } from "../tenancy/tenancyRoutes.js";
@@ -57,6 +58,7 @@ const ROUTE_HANDLERS: readonly ExtendedRouteHandler[] = [
   handleBillingRoutes,
   handleAiCoachRoutes,
   handleAdminRoutes,
+  handleAdminConsoleRoutes,
   handlePortfolioRoutes,
   handleEaRoutes,
   handleTenancyRoutes,

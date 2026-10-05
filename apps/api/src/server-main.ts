@@ -17,6 +17,7 @@
 // gate rejects that configuration outright). PERSISTENCE=postgres boots the
 // real-PostgreSQL adapters (Phase D D2): `pg` is a declared apps/api
 // dependency and the four Pg* stores in this tree are the durable adapters.
+import { readdirSync } from "node:fs";
 import { createApp, listen } from "./kernel/server.js";
 import { assertBootable, BootError } from "./kernel/boot.js";
 import { AuthService } from "./auth/authService.js";
@@ -83,6 +84,8 @@ import { AttachmentService, PgAttachmentStore, LocalAttachmentStorage } from "./
 import { PgSubscriptionStore } from "./billing/subscriptionService.js";
 import { PgAiCoachStore } from "./aicoach/aiCoachRoutes.js";
 import { PgAdminStore } from "./admin/adminRoutes.js";
+import { PgAdminConsoleStore } from "./admin/adminConsoleStore.js";
+import { AdminConsoleService } from "./admin/adminConsoleService.js";
 import { PgPortfolioStore } from "./portfolio/portfolioRoutes.js";
 import { PgEaStore } from "./ea/eaRoutes.js";
 import { PgTenancyStore } from "./tenancy/tenancyRoutes.js";
@@ -230,6 +233,8 @@ async function main(): Promise<void> {
     subscriptions?: import("./billing/subscriptionService.js").SubscriptionStore;
     aiCoach?: import("./aicoach/aiCoachRoutes.js").AiCoachStore;
     admin?: import("./admin/adminRoutes.js").AdminStore;
+    /** Phase 6 — the admin console (overview, analytics, health, feeds, per-user). */
+    adminConsole?: import("./admin/adminConsoleRoutes.js").AdminConsoleCapability;
     portfolio?: import("./portfolio/portfolioRoutes.js").PortfolioStore;
     ea?: import("./ea/eaRoutes.js").EaStore;
     eaSync?: import("./ea/eaRoutes.js").SyncTriggerPort;
@@ -449,6 +454,19 @@ async function main(): Promise<void> {
     capabilities.subscriptions = new PgSubscriptionStore(q);
     capabilities.aiCoach = new PgAiCoachStore(q);
     capabilities.admin = new PgAdminStore(q);
+    // Phase 6: the admin console. It reuses the SAME AdminUserService the
+    // kernel's user routes use (`capabilities.adminUsers`, constructed above with
+    // the ownership resolver and the audit store) so the console cannot hold a
+    // second, differently-guarded copy of the per-user operations.
+    if (capabilities.adminUsers !== undefined) {
+      capabilities.adminConsole = {
+        console: new AdminConsoleService({
+          store: new PgAdminConsoleStore(q, countMigrationManifest()),
+          users: capabilities.adminUsers,
+        }),
+        users: capabilities.adminUsers,
+      };
+    }
     capabilities.portfolio = new PgPortfolioStore(q);
     capabilities.ea = new PgEaStore(q);
     capabilities.tenancy = new PgTenancyStore(q);
@@ -739,3 +757,22 @@ async function main(): Promise<void> {
 }
 
 void main();
+
+/**
+ * How many migrations this BUILD expects, read from `db/migrations/*.sql`.
+ *
+ * Read at boot rather than hard-coded so the number cannot drift from what the
+ * repository actually ships, and returns `null` when the directory is not
+ * readable from this process — the console then reports the migration component
+ * as UNKNOWN instead of inventing an expectation. That distinction matters: a
+ * process that cannot see the manifest must not claim the schema is current.
+ */
+function countMigrationManifest(): number | null {
+  try {
+    const dir = new URL("../../../db/migrations", import.meta.url);
+    const files = readdirSync(dir).filter((f) => f.endsWith(".sql"));
+    return files.length;
+  } catch {
+    return null;
+  }
+}
