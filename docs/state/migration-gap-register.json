@@ -338,16 +338,23 @@
       "id": "MG-METAAPI-ASSEMBLY",
       "section": "B",
       "title": "MetaAPI per-fill trade assembly (entry=exit price, volume=OUT fill, contract_size=1, single timestamp, DO NOTHING convergence) — implementation brief prepared 2026-09-26 (docs/reconciliation/METAAPI_POSITION_ASSEMBLY_BRIEF.md); owner decisions OD-M-PA-1…3 pending",
-      "status": "OPEN",
+      "status": "PARTIAL",
       "priority": "P1",
-      "verification_state": "STATIC",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§9.2"
       ],
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
         "apps/worker/src/metaapi/syncRepository.ts",
-        "docs/reconciliation/METAAPI_POSITION_ASSEMBLY_BRIEF.md"
+        "docs/reconciliation/METAAPI_POSITION_ASSEMBLY_BRIEF.md",
+        "packages/domain/src/metaApiPositionAssembly.ts",
+        "packages/domain/src/metaApiPositionAssembly.test.ts",
+        "db/migrations/0029_metaapi_position_assembly.sql",
+        "apps/worker/src/metaapi/positionReconciler.ts",
+        "db/tests/metaapiAssembly.pg.test.ts",
+        "ops/metaapi/retirePerFillTrades.ts",
+        "docs/state/CHANGE_LOG.md#AC-28"
       ],
       "decisions": [
         "OD-M-PA-1",
@@ -356,7 +363,8 @@
       ],
       "closure_criteria": "Position-level volume-weighted assembly + convergence path, verified",
       "related": [],
-      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC."
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC.",
+      "notes": "IMPLEMENTED 2026-10-05 (AC-28) per the implementation brief §4: one trade per POSITION (pos-<positionId> key), VWAP prices at bcmath scale 8, Σ-IN volume, IN+OUT financial sums, earliest-IN/latest-OUT boundaries, terminal-vs-repairable skip state machine in sync_position_state (0029) with the sync_fills append-only control NOT relaxed; self-healing for pre-0029 fills; OD-M-PA-1/2/3 adopted per their recorded recommendations PENDING OWNER RATIFICATION. Verified: 19/19 domain golden vectors; 8/8 assembly battery on real PG 17.11; 13/13 metaapiSync battery; full local battery 1282/1282. Remaining: LIVE provider round trip (NOT_VERIFIED — no credentials) + owner ratification."
     },
     {
       "id": "MG-WORKER-DEPLOY",
@@ -387,28 +395,30 @@
       "id": "MG-SEC-COOKIE",
       "section": "B",
       "title": "Refresh cookie: __Host- prefix lost, SameSite Strict→Lax, body acceptance (S1)",
-      "status": "OPEN",
+      "status": "CLOSED",
       "priority": "P1",
-      "verification_state": "STATIC",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§10.2 S1"
       ],
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
-        "apps/api/src/kernel/server.ts"
+        "apps/api/src/kernel/server.ts",
+        "apps/api/src/auth/authRoutes.test.ts"
       ],
       "decisions": [],
       "closure_criteria": "__Host- prefix + SameSite=Strict restored; body acceptance removed; regression tests",
       "related": [],
-      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC."
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC.",
+      "notes": "CLOSED 2026-10-05 (AC-28): __Host-velora_refresh + SameSite=Strict landed with the telegram lineage (SEC-04); the remaining S1 sub-issue — token accepted from the request body — is removed (cookie-only, matching Legacy whose body exchange was a time-boxed 7-day window, AuthController.php:352-386) and Legacy's 128-char cap is ported. Evidence: authRoutes 12/12 incl. the S1 proof (valid token body-only → 401 REFRESH_COOKIE_MISSING). HUMAN REVIEW of this auth change is flagged per AGENTS.md rule 7."
     },
     {
       "id": "MG-SEC-CSP",
       "section": "B",
       "title": "CSP release pinning/manifest lost; Math.random() nonce fallback (S2)",
-      "status": "OPEN",
+      "status": "PARTIAL",
       "priority": "P1",
-      "verification_state": "STATIC",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§10.2 S2"
       ],
@@ -419,7 +429,8 @@
       "decisions": [],
       "closure_criteria": "Pinning model decided and implemented; weak-entropy fallback removed",
       "related": [],
-      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC."
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC.",
+      "notes": "Math.random() nonce fallback REMOVED 2026-10-05 (AC-28) — fail-closed 503 instead of a predictable nonce. Remaining: the release pinning/manifest model is owner-gated (OD pinning model)."
     },
     {
       "id": "MG-SEC-HSTS",
@@ -443,22 +454,25 @@
       "id": "MG-SEC-EDGE-AUTHZ",
       "section": "B",
       "title": "No edge authorization boundary for 11 legacy-protected HTML routes (S5)",
-      "status": "OPEN",
+      "status": "PARTIAL",
       "priority": "P1",
-      "verification_state": "NOT_VERIFIED",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§10.2 S5"
       ],
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
-        "apps/web/src/proxy.ts"
+        "apps/web/src/proxy.ts",
+        "apps/web/src/lib/auth/protectedRoutes.ts",
+        "apps/web/src/lib/auth/protectedRoutes.test.ts"
       ],
       "decisions": [
         "OD-AC-R8"
       ],
       "closure_criteria": "Edge boundary reproduced or owner accepts client-side gating in writing",
       "related": [],
-      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/NOT_VERIFIED, domain=OPEN/NOT_VERIFIED."
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/NOT_VERIFIED, domain=OPEN/NOT_VERIFIED.",
+      "notes": "The server-side edge gate EXISTS on the integrated tree (telegram lineage SEC-04: session probe with fail-closed timeout + role gate + login redirects; protectedRoutes unit tests green in the merged-tree battery). Register row re-audited 2026-10-05 (was stale OPEN/absent). Remaining: R8 owner decision (markets/news/support public vs protected) and browser-level verification of every gated route."
     },
     {
       "id": "MG-ADMIN",
@@ -708,19 +722,26 @@
       "id": "MG-AUTH-EVENTS",
       "section": "B",
       "title": "No auth_events/login-history recording",
-      "status": "OPEN",
+      "status": "PARTIAL",
       "priority": "P2",
-      "verification_state": "STATIC",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§11.5"
       ],
       "evidence": [
-        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "db/migrations/0024_auth_events.sql",
+        "apps/api/src/auth/authEventStore.ts",
+        "apps/api/src/auth/pgAuthEventStore.ts",
+        "apps/api/src/auth/authEvents.test.ts",
+        "apps/api/src/kernel/loginHistoryRoutes.test.ts",
+        "db/tests/pgAuthEvents.pg.test.ts"
       ],
       "decisions": [],
       "closure_criteria": "Event recording + admin data source",
       "related": [],
-      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC."
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC.",
+      "notes": "auth_events recording EXISTS on the integrated tree (telegram lineage SEC-02/03: 0024 migration, append-only store with anti-enumeration NULL-user semantics, login-history surface, tests green in the merged-tree local + real-PG batteries). Register row re-audited 2026-10-05 (was stale OPEN). Remaining: per-user login history admin follow-up (AC-16 annotation) + human sign-off for CLOSED."
     },
     {
       "id": "MG-METAAPI-CADENCE",
@@ -1082,8 +1103,6 @@
         "AC-10"
       ],
       "evidence": [
-        "tools/pg-smoke.ts (expected migration set now discovered from db/migrations/)",
-        "npx tsx tools/pg-smoke.ts → S1–S9 ALL PASSED on fresh PostgreSQL 16.15, 23/23 migrations, re-run no-op (2026-10-04)",
         "tools/pg-smoke.ts"
       ],
       "decisions": [
@@ -1091,7 +1110,11 @@
       ],
       "closure_criteria": "MET 2026-10-04 (AC-10)",
       "related": [],
-      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=CLOSED/CURRENT_RUNTIME_VERIFIED, domain=CLOSED/STATIC."
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=CLOSED/CURRENT_RUNTIME_VERIFIED, domain=CLOSED/STATIC.",
+      "evidence_note": [
+        "tools/pg-smoke.ts (expected migration set now discovered from db/migrations/)",
+        "npx tsx tools/pg-smoke.ts → S1–S9 ALL PASSED on fresh PostgreSQL 16.15, 23/23 migrations, re-run no-op (2026-10-04)"
+      ]
     },
     {
       "id": "MG-TG-4",
@@ -1104,17 +1127,21 @@
         "AC-10"
       ],
       "evidence": [
-        "apps/api/src/telegram/telegramBot.ts (withinJournalBudget / withinAnalyzeBudget, checked BEFORE the download and the model call)",
-        "apps/api/src/telegram/telegramBot.ts fetchBytes (declared-size pre-check, 5 MiB) + telegramApi.ts downloadFile (post-check retained)",
-        "apps/api/src/telegram/telegramRoutes.ts TELEGRAM_WEBHOOK_MAX_BODY_BYTES = 256 KiB → 400 VALIDATION_FAILED",
-        "tests: 6 new bot-wiring tests + 1 webhook bound assertion; each fails without its fix",
-        "SECURITY.md §7 key→call-site table; ADR-018 Amendment 1"
+        "apps/api/src/telegram/telegramBot.ts",
+        "apps/api/src/telegram/telegramRoutes.ts"
       ],
       "decisions": [
         "Contract rate-limit VALUES unchanged — nothing loosened to make a test pass.",
         "No new error code invented for the webhook bound; the kernel's existing oversized-body contract is reused."
       ],
-      "closure_criteria": "MET 2026-10-04 (AC-10)"
+      "closure_criteria": "MET 2026-10-04 (AC-10)",
+      "evidence_note": [
+        "apps/api/src/telegram/telegramBot.ts (withinJournalBudget / withinAnalyzeBudget, checked BEFORE the download and the model call)",
+        "apps/api/src/telegram/telegramBot.ts fetchBytes (declared-size pre-check, 5 MiB) + telegramApi.ts downloadFile (post-check retained)",
+        "apps/api/src/telegram/telegramRoutes.ts TELEGRAM_WEBHOOK_MAX_BODY_BYTES = 256 KiB → 400 VALIDATION_FAILED",
+        "tests: 6 new bot-wiring tests + 1 webhook bound assertion; each fails without its fix",
+        "SECURITY.md §7 key→call-site table; ADR-018 Amendment 1"
+      ]
     },
     {
       "id": "MG-TG-1",
