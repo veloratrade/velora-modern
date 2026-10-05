@@ -121,7 +121,11 @@ export default function TradesPage() {
     swap: form.swap,
     stopLoss: form.stopLoss.trim() === "" ? null : form.stopLoss,
   });
-  const previewNet = preview.status === "ok" ? preview.result.netPnl : null;
+  // "ok" and "undefined-risk" both carry netPnl (a no-SL trade still has a
+  // previewable net); only "out-of-range" (MG-RANGE-GUARD, legacy assertFits)
+  // has none — the server would 422 that trade, so the preview shows "—".
+  const previewNet =
+    preview.status === "ok" && preview.result.kind !== "out-of-range" ? preview.result.netPnl : null;
   const previewR = preview.status === "ok" && preview.result.kind === "ok" ? preview.result.rMultiple : null;
   const previewReason =
     preview.status === "ok" && preview.result.kind === "undefined-risk" ? preview.result.reason : null;

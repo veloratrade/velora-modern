@@ -41,6 +41,11 @@ test("commission and swap are COSTS: they reduce the previewed net, never inflat
   assert.equal(withCosts.status, "ok");
   assert.equal(withoutCosts.status, "ok");
   if (withCosts.status !== "ok" || withoutCosts.status !== "ok") return;
+  // Vector A carries a stop loss, so both previews are fully-resolved "ok"
+  // results (PnlResult is a union since MG-RANGE-GUARD — narrow before reading).
+  assert.equal(withCosts.result.kind, "ok");
+  assert.equal(withoutCosts.result.kind, "ok");
+  if (withCosts.result.kind !== "ok" || withoutCosts.result.kind !== "ok") return;
   assert.equal(withoutCosts.result.netPnl, "500.00");
   assert.equal(withCosts.result.netPnl, "488.00"); // 500 − 10 − 2
 });
