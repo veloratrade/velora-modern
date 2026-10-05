@@ -1,0 +1,510 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-05",
+  "source_audit": "docs/audits/2026-10-04-CAPABILITY-AUDIT-legacy-to-modern.md",
+  "git": {
+    "modern_head": "d5710fe (phase 7 — the AI capability's API slice; the web surface is the next commit)",
+    "modern_branch": "feat/telegram-journal-client",
+    "legacy_ref": "edede31"
+  },
+  "status_vocabulary": [
+    "MISSING",
+    "UI_ONLY",
+    "BACKEND_ONLY",
+    "PARTIAL",
+    "IMPLEMENTED",
+    "VERIFIED",
+    "LEGACY_ONLY",
+    "INTENTIONALLY_NOT_MIGRATED"
+  ],
+  "counts": {
+    "VERIFIED": 13,
+    "IMPLEMENTED": 8,
+    "PARTIAL": 13,
+    "MISSING": 9,
+    "UI_ONLY": 1,
+    "LEGACY_ONLY": 2,
+    "INTENTIONALLY_NOT_MIGRATED": 2,
+    "BACKEND_ONLY": 5
+  },
+  "capabilities": [
+    {
+      "id": "ACC-01",
+      "area": "account",
+      "capability": "Register + e-mail verification gate",
+      "status": "VERIFIED",
+      "legacy_evidence": "POST /auth/register 5/3600, verify-email 20/900, resend 4/3600; users.email_verified_at",
+      "modern_evidence": "UI /register,/verify-email; API register/verify-email/resend-verification; email_verifications; login 401 EMAIL_NOT_VERIFIED; 14 auth test files",
+      "next_action": "none"
+    },
+    {
+      "id": "ACC-02",
+      "area": "account",
+      "capability": "Sign in / refresh / sign out",
+      "status": "IMPLEMENTED",
+      "legacy_evidence": "auth/login 8/300, refresh 30/300, logout; auth_events",
+      "modern_evidence": "POST /auth/login|refresh|logout; user_sessions refresh-token hash; Secure cookie; auth tests",
+      "next_action": "none"
+    },
+    {
+      "id": "ACC-03",
+      "area": "account",
+      "capability": "Forgot / reset password",
+      "status": "IMPLEMENTED",
+      "legacy_evidence": "forgot 4/3600, reset 6/3600; password_resets",
+      "modern_evidence": "POST /auth/forgot-password|reset-password; password_resets; UI pages both locales",
+      "next_action": "none"
+    },
+    {
+      "id": "ACC-04",
+      "area": "account",
+      "capability": "Change own password (user-facing)",
+      "status": "VERIFIED",
+      "legacy_evidence": "form on /profile + POST /auth/change-password 8/900",
+      "modern_evidence": "Phase 1: /settings → Security change-password form over POST /auth/change-password. Browser-verified on a production build (wrong current password → localized error; success → all sessions revoked → /login). Unit: authService.test.ts 21/21. Screenshot 04.",
+      "next_action": null
+    },
+    {
+      "id": "ACC-05",
+      "area": "account",
+      "capability": "Profile page (identity overview)",
+      "status": "VERIFIED",
+      "legacy_evidence": "/profile page with identity, member since, role",
+      "modern_evidence": "Phase 1: /profile renders the REAL identity from GET /auth/me (full name, e-mail, role, plan, member-since in Jalali, timezone) and points editing at /settings. Browser-verified fa+en, desktop+mobile, no overflow. Screenshots 01/06/08/12.",
+      "next_action": null
+    },
+    {
+      "id": "ACC-06",
+      "area": "account",
+      "capability": "Profile data fields (full name, timezone)",
+      "status": "PARTIAL",
+      "legacy_evidence": "users.first_name,last_name,full_name,timezone",
+      "modern_evidence": "RE-VERIFIED 2026-10-04 (the first audit pass was WRONG here): migration 0002_identity_capability.sql ALREADY adds users.full_name + users.timezone; register accepts both and GET /auth/me returns them (curl-verified on live PG); 0022 adds first_name,last_name,locale_source,locale_updated_at. Only first_name/last_name are Legacy-only, and no Legacy UI string consumes them.",
+      "next_action": "None for the migrated fields. first_name/last_name have no consumer and stay deliberately unmigrated unless a future requirement needs them."
+    },
+    {
+      "id": "ACC-07",
+      "area": "account",
+      "capability": "Locale preference persisted per user",
+      "status": "VERIFIED",
+      "legacy_evidence": "users.locale,locale_source,locale_updated_at; PATCH /auth/me/preferences via velora-localization.js",
+      "modern_evidence": "Phase 1: locale select in /settings → Preferences writes PATCH /auth/me/preferences {locale} and records locale_source='user' + locale_updated_at (raw row asserted: db/tests/pgUserStore.pg.test.ts 6/6 on PG 16.15). Browser-verified EN→FA switch navigates to the fa route with RTL. Screenshot 09.",
+      "next_action": null
+    },
+    {
+      "id": "ACC-08",
+      "area": "account",
+      "capability": "AI processing consent",
+      "status": "VERIFIED",
+      "legacy_evidence": "toggle on /profile → users.ai_consent_at; UserAIConsentRepository",
+      "modern_evidence": "Phase 1: /settings → Preferences consent pill + toggle over PATCH /auth/me/preferences {ai_consent}. The row shows the SERVER's answer (no optimistic state); browser-verified toggle inactive→active and back, session copy updated. Screenshot 03 area.",
+      "next_action": null
+    },
+    {
+      "id": "ACC-09",
+      "area": "account",
+      "capability": "E-mail category preferences (6)",
+      "status": "VERIFIED",
+      "legacy_evidence": "GET/PUT /auth/email-preferences; 6 keys",
+      "modern_evidence": "Phase 1: /settings → 6 email categories over GET/PUT /auth/email-preferences with Legacy's merge semantics; partial PUT persists and survives reload (browser-verified), raw row asserted on PG.",
+      "next_action": null
+    },
+    {
+      "id": "ACC-10",
+      "area": "account",
+      "capability": "User sessions/devices admin view",
+      "status": "MISSING",
+      "legacy_evidence": "admin sessions/devices/login-history/revoke-sessions",
+      "modern_evidence": "user_sessions/user_devices tables only",
+      "next_action": "Fold into ADM-01"
+    },
+    {
+      "id": "ACC-11",
+      "area": "account",
+      "capability": "Admin create/invite/verify user",
+      "status": "MISSING",
+      "legacy_evidence": "POST /admin/users, /users/invitations, /users/{id}/verify-email",
+      "modern_evidence": "—",
+      "next_action": "Fold into ADM-01"
+    },
+    {
+      "id": "SEC-01",
+      "area": "security",
+      "capability": "RBAC vocabulary + enforcement",
+      "status": "PARTIAL",
+      "legacy_evidence": "24 P_* permissions in Role.php (18 admin / 24 super_admin), enforced per route, fail-closed can()",
+      "modern_evidence": "docs/security/RBAC-CAPABILITY-MAP.md answers for all 24 with meaning/owner/enforcement/evidence + guard test rbacCapabilityMap.test.ts 5/5; **12 of 24 ENFORCED** in code after phases 5-6 (overview.view, users.view, suspend+activate merged→users.manage_status, users.change_role, users.verify_email, audit.view (split: security feeds on audit.view, the trail read on admin.panel.access so there is ONE implementation), audit.view_sensitive, system.health.view, communication.view→support.tickets.view, communication.reply→support.tickets.manage, analytics.view) + 3 Modern-only permissions (rbac.self.view, admin.panel.access, rbac.matrix.view). The other 12 are PARTIAL (users.manage_subscription, users.create, billing.view, integrations.view), MISSING (system.logs.view) or NOT DECLARED because Modern has no substrate to guard yet (settings ×2, feature_flags ×2, integrations.manage, aiManage, aiRouteManage) — a permission with nothing to guard would be a fabricated authorization surface.",
+      "next_action": "A capability brings its permission with it: phase 7 (AI) declares aiManage/aiRouteManage, phase 8 declares integrations.*, phase 9 declares feature_flags.* + settings.* + billing.view, each with its grant row, enforcement point and test in the same commit, moving its map row to ENFORCED."
+    },
+    {
+      "id": "SEC-02",
+      "area": "security",
+      "capability": "Rate limiting on expensive routes",
+      "status": "PARTIAL",
+      "legacy_evidence": "33 RateLimiter::hit calls: 15 at PHP dispatch (per-IP) + 18 inside admin/AI/support controllers (incl. per-USER ai-*-user-{id})",
+      "modern_evidence": "All 15 dispatcher routes that EXIST in Modern are throttled at Legacy's exact numbers: 8 auth buckets + accounts:metaapi-connect 5/900 + accounts:detect-server 20/900 + webhooks:metaapi 120/60 + admin:user-action 30/300 on the two PATCH mutations Legacy limited in setStatus/setRole; THROTTLED_PATTERN_ROUTES + throttleKeyFor() single lookup; rateLimitRoutes.test.ts 17/17 incl. behavioural 429s and the shared-bucket case",
+      "next_action": "Remaining Legacy buckets land WITH their routes: metaapi-sync (no Modern sync route), ai-analyze/report/feedback (AI phase), admin-* controller buckets (admin phase). No key is declared for a route that does not exist."
+    },
+    {
+      "id": "SEC-03",
+      "area": "security",
+      "capability": "Auth events / login history",
+      "status": "VERIFIED",
+      "legacy_evidence": "api/database/schema.sql auth_events + AuthService write sites 135/349/373 + AuthEventRepository + admin logins/signups + login-history route (api/index.php:243)",
+      "modern_evidence": "auth_events (0024, applied); event_type/result closed vocabularies + CHECK reason-only-on-failure; NULL user_id for unknown account (address never stored); fail-open write (logged) vs fail-loud read; GET /api/v1/admin/users/{id}/login-history gated by users.view with 404/400/503 contracts and ip/UA omitted from the body unless super_admin|System Owner; append-only privileges in db/roles.sql. Batteries: authEvents 5/5, loginHistoryRoutes 5/5, pgAuthEvents.pg 4/4, readinessSchema 5/5",
+      "next_action": "None for the login/signup surface. Legacy's admin security listings (logins/signups pages) remain part of the admin phase; the data they need now exists."
+    },
+    {
+      "id": "SEC-04",
+      "area": "security",
+      "capability": "Session/cookie/CSP/HSTS/edge authz hardening",
+      "status": "VERIFIED",
+      "legacy_evidence": "Response.php __Host-velora_refresh + SameSite=Strict; .htaccess:49 HSTS max-age=31536000; locale-router.php protected-route session check with 302+no-store and admin role gate, fail closed; .htaccess HTML cache private,max-age=0,must-revalidate; CSP manifest verification",
+      "modern_evidence": "Cookie renamed to __Host-velora_refresh with Path=/; HttpOnly; Secure; SameSite=Strict and the legacy name cleared (chromium-accepted, browser-verified); Legacy's exact HSTS on API + web; edge gate in proxy.ts via read-only GET /api/v1/auth/session (route battery 6/6) refusing anonymous (302→/{locale}/login+no-store) and non-panel /admin (302→/{locale}/dashboard), failing closed when the probe cannot answer; ADR-009 route class D (private, no-store) now actually applied; rotation made atomic by compare-and-swap (concurrency asserted on real PG); protectedRoutes.test.ts 7/7 pins the protected/public split including the R8 delta for markets/news",
+      "next_action": "ADR-005 item 9 second half (reuse detection → revoke the token family + security event) needs rotation history (family_id/previous hash) and belongs with phase-4 schema work; today a replayed rotated token is refused but not escalated. /markets + /news remain public per the frozen PUBLIC_ROUTES contract (owner decision R8)."
+    },
+    {
+      "id": "TRD-01",
+      "area": "trading",
+      "capability": "Trade journal CRUD + exits + symbols",
+      "status": "VERIFIED",
+      "legacy_evidence": "GET/POST/PUT/DELETE /trades, exits, symbols",
+      "modern_evidence": "kernel routes incl. regex matchers; trades/trade_events/trade_exits; optimistic concurrency (If-Match/version); 4 test files; UI /trades",
+      "next_action": "none"
+    },
+    {
+      "id": "TRD-02",
+      "area": "trading",
+      "capability": "Manual trade entry UI",
+      "status": "PARTIAL",
+      "legacy_evidence": "/trades/new full form + symbol icons + emotion picker",
+      "modern_evidence": "/trades real form persisting POST /trades; missing contract/commission/swap + iconography",
+      "next_action": "Add remaining numeric fields if parity required (design-preserving)"
+    },
+    {
+      "id": "TRD-03",
+      "area": "trading",
+      "capability": "Screenshot import (OCR)",
+      "status": "MISSING",
+      "legacy_evidence": "POST /trades/extract-screenshot + velora-smart-import.js; trade_screenshots, ai_extractions",
+      "modern_evidence": "audited 2026-10-04: nothing on the Modern side. Legacy pipeline read end to end — POST /trades/extract-screenshot: 8/300 per user, max 4 images (8 MiB each / 16 MiB total, ≤12 MP, PNG/JPEG/WebP verified against the declared type), 30 s deadline, AI_FEATURE_DISABLED flag, consent gate, Tesseract fallback, sha256 dedup, ai_extractions + ai_audit_logs rows (hash only, never the image), and the 501 OCR_UNAVAILABLE answer when no engine exists; the wizard (velora-smart-import.js) validates, compresses and maps the result into the trade form.",
+      "next_action": "Phase 7 (AI): the endpoint's core deliverable is `texts` + `times` produced by a DETERMINISTIC OCR engine, so it depends on an OCR engine this host does not have (no tesseract binary). Design the deterministic-first contract + ingest half (image validation, feature flag, dedup, audit, quota, job lifecycle) here in phase 3 and wire the engine as the fail-closed dependency (MG-AI-OCR)."
+    },
+    {
+      "id": "TRD-04",
+      "area": "trading",
+      "capability": "Trade list filters/sort parity",
+      "status": "PARTIAL",
+      "legacy_evidence": "legacy list params enforced in controller/repository",
+      "modern_evidence": "modern list + own contract; divergences incl. r_multiple scale 4 vs 8",
+      "next_action": "MG-API-CONTRACT-DIVERGENCE + MG-RMULTIPLE-SCALE decisions"
+    },
+    {
+      "id": "TRD-05",
+      "area": "trading",
+      "capability": "Connect MT account (provisioning)",
+      "status": "PARTIAL",
+      "legacy_evidence": "POST /accounts/connect-metaapi 5/900, detect-server 20/900, DELETE /accounts/{id}",
+      "modern_evidence": "3-step POST /accounts → /credentials → /accounts/{id}/metaapi/connect; disconnect; timezone; DELETE; real /accounts UI",
+      "next_action": "Live MetaAPI run + assembly parity (MG-METAAPI-ASSEMBLY)"
+    },
+    {
+      "id": "TRD-06",
+      "area": "trading",
+      "capability": "Sync: cadence, manual trigger, visibility",
+      "status": "IMPLEMENTED",
+      "legacy_evidence": "POST /accounts/{id}/sync 20/300, GET sync-status; hourly cron; sync_jobs",
+      "modern_evidence": "GET /accounts/{id}/sync-status; POST /accounts/{id}/sync (20/300) → ManualSyncService + shared syncWindow contract; pg-boss descriptor dispatched to the real queue; web control on /accounts; manualSyncService.test 8, migratedRoutes 3, rateLimitRoutes 1, contracts/syncWindow 6, db/tests/manualSync.pg 4; 16/16 runtime checks on real PostgreSQL; hourly tick + webhook ingress share the same window",
+      "next_action": "Worker service deployed (MG-WORKER-DEPLOY) — otherwise a queued job has no consumer in production; cadence decision (MG-METAAPI-CADENCE)"
+    },
+    {
+      "id": "TRD-07",
+      "area": "trading",
+      "capability": "Dashboard summary/equity/strategies",
+      "status": "PARTIAL",
+      "legacy_evidence": "GET /dashboard/summary|equity-curve|strategies",
+      "modern_evidence": "/dashboard real via analytics/*; no dashboard/* API; no strategies endpoint",
+      "next_action": "Decide dashboard semantics source; add strategies if kept"
+    },
+    {
+      "id": "TRD-08",
+      "area": "performance",
+      "capability": "Performance analytics surface",
+      "status": "MISSING",
+      "legacy_evidence": "/performance static content page (no API)",
+      "modern_evidence": "analytics/* API + aggregates migrations exist; /analytics thin, /performance shell",
+      "next_action": "Build /performance or retire shell (owner decision)"
+    },
+    {
+      "id": "TRD-09",
+      "area": "wallet",
+      "capability": "Wallet / cloud-wallet view",
+      "status": "UI_ONLY",
+      "legacy_evidence": "wallet page hard-coded demo equity, no API",
+      "modern_evidence": "/wallet shell",
+      "next_action": "Owner decision: build from account equity or retire shell"
+    },
+    {
+      "id": "TRD-10",
+      "area": "content",
+      "capability": "Blog/legal/404 content surfaces",
+      "status": "LEGACY_ONLY",
+      "legacy_evidence": "blog x6, privacy, terms, 404",
+      "modern_evidence": "—",
+      "next_action": "Content-only; no behaviour to migrate"
+    },
+    {
+      "id": "TRD-11",
+      "area": "content",
+      "capability": "Markets/news informational pages",
+      "status": "LEGACY_ONLY",
+      "legacy_evidence": "static pages with 23–28 i18n keys, no data source",
+      "modern_evidence": "/markets,/news shells",
+      "next_action": "Content-only; shells are placeholders, not migrations"
+    },
+    {
+      "id": "TRD-12",
+      "area": "integration",
+      "capability": "Telegram journal client",
+      "status": "IMPLEMENTED",
+      "legacy_evidence": "(Modern-only capability)",
+      "modern_evidence": "ADR-018, 0023 migration, telegram handlers, /settings section, 6 test files, rate limits, caps",
+      "next_action": "Live Bot API verification (MG-TG-1)"
+    },
+    {
+      "id": "TRD-13",
+      "area": "platform",
+      "capability": "Copy trading / EA / developer API / tenancy",
+      "status": "INTENTIONALLY_NOT_MIGRATED",
+      "legacy_evidence": "absent in Legacy",
+      "modern_evidence": "0019–0021 + routes + tests",
+      "next_action": "Not parity work; excluded from counts"
+    },
+    {
+      "id": "AI-01",
+      "area": "ai",
+      "capability": "Analyze my trades",
+      "status": "BACKEND_ONLY",
+      "legacy_evidence": "POST /ai/analyze-trades 10/3600; AI/Analysis; ai_analysis, ai_jobs, provider chain",
+      "modern_evidence": "ai-coach latest-insights only (different meaning) Phase 7 delivered the server side: POST /api/v1/ai/{analyze-trades,weekly-report,feedback} + GET /ai/{attempts,status} on the chain-walking AiManager (flag gate → chain → deadline → consent → ONE atomic quota reservation → fail-closed image anonymization → call → validate → record), Legacy's own prompt templates and output whitelists, ownership-resolved trade_ids, and Legacy's rate limits (10/5/20 per hour). Tested 23/23 unit + 19/19 through the real kernel + 12/12 on real PostgreSQL 17.11. No user-facing surface yet: `/intelligence` is still a shell and the console has no AI tab, so this is BACKEND_ONLY rather than IMPLEMENTED.",
+      "next_action": "The web surface (phase 7's next slice) turns this into IMPLEMENTED; a live provider round trip stays NOT_VERIFIED until a credential exists."
+    },
+    {
+      "id": "AI-02",
+      "area": "ai",
+      "capability": "Weekly/monthly AI report",
+      "status": "BACKEND_ONLY",
+      "legacy_evidence": "POST /ai/weekly-report 5/3600; ai_reports; e-mail delivery",
+      "modern_evidence": "— Phase 7 delivered the server side: POST /api/v1/ai/{analyze-trades,weekly-report,feedback} + GET /ai/{attempts,status} on the chain-walking AiManager (flag gate → chain → deadline → consent → ONE atomic quota reservation → fail-closed image anonymization → call → validate → record), Legacy's own prompt templates and output whitelists, ownership-resolved trade_ids, and Legacy's rate limits (10/5/20 per hour). Tested 23/23 unit + 19/19 through the real kernel + 12/12 on real PostgreSQL 17.11.",
+      "next_action": "The web surface (phase 7's next slice) turns this into IMPLEMENTED; a live provider round trip stays NOT_VERIFIED until a credential exists."
+    },
+    {
+      "id": "AI-03",
+      "area": "ai",
+      "capability": "AI answer feedback",
+      "status": "BACKEND_ONLY",
+      "legacy_evidence": "POST /ai/feedback 20/3600; ai_feedback",
+      "modern_evidence": "— Phase 7 delivered the server side: POST /api/v1/ai/{analyze-trades,weekly-report,feedback} + GET /ai/{attempts,status} on the chain-walking AiManager (flag gate → chain → deadline → consent → ONE atomic quota reservation → fail-closed image anonymization → call → validate → record), Legacy's own prompt templates and output whitelists, ownership-resolved trade_ids, and Legacy's rate limits (10/5/20 per hour). Tested 23/23 unit + 19/19 through the real kernel + 12/12 on real PostgreSQL 17.11. Feedback stores a DERIVED changed_fields (0028 refuses a correction that changes nothing).",
+      "next_action": "The web surface (phase 7's next slice) turns this into IMPLEMENTED; a live provider round trip stays NOT_VERIFIED until a credential exists."
+    },
+    {
+      "id": "AI-04",
+      "area": "ai",
+      "capability": "Intelligence Q&A surface",
+      "status": "MISSING",
+      "legacy_evidence": "/intelligence with preset questions + free text",
+      "modern_evidence": "/intelligence shell",
+      "next_action": "Legacy's `/intelligence` is a demo: 27 keys of which most are simulated content (`pages.intelligence.simulatedAnswer`, \"72٪ نرخ برد\", \"✦ بهترین استراتژی هفته\") and the `assistant` feature has NO Legacy route. Modern will build the real surface over analyze/report/attempts + consent and will NOT reproduce the fabricated answers (mission: never fabricate)."
+    },
+    {
+      "id": "AI-05",
+      "area": "ai",
+      "capability": "AI coach insights + consent gate",
+      "status": "BACKEND_ONLY",
+      "legacy_evidence": "—",
+      "modern_evidence": "GET/POST /ai-coach/latest-insights, POST /ai-coach/consent, ai_coaching_logs (0017)",
+      "next_action": "Optional UI; not legacy parity"
+    },
+    {
+      "id": "SUP-01",
+      "area": "support",
+      "capability": "User support tickets",
+      "status": "IMPLEMENTED",
+      "legacy_evidence": "6 routes incl. messages/read/reopen; support_conversations/messages (v1.8) → modern support_tickets/support_messages; two server-derived axes (status + waiting_for), derived counters, first_reply_at sentinel; internal notes are super_admin-only and move NOTHING (a Legacy defect deliberately not reproduced)",
+      "modern_evidence": "0026_support_tickets.sql (2 tables, 3 functions, 5 CHECKs); SupportService + PgSupportStore/MemorySupportStore; user routes GET/POST /support/tickets[/{id}[/messages|/read|/reopen]]; RBAC support.tickets.view/manage (Legacy P_COMM_VIEW/P_COMM_REPLY → admin+super_admin); throttle support:write 20/300; page apps/web/src/app/(app)/support/page.tsx with the Legacy catalog copy; service 15/15, routes 10/10, real-PG 14/14, browser QA 29/29",
+      "next_action": "None for the user surface. The ADMIN half is phase 6 (admin console), and /translate + /copilot are phase 7 (AI, fail-closed)."
+    },
+    {
+      "id": "SUP-02",
+      "area": "support",
+      "capability": "Admin communication centre",
+      "status": "VERIFIED",
+      "legacy_evidence": "7 admin routes + translations + copilot draft",
+      "modern_evidence": "GET /api/v1/admin/communications/tickets (+?status&waiting_for&unread&q&page), GET /{id}, POST /{id}/messages {message, internal}, POST /{id}/status {action}; RBAC-gated support.tickets.view/manage; queue counters; real-PG battery covers filters, ILIKE escaping and CAS conflicts. The two AI routes (/translate, /copilot) are NOT wired here — phase 7 owns them and they must never be a stub. Re-proved in this session in a real browser against the production build + live API on PostgreSQL: queue → thread → operator reply → close → archive, with the thread offering only the transitions the service allows (docs/audits/phase6-ui/ 07-08).",
+      "next_action": "The AI assists (translate, copilot, copilot/draft) landed as API in phase 7 — gated by support.tickets.manage, degrading to available:false + a reason, and a draft is never sent. Their console buttons arrive with the phase-7 web slice."
+    },
+    {
+      "id": "ADM-01",
+      "area": "admin",
+      "capability": "Admin user management",
+      "status": "VERIFIED",
+      "legacy_evidence": "17 /admin/users* routes @edede31 (list, get, role, status, verify-email, sessions, devices, activity, create, invite, subscription, …), P_USERS_VIEW/SUSPEND/ACTIVATE/CHANGE_ROLE/VERIFY_EMAIL/CREATE",
+      "modern_evidence": "GET /api/v1/admin/users (filters+paging), GET /{id} (user360: identity, plans, telegram, sessions, devices, audit trail, support), PATCH /{id}/role, PATCH /{id}/status, POST /{id}/session-revocations (optional sessionId), POST /{id}/verify-email; AdminUserService guard order frozen (self→404→system_owner→privileged→super-admin peer→escalation→no-op→last super admin 409); RBAC users.view/manage_status/change_role/verify_email; adminConsoleRoutes 17/17, adminConsoleService 16/16, db/tests/adminConsole.pg.test.ts 14/14 Re-proved in this session against real PostgreSQL (db/tests/adminConsole.pg.test.ts 14/14, extendedCapabilities.pg 15/15) and in a real browser against the production build (docs/audits/phase6-ui/, 62/62): suspension, reactivation, e-mail verification and session revocation were driven through the UI and read back from the server.",
+      "next_action": "User creation/invitation stays NOT MIGRATED (invite policy = owner decision); per-user login history is a phase-6 follow-up. See docs/audits/2026-10-04-PHASE6-ADMIN-CAPABILITY-MAP.md §4."
+    },
+    {
+      "id": "ADM-02",
+      "area": "admin",
+      "capability": "Admin analytics/overview/billing",
+      "status": "PARTIAL",
+      "legacy_evidence": "6 analytics routes (users/trading/ai/operations/revenue), /admin/overview, 2 billing routes, 1 per-user subscription; P_ANALYTICS_VIEW, P_BILLING_VIEW",
+      "modern_evidence": "GET /api/v1/admin/overview (composed Overview tab) + GET /api/v1/admin/analytics with five range presets (today/7d/30d/90d/all) over users, trading, telegram and support; RBAC overview.view + analytics.view; counts only — no money is invented where Modern has no ledger (Legacy's own revenueUnavailable() precedent)",
+      "next_action": "Billing/revenue/subscription surfaces + the ai/operations/revenue analytics blocks are phase 9 (no subscription ledger view in Modern yet)."
+    },
+    {
+      "id": "ADM-03",
+      "area": "admin",
+      "capability": "Admin system surface",
+      "status": "PARTIAL",
+      "legacy_evidence": "75 /api/v1/admin/* route statements across 19 segments @edede31 (reproducible parse of api/index.php 109–251): users 17, integrations 12, ai 10, communications 7, analytics 6, settings 3, system 3, billing 2, feature-flags 2, logs 2, providers 2, security 2, ai-usage 1, config 1, me 1, overview 1, permissions 1, trades 1, trading-accounts 1",
+      "modern_evidence": "Migrated: audit logs (filters + before/after state), security feeds (signups/logins, sensitive-gated by audit.view_sensitive), system health (nine attested components; unbuilt = not_applicable + phase reason, never a green check), RBAC matrix (rbac.matrix.view, super_admin-only), metrics. NOT migrated with owners: AI (phase 7), integrations/worker/e-mail + A2 logs (phase 8), flags/settings/billing/log viewer (phase 9 or no reader yet), user create+invite (owner decision) Phase 7 added the AI part of this surface: 21 admin routes (overview, chain CRUD + reorder, flags with rollout, quotas, route show/save/clear, relay show/save/clear, credential replace/delete, verify + test-connection, usage drilldown) gated by aiManage (read) and aiRouteManage (super-admin-only writes), and the RBAC map moved rows 23-24 toward ENFORCED. Still not migrated: settings, feature flags outside AI, the log viewer, /admin/config/effective and /admin/analytics/ai.",
+      "next_action": "Phase 7 (AI) → phase 8 (integrations/worker/e-mail) → phase 9 (flags/settings/billing). Each stays recorded as not-migrated with its dependency; never widened silently (AC-14 precedent)."
+    },
+    {
+      "id": "ADM-04",
+      "area": "admin",
+      "capability": "Admin console UI",
+      "status": "VERIFIED",
+      "legacy_evidence": "admin/v2/index.html + admin/index.html, 15 modules, fa admin chunk 454 keys (user360 85, ai 80, analytics 69, integrations 37, billing 35, flags 33, system 29, logs 21, security 14, relay 13)",
+      "modern_evidence": "apps/web/src/app/(app)/admin/page.tsx — seven tabs (overview, users 360, support queue, audit, security, system health, analytics) on the real console API; messages/{fa,en}/admin.json 148 keys each (119 byte copies of Legacy's own admin vocabulary + 29 authored adminConsole.*); canonical classes only (card/kpi/btn-*/badge*/table/empty), no inline styles, enum labels mapped with raw fallback; i18n+design guard apps/web/src/i18n/adminSurface.test.ts 8/8; next build renders /admin and /en/admin Re-proved in this session in a real browser against the production build + live API on PostgreSQL 17 (docs/audits/phase6-ui/, 62/62 checks, 20 screenshots): permission-driven tabs for super_admin and admin, sensitive fields omitted AND labelled, honest not_applicable health states, fa/rtl + en/ltr, zero overflow at 1440/390/320, keyboard focus, 503 → localized failure. Three defects the run found were fixed before the phase was called done (mobile table overflow, raw enums in the Persian console, thread actions the service refuses).",
+      "next_action": "Modules whose substrate does not exist yet (AI, integrations, flags, settings, billing) are absent by design and named in the UI; they arrive with phases 7–9."
+    },
+    {
+      "id": "PLT-01",
+      "area": "platform",
+      "capability": "PostgreSQL single source of truth",
+      "status": "VERIFIED",
+      "legacy_evidence": "MySQL 46 tables",
+      "modern_evidence": "26 migrations, pg driver, PG stores; db/tests 33 files; 74 real-PG tests at HEAD",
+      "next_action": "none"
+    },
+    {
+      "id": "PLT-02",
+      "area": "platform",
+      "capability": "Legacy data migration/cutover",
+      "status": "IMPLEMENTED",
+      "legacy_evidence": "ADR-004 sampling blocked; unmapped tables",
+      "modern_evidence": "0025 financial guards (9 real-PG tests, fail-loud proof); tools/load_rehearsal.ts + A12 field-mapping gate (12 tests); rehearsal EXECUTED 2026-10-04 on a disposable PG: A-gates MAPPED/QUARANTINE/RECORDED, id-preserving load, exact row+money parity, gate 6 PnL recomputation 5/5",
+      "next_action": "real export + ADR-004 sampling decision (owner) → run the same harness"
+    },
+    {
+      "id": "PLT-03",
+      "area": "platform",
+      "capability": "Background workers/cron deployed",
+      "status": "PARTIAL",
+      "legacy_evidence": "api/workers + cron",
+      "modern_evidence": "apps/worker handlers + scheduler test; never deployed",
+      "next_action": "Deployment + proof of run (MG-WORKER-DEPLOY)"
+    },
+    {
+      "id": "PLT-04",
+      "area": "platform",
+      "capability": "Backup/restore + ops tooling",
+      "status": "IMPLEMENTED",
+      "legacy_evidence": "tools/ 86 PHP ops scripts",
+      "modern_evidence": "ops/backup/restore_drill.mjs + core (13 tests): real artifact db-backup-staging-20261004095454-bb023e0cab03 (32 926 B, sha256 b289558f…), restored in 343 ms, parity PASS 44 tables/49 numeric columns, smoke 11/11 against the restored copy → RESTORE_VERIFIED",
+      "next_action": "offsite upload + storage re-hash, then a scheduled drill on staging (MG-BACKUP-RESTORE)"
+    },
+    {
+      "id": "PLT-05",
+      "area": "platform",
+      "capability": "Localization coverage fa/en",
+      "status": "PARTIAL",
+      "legacy_evidence": "1,994 keys per locale",
+      "modern_evidence": "726 fa keys; 624 shared key names = 31.3%; 1,370 unmapped",
+      "next_action": "MG-I18N-COVERAGE"
+    },
+    {
+      "id": "PLT-06",
+      "area": "platform",
+      "capability": "Transactional e-mail types",
+      "status": "PARTIAL",
+      "legacy_evidence": "email_notifications, 10 types",
+      "modern_evidence": "2 of 10; no templates/CID/locale copy/delivery log",
+      "next_action": "MG-EMAIL-TYPES"
+    },
+    {
+      "id": "PLT-07",
+      "area": "domain",
+      "capability": "Jalali calendar, session engine, achievements",
+      "status": "MISSING",
+      "legacy_evidence": "JalaliCalendar, TradingSessionEngine, user_achievements",
+      "modern_evidence": "—",
+      "next_action": "MG-DOMAIN-LEGACY-ONLY"
+    },
+    {
+      "id": "PLT-08",
+      "area": "integration",
+      "capability": "Telegram journal client (alias of TRD-12)",
+      "status": "IMPLEMENTED",
+      "legacy_evidence": "—",
+      "modern_evidence": "see TRD-12",
+      "next_action": "see TRD-12"
+    },
+    {
+      "id": "PLT-09",
+      "area": "platform",
+      "capability": "In-app notifications",
+      "status": "MISSING",
+      "legacy_evidence": "notifications table",
+      "modern_evidence": "—",
+      "next_action": "Secondary"
+    },
+    {
+      "id": "PLT-10",
+      "area": "content",
+      "capability": "Marketing/blog/legal surfaces",
+      "status": "MISSING",
+      "legacy_evidence": "blog x6, privacy, terms",
+      "modern_evidence": "—",
+      "next_action": "Content-only"
+    },
+    {
+      "id": "PLT-11",
+      "area": "billing",
+      "capability": "Subscription / checkout",
+      "status": "PARTIAL",
+      "legacy_evidence": "checkout page; admin billing; no user billing API",
+      "modern_evidence": "GET/POST /subscriptions/me, POST /subscriptions/checkout, stripe webhook, subscriptions (0017); no page",
+      "next_action": "Billing surface decision + UI if kept"
+    },
+    {
+      "id": "PLT-12",
+      "area": "platform",
+      "capability": "The eight badged shells become real",
+      "status": "MISSING",
+      "legacy_evidence": "n/a",
+      "modern_evidence": "/profile /settings /trades /dashboard real; /support real (Phase 5); /admin real (Phase 6: seven permission-driven tabs on the console API, fa+en, 62/62 browser QA); /intelligence /markets /news /performance /wallet still shells",
+      "next_action": "/intelligence is phase 7 (AI); /performance + /wallet are phase 9; /markets + /news are LEGACY_ONLY content (TRD-11)"
+    },
+    {
+      "id": "PLT-13",
+      "area": "platform",
+      "capability": "Legacy PHP/MVC structural patterns",
+      "status": "INTENTIONALLY_NOT_MIGRATED",
+      "legacy_evidence": "entire PHP app",
+      "modern_evidence": "kernel dispatcher + services + PG",
+      "next_action": "Architecture is not a capability"
+    },
+    {
+      "id": "PLT-14",
+      "area": "platform",
+      "capability": "Third-party credential vault",
+      "status": "BACKEND_ONLY",
+      "legacy_evidence": "admin ai_provider_credentials",
+      "modern_evidence": "user_credentials (0010) + credentialService + credentialCrypto; UI only via /accounts METAAPI",
+      "next_action": "Optional admin UI"
+    }
+  ],
+  "notes": []
+}

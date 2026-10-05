@@ -31,7 +31,13 @@
 .app-content{padding:24px 20px;max-width:1200px;width:100%;margin:0 auto;}
 .app-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:15;border:none;}
 @media (max-width: 900px){
+  /* The drawer is anchored with a LOGICAL inset (inline-start) but was hidden
+     with a PHYSICAL transform: in RTL `inset-inline-start:0` puts it on the
+     right while `translateX(-100%)` pushed it 260px to the LEFT — i.e. straight
+     over the content instead of off-canvas. The RTL override moves it out the
+     other side, so "closed" means closed in both directions. */
   .app-sidebar{position:fixed;inset-inline-start:0;top:0;transform: translateX(-100%);transition: transform .2s;box-shadow: 0 12px 40px rgba(0,0,0,.5);}
+  [dir="rtl"] .app-sidebar{transform: translateX(100%);}
   .app-sidebar.drawer-open{transform: translateX(0);}
   .tb-toggle{display:grid;place-items:center;}
   .app-content{padding:16px 14px;}

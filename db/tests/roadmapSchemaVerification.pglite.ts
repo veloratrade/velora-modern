@@ -42,10 +42,12 @@ try {
   const uB = String((await engine.query("INSERT INTO users(email,password_hash) VALUES('b@x.ir','h') RETURNING id")).rows[0]!.id);
   const acctA = String((await engine.query("INSERT INTO trading_accounts(user_id, external_account_id, metaapi_account_id) VALUES($1,'AA-1','mp-acc-a') RETURNING id", [uA])).rows[0]!.id);
   const acctB = String((await engine.query("INSERT INTO trading_accounts(user_id, external_account_id) VALUES($1,'BB-1') RETURNING id", [uB])).rows[0]!.id);
-  const trA = String((await engine.query(`INSERT INTO trades(user_id,account_id,symbol,direction,entry_price,volume,occurred_at)
-      VALUES($1,$2,'XAUUSD','buy',2350.5,1.0, now()) RETURNING id`, [uA, acctA])).rows[0]!.id);
-  const trB = String((await engine.query(`INSERT INTO trades(user_id,account_id,symbol,direction,entry_price,volume,occurred_at)
-      VALUES($1,$2,'EURUSD','sell',1.08,1.0, now()) RETURNING id`, [uB, acctB])).rows[0]!.id);
+  // OPEN: fixtures for the 0015..0022 surfaces (tags, attachments, ownership);
+  // 0025 requires a CLOSED row to carry exit/PnL/close, which these do not claim.
+  const trA = String((await engine.query(`INSERT INTO trades(user_id,account_id,symbol,direction,status,entry_price,volume,occurred_at)
+      VALUES($1,$2,'XAUUSD','buy','OPEN',2350.5,1.0, now()) RETURNING id`, [uA, acctA])).rows[0]!.id);
+  const trB = String((await engine.query(`INSERT INTO trades(user_id,account_id,symbol,direction,status,entry_price,volume,occurred_at)
+      VALUES($1,$2,'EURUSD','sell','OPEN',1.08,1.0, now()) RETURNING id`, [uB, acctB])).rows[0]!.id);
 
   // --- 0015 tags ----------------------------------------------------------
   const tagA = String((await engine.query("INSERT INTO tags(user_id,name,kind) VALUES($1,'Fair Value Gap','SETUP') RETURNING id", [uA])).rows[0]!.id);

@@ -19,10 +19,11 @@ import { createHash, randomBytes } from "node:crypto";
 import type { PasswordHasher } from "@velora/domain";
 import { verifyAndRehash } from "@velora/domain";
 import { passwordSchema } from "@velora/contracts";
-import type { UserStore, UserRecord, EmailPreferences } from "./userStore.js";
+import type { UserStore, UserRecord, SessionRecord, EmailPreferences } from "./userStore.js";
 import { DEFAULT_EMAIL_PREFERENCES } from "./userStore.js";
 import type { JwtService, JwtPayload } from "./jwt.js";
 import type { MailPort } from "../mail/mailPort.js";
+import type { AuthEventStore, AuthEventFailureReason } from "./authEventStore.js";
 
 export const ACCESS_TOKEN_TTL_SECONDS = 900;
 export const REFRESH_TOKEN_TTL_SECONDS = 2_592_000;
@@ -103,6 +104,31 @@ export interface AuthDeps {
   readonly mail: MailPort;
   /** Base URL used to build verification/reset links (no trailing slash). */
   readonly appOrigin?: string;
+  /**
+   * Authentication-attempt history (SEC-03, migration 0024).
+   *
+   * OPTIONAL BY DESIGN: the Service is fully functional without it, because a
+   * history recorder must never be able to break authentication — the same
+   * fail-open posture Legacy documented. When present, the recorder swallows its
+   * own errors; when absent, no attempt history is kept and nothing else changes.
+   */
+  readonly authEvents?: AuthEventStore;
+}
+
+/**
+ * The three codes that mean "the caller failed to authenticate" — as opposed to
+ * a database outage or a programming error. Only these become history rows.
+ * The `satisfies` ties this list to the port's own union, so adding a reason to
+ * one side without the other is a build error rather than a silent drift.
+ */
+const AUTH_FAILURE_CODES = new Set<string>([
+  "INVALID_CREDENTIALS",
+  "ACCOUNT_INACTIVE",
+  "EMAIL_NOT_VERIFIED",
+] satisfies AuthEventFailureReason[]);
+
+function isAuthFailureCode(code: string): code is AuthEventFailureReason {
+  return AUTH_FAILURE_CODES.has(code);
 }
 
 function sha256(data: string): string {
@@ -147,6 +173,8 @@ export class AuthService {
     fullName?: string | undefined;
     timezone?: string | undefined;
     locale?: "fa" | "en" | undefined;
+    ipAddress?: string | undefined;
+    userAgent?: string | undefined;
   }): Promise<{
     verificationRequired: true;
     email: string;
@@ -199,6 +227,9 @@ export class AuthService {
       fullName: (input.fullName ?? "").trim(),
       timezone: input.timezone ?? "UTC",
       locale: input.locale ?? "fa",
+      // Legacy AuthService: a registration that carried an explicit UI locale
+      // records locale_source='user'; otherwise the column default stands.
+      ...(input.locale !== undefined ? { localeSource: "user" as const } : {}),
       now,
     });
     const token = this.newVerificationToken();
@@ -210,6 +241,17 @@ export class AuthService {
     });
     // Phase 3B-1: actually dispatch the token the flow already minted.
     await this.sendVerificationMail(user.email, token);
+    // SEC-03: registration is the second of Legacy's two recorded events
+    // ('signup', success). It is recorded for the NEW account only — the
+    // resend path above is not a signup and is deliberately not recorded, the
+    // same distinction Legacy drew.
+    await this.recordAuthEvent({
+      userId: user.id,
+      eventType: "signup",
+      result: "success",
+      ipAddress: input.ipAddress ?? null,
+      userAgent: input.userAgent ?? null,
+    });
     return { verificationRequired: true, email };
   }
 
@@ -243,50 +285,163 @@ export class AuthService {
     userAgent?: string | undefined;
   }): Promise<TokenPair> {
     const email = input.email.trim().toLowerCase();
-    const user = await this.deps.store.findUserByEmail(email);
-    if (user === null) {
+    // The whole authentication decision is wrapped so EVERY refusal is recorded
+    // with the code the caller received — the point of the history is the
+    // refused attempt, and a recorded reason that disagrees with the response
+    // would be worse than no record at all (SEC-03). `found` carries the user
+    // row when one matched, so an unknown address records user_id = NULL exactly
+    // as Legacy did: the attempted address itself is NEVER stored.
+    let found: UserRecord | null = null;
+    try {
+      found = await this.deps.store.findUserByEmail(email);
+      const user = found;
+      if (user === null) {
+        throw new AuthError(401, "INVALID_CREDENTIALS", "Invalid credentials.");
+      }
+
+      // S5 boundary: verify + transparent rehash, persisted through the store.
+      const result = await verifyAndRehash(this.deps.hasher, input.password, user.passwordHash);
+      if (!result.verified) {
+        throw new AuthError(401, "INVALID_CREDENTIALS", "Invalid credentials.");
+      }
+      if (result.rehashNeeded && result.newHash !== undefined) {
+        await this.deps.store.updateUserPasswordHash(user.id, result.newHash, this.now());
+      }
+
+      if (user.status !== "active") {
+        throw new AuthError(401, "ACCOUNT_INACTIVE", "Account is inactive.");
+      }
+      if (user.emailVerifiedAt === null) {
+        throw new AuthError(401, "EMAIL_NOT_VERIFIED", "Email verification required.");
+      }
+    } catch (err) {
+      // Only the three authentication refusals are history: an infrastructure
+      // error is not an attempt outcome and must not be recorded as one.
+      if (err instanceof AuthError && isAuthFailureCode(err.code)) {
+        await this.recordAuthEvent({
+          userId: found?.id ?? null,
+          eventType: "login",
+          result: "failure",
+          reason: err.code,
+          ipAddress: input.ipAddress ?? null,
+          userAgent: input.userAgent ?? null,
+        });
+      }
+      throw err;
+    }
+
+    // Unreachable when the try completed (a null user throws inside it and the
+    // catch rethrows), but stated explicitly so the type is narrowed honestly
+    // instead of asserted.
+    if (found === null) {
       throw new AuthError(401, "INVALID_CREDENTIALS", "Invalid credentials.");
     }
 
-    // S5 boundary: verify + transparent rehash, persisted through the store.
-    const result = await verifyAndRehash(this.deps.hasher, input.password, user.passwordHash);
-    if (!result.verified) {
-      throw new AuthError(401, "INVALID_CREDENTIALS", "Invalid credentials.");
-    }
-    if (result.rehashNeeded && result.newHash !== undefined) {
-      await this.deps.store.updateUserPasswordHash(user.id, result.newHash, this.now());
-    }
+    await this.recordAuthEvent({
+      userId: found.id,
+      eventType: "login",
+      result: "success",
+      ipAddress: input.ipAddress ?? null,
+      userAgent: input.userAgent ?? null,
+    });
+    return this.issueTokenPair(found, input.ipAddress, input.userAgent);
+  }
 
-    if (user.status !== "active") {
-      throw new AuthError(401, "ACCOUNT_INACTIVE", "Account is inactive.");
+  /**
+   * Append one authentication event. NEVER throws — see AuthDeps.authEvents.
+   * The store's own fail-open policy is the first line; this guard keeps a
+   * throwing implementation (a test double, a future adapter) from breaking
+   * authentication as well.
+   */
+  private async recordAuthEvent(input: Parameters<AuthEventStore["record"]>[0]): Promise<void> {
+    const store = this.deps.authEvents;
+    if (store === undefined) return;
+    try {
+      await store.record(input);
+    } catch {
+      // Swallowed by contract: history must never break authentication.
     }
-    if (user.emailVerifiedAt === null) {
-      throw new AuthError(401, "EMAIL_NOT_VERIFIED", "Email verification required.");
-    }
-    return this.issueTokenPair(user, input.ipAddress, input.userAgent);
   }
 
   /** Refresh with rotation (Remote-verified semantics + error codes). */
+  /**
+   * SEC-04 — the ONE place that decides whether a refresh token is a live
+   * session. It is a READ: it never rotates, never writes, never records.
+   *
+   * Two callers need this answer for different reasons and must never disagree:
+   *  - `refresh()` continues a session (rotates) and needs to name WHY it
+   *    refused, because those codes are part of the public auth contract;
+   *  - `sessionProbe()` only reports whether the edge may serve authenticated
+   *    HTML, and must never pay the cost of a rotation.
+   *
+   * Returning a discriminated state (instead of throwing here) is what lets the
+   * probe stay silent about reasons — an unauthenticated visitor learns nothing
+   * about which check failed, exactly like Legacy's protected-route gate.
+   */
+  private async sessionState(refreshToken: string): Promise<
+    | { readonly kind: "missing" }
+    | { readonly kind: "invalid" }
+    | { readonly kind: "expired" }
+    | { readonly kind: "inactive" }
+    | { readonly kind: "active"; readonly session: SessionRecord; readonly user: UserRecord }
+  > {
+    if (refreshToken === "") return { kind: "missing" };
+    const session = await this.deps.store.findSessionByRefreshTokenHash(sha256(refreshToken));
+    if (session === null || session.revokedAt !== null) return { kind: "invalid" };
+    if (new Date(session.expiresAt) <= this.now()) return { kind: "expired" };
+    const user = await this.deps.store.findUserById(session.userId);
+    if (user === null || user.status !== "active") return { kind: "inactive" };
+    return { kind: "active", session, user };
+  }
+
   async refresh(
     refreshToken: string,
     ipAddress?: string | undefined,
     userAgent?: string | undefined,
   ): Promise<TokenPair> {
-    if (refreshToken === "") {
-      throw new AuthError(401, "REFRESH_COOKIE_MISSING", "Refresh cookie is missing.");
+    const state = await this.sessionState(refreshToken);
+    switch (state.kind) {
+      case "missing":
+        throw new AuthError(401, "REFRESH_COOKIE_MISSING", "Refresh cookie is missing.");
+      case "invalid":
+        throw new AuthError(401, "INVALID_TOKEN", "Invalid token.");
+      case "expired":
+        throw new AuthError(401, "SESSION_EXPIRED", "Session expired.");
+      case "inactive":
+        throw new AuthError(401, "ACCOUNT_INACTIVE", "Account is inactive.");
+      default:
+        // The raw token is passed along so the rotation can be a compare-and-swap
+        // against the exact value this caller presented (SEC-04).
+        return this.issueTokenPair(state.user, ipAddress, userAgent, {
+          id: state.session.id,
+          refreshToken,
+        });
     }
-    const session = await this.deps.store.findSessionByRefreshTokenHash(sha256(refreshToken));
-    if (session === null || session.revokedAt !== null) {
-      throw new AuthError(401, "INVALID_TOKEN", "Invalid token.");
-    }
-    if (new Date(session.expiresAt) <= this.now()) {
-      throw new AuthError(401, "SESSION_EXPIRED", "Session expired.");
-    }
-    const user = await this.deps.store.findUserById(session.userId);
-    if (user === null || user.status !== "active") {
-      throw new AuthError(401, "ACCOUNT_INACTIVE", "Account is inactive.");
-    }
-    return this.issueTokenPair(user, ipAddress, userAgent, session);
+  }
+
+  /**
+   * SEC-04 edge gate: is the presented refresh cookie a live session, and what
+   * may the holder's shell render?
+   *
+   * READ-ONLY BY CONTRACT. This exists because Legacy's HTML layer
+   * (`locale-router.php`) validated the session against the database BEFORE
+   * serving a protected page and redirected to the login page otherwise —
+   * including when the check could not be completed (fail closed). Modern's web
+   * layer holds no database credentials by design, so the validity question has
+   * to be asked over HTTP; asking it with `refresh()` would rotate the caller's
+   * token on every page view and spend the 30/300 refresh bucket, so the edge
+   * gets this dedicated, non-rotating read instead.
+   *
+   * `role` is returned because the admin gate (non-panel role must never
+   * receive the admin shell) is decided by the same response. It is the
+   * caller's OWN role; nothing about anyone else is exposed.
+   */
+  async sessionProbe(refreshToken: string): Promise<
+    { readonly authenticated: true; readonly role: string } | { readonly authenticated: false }
+  > {
+    const state = await this.sessionState(refreshToken);
+    if (state.kind !== "active") return { authenticated: false };
+    return { authenticated: true, role: state.user.role };
   }
 
   /** Logout: revoke the session bound to this refresh token (idempotent). */
@@ -320,7 +475,7 @@ export class AuthService {
     user: UserRecord,
     ipAddress: string | undefined,
     userAgent: string | undefined,
-    existingSession?: { id: string },
+    existingSession?: { id: string; refreshToken: string },
   ): Promise<TokenPair> {
     const accessToken = this.deps.jwt.sign(this.accessTokenClaims(user), ACCESS_TOKEN_TTL_SECONDS);
     const refreshToken = randomBytes(32).toString("hex"); // CSPRNG — never injectable
@@ -329,13 +484,23 @@ export class AuthService {
     const ua = userAgent === undefined ? null : userAgent.substring(0, USER_AGENT_MAX_CHARS);
 
     if (existingSession !== undefined) {
-      await this.deps.store.rotateSession(existingSession.id, {
-        refreshTokenHash: sha256(refreshToken),
-        accessTokenHash: sha256(accessToken),
-        ipAddress: ipAddress ?? null,
-        userAgent: ua,
-        expiresAt,
-      });
+      const rotated = await this.deps.store.rotateSession(
+        existingSession.id,
+        {
+          refreshTokenHash: sha256(refreshToken),
+          accessTokenHash: sha256(accessToken),
+          ipAddress: ipAddress ?? null,
+          userAgent: ua,
+          expiresAt,
+        },
+        sha256(existingSession.refreshToken),
+      );
+      if (!rotated) {
+        // SEC-04: somebody else rotated this token first. Handing the caller a
+        // pair the store does not know would be a silent failure one request
+        // later, so it is refused here, with the same code a stale token gets.
+        throw new AuthError(401, "INVALID_TOKEN", "Invalid token.");
+      }
     } else {
       await this.deps.store.createSession({
         userId: user.id,

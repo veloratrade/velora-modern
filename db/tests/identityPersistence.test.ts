@@ -259,13 +259,26 @@ class PgliteUserStore implements UserStore {
       userAgent: string | null;
       expiresAt: Date;
     },
-  ): Promise<void> {
-    await this.engine.query(
+    expectedRefreshTokenHash: string,
+  ): Promise<boolean> {
+    // SEC-04 compare-and-swap, mirroring PgUserStore: the test double must not be
+    // more permissive than the store it stands in for.
+    const rows = await this.engine.query(
       `UPDATE user_sessions
        SET refresh_token_hash = $1, access_token_hash = $2, ip_address = $3, user_agent = $4, expires_at = $5
-       WHERE id = $6`,
-      [input.refreshTokenHash, input.accessTokenHash, input.ipAddress, input.userAgent, input.expiresAt, id],
+       WHERE id = $6 AND refresh_token_hash = $7
+       RETURNING id`,
+      [
+        input.refreshTokenHash,
+        input.accessTokenHash,
+        input.ipAddress,
+        input.userAgent,
+        input.expiresAt,
+        id,
+        expectedRefreshTokenHash,
+      ],
     );
+    return rows.rows.length === 1;
   }
 
   async revokeSession(id: string, revokedAt: Date): Promise<void> {

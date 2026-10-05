@@ -143,6 +143,17 @@ REVOKE UPDATE, DELETE, TRUNCATE ON TABLE audit_log      FROM app_readwrite, velo
 REVOKE ALL                      ON TABLE audit_log      FROM velora_worker;
 GRANT  INSERT, SELECT           ON TABLE audit_log      TO   app_readwrite;
 
+-- `auth_events` (SEC-03, migration 0024) is the authentication-attempt history:
+-- an append-only security record of its own kind (see the migration header for
+-- why it is NOT audit_log). The API appends and reads it and must never be able
+-- to rewrite or erase history — same two-layer posture as audit_log: no
+-- update/delete method exists on the store port, and the privilege layer refuses
+-- them here. velora_worker gets no access at all: no background job records or
+-- reads authentication history.
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE auth_events    FROM app_readwrite, velora_worker;
+REVOKE ALL                      ON TABLE auth_events    FROM velora_worker;
+GRANT  INSERT, SELECT           ON TABLE auth_events    TO   app_readwrite;
+
 -- `sync_fills` (D-6, migration 0012) is the MetaAPI import ledger: one durable
 -- row per provider deal, which is what makes a replayed provider response
 -- converge instead of double-counting. Provider-reported facts are evidence and

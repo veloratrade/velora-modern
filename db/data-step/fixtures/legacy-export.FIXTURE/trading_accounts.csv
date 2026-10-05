@@ -1,0 +1,4 @@
+id,user_id,broker_server,account_number,account_type,platform,provider,label,currency,leverage,timezone,status,sync_status,balance,starting_balance,consecutive_errors,created_at
+1,1,,5011223,STANDARD,MT5,MT5,Fixture One · IC Markets,USD,1:100,Asia/Tehran,connected,CONNECTED,10000.00,10000.00,0,2026-01-10T08:00:00Z
+2,2,,6011447,STANDARD,MT4,MT4,Fixture Two · XM,USD,1:500,UTC,disconnected,DISCONNECTED,2500.00,2000.00,0,2026-01-11T08:00:00Z
+3,4,,7011998,STANDARD,MT5,MT5,Fixture Four · Pepperstone,USD,1:200,Asia/Tehran,connected,CONNECTED,5000.00,5000.00,1,2026-01-12T08:00:00Z

@@ -17,6 +17,7 @@
 // gate rejects that configuration outright). PERSISTENCE=postgres boots the
 // real-PostgreSQL adapters (Phase D D2): `pg` is a declared apps/api
 // dependency and the four Pg* stores in this tree are the durable adapters.
+import { readdirSync } from "node:fs";
 import { createApp, listen } from "./kernel/server.js";
 import { assertBootable, BootError } from "./kernel/boot.js";
 import { AuthService } from "./auth/authService.js";
@@ -24,6 +25,9 @@ import { JwtService } from "./auth/jwt.js";
 import { VeloraHasher } from "./auth/hashing.js";
 import { MemoryUserStore } from "./auth/memoryUserStore.js";
 import { PgUserStore } from "./auth/pgUserStore.js";
+import { PgAuthEventStore } from "./auth/pgAuthEventStore.js";
+import { MemoryAuthEventStore } from "./auth/memoryAuthEventStore.js";
+import type { AuthEventStore } from "./auth/authEventStore.js";
 import { AccountService } from "./accounts/accountService.js";
 import { MemoryAccountStore } from "./accounts/memoryAccountStore.js";
 import { PgAccountStore } from "./accounts/pgAccountStore.js";
@@ -43,6 +47,7 @@ import { PgOwnershipStore } from "./auth/pgOwnershipStore.js";
 import { MemoryAuditStore } from "./auth/memoryAuditStore.js";
 import { PgAuditStore } from "./auth/pgAuditStore.js";
 import { resolveCredentialKey } from "./credentials/credentialConfig.js";
+import { canAct } from "@velora/contracts";
 import { resolveMetaApiConfig } from "./metaapi/metaApiConfig.js";
 import { MetaApiProvisioningService } from "./metaapi/provisioningService.js";
 import { PgProvisioningStore } from "./metaapi/pgProvisioningStore.js";
@@ -71,16 +76,51 @@ import { PgWebhookEventStore } from "./webhooks/pgWebhookStore.js";
 import { PgBossSyncTrigger, DurableOnlySyncTrigger, type SyncTrigger } from "./webhooks/syncTrigger.js";
 import type { WebhookAccountRef } from "./webhooks/metaApiWebhookService.js";
 import { PgSyncStatusStore } from "./accounts/syncStatusService.js";
+import { ManualSyncService, PgManualSyncStore } from "./accounts/manualSyncService.js";
+import { makeSyncPendingMarker } from "./accounts/syncPending.js";
 import { PgAnalyticsStore } from "./analytics/analyticsStore.js";
 import { PgTagStore } from "./tags/tagService.js";
+import { PgSupportStore, SupportService } from "./support/supportService.js";
 import { AttachmentService, PgAttachmentStore, LocalAttachmentStorage } from "./attachments/attachmentService.js";
 import { PgSubscriptionStore } from "./billing/subscriptionService.js";
 import { PgAiCoachStore } from "./aicoach/aiCoachRoutes.js";
 import { PgAdminStore } from "./admin/adminRoutes.js";
+import { PgAdminConsoleStore } from "./admin/adminConsoleStore.js";
+// Phase 7 — the AI capability: configuration substrate, routing, the n8n relay,
+// the local OCR fallback, the chain walker and the two HTTP surfaces.
+import { PgAiConfigStore } from "./ai/aiConfigStore.js";
+import { AiSecretService } from "./ai/aiSecrets.js";
+import { AiRouteResolver } from "./ai/aiRouteResolver.js";
+import { AiFeatureRouter } from "./ai/aiFeatureRouter.js";
+import { AiFeatureGuard } from "./ai/aiFeatureGuard.js";
+import { UnavailableImageAnonymizer } from "./ai/imageAnonymizer.js";
+import { GeminiExecutor, TesseractExecutor, type AiExecutor } from "./ai/aiExecutors.js";
+import { AiManager } from "./ai/aiManager.js";
+import { AiAnalysisService } from "./ai/aiAnalysisService.js";
+import { PgAiLedger } from "./ai/aiLedger.js";
+import { AiAdminService } from "./ai/aiAdminService.js";
+import { TesseractProvider, findTesseractBinary } from "./ai/tesseractProvider.js";
+import type { AiCatalogProvider } from "./ai/aiCatalog.js";
+import { AdminConsoleService } from "./admin/adminConsoleService.js";
 import { PgPortfolioStore } from "./portfolio/portfolioRoutes.js";
 import { PgEaStore } from "./ea/eaRoutes.js";
 import { PgTenancyStore } from "./tenancy/tenancyRoutes.js";
 import { PgDeveloperStore } from "./developer/developerRoutes.js";
+// Telegram journal client (ADR-018 / migration 0023). Composed here like every
+// other migrated capability: one place where its dependencies are visible.
+import { resolveTelegramConfig } from "./telegram/telegramConfig.js";
+import { HttpTelegramBotApi } from "./telegram/telegramApi.js";
+import { PgTelegramStore } from "./telegram/pgTelegramStore.js";
+import { TelegramLinkService } from "./telegram/telegramLinkService.js";
+import { TelegramBot } from "./telegram/telegramBot.js";
+import { TelegramUpdatePipeline } from "./telegram/telegramUpdatePipeline.js";
+import { TelegramPoller } from "./telegram/telegramPoller.js";
+import { JournalApplicationService } from "./journal/journalApplicationService.js";
+import { JournalAnalysisService } from "./journal/journalAnalysisService.js";
+import { UnconfiguredMediaInterpreter, GeminiMediaInterpreter, type MediaInterpreter } from "./aicoach/mediaInterpreter.js";
+import { GeminiAiProvider } from "./aicoach/geminiProvider.js";
+import { AiCoachService } from "./aicoach/aiCoachService.js";
+import { PgAiAttemptStore, UnconfiguredAiProvider, AI_PROVIDERS } from "./aicoach/aiProvider.js";
 
 
 async function main(): Promise<void> {
@@ -136,6 +176,11 @@ async function main(): Promise<void> {
     });
   }
   const userStore = pool !== undefined ? new PgUserStore(pool) : new MemoryUserStore();
+  // SEC-03 — authentication-attempt history. Same posture as every other store:
+  // the real adapter on the PostgreSQL posture, the in-memory one otherwise, so
+  // dev and PG cannot diverge in behaviour.
+  const authEventStore: AuthEventStore =
+    pool !== undefined ? new PgAuthEventStore(pool) : new MemoryAuthEventStore();
   const accountStore = pool !== undefined ? new PgAccountStore(pool) : new MemoryAccountStore();
   // v2.5 COPY TRADING — the producer half of the dispatch pipeline.
   //
@@ -188,18 +233,30 @@ async function main(): Promise<void> {
     accounts?: AccountService;
     trades?: TradeService;
     adminUsers?: AdminUserService;
+    /** SEC-03 — authentication-attempt history (read surface + recorder). */
+    authEvents?: AuthEventStore;
     ownership?: OwnershipService;
     credentials?: CredentialService;
     provisioning?: MetaApiProvisioningService;
     // --- backend migration (directive t) ---
     webhooks?: MetaApiWebhookService;
     syncStatus?: import("./accounts/syncStatusService.js").SyncStatusStore;
+    /** TRD-06 — user-triggered MetaAPI sync (POST /accounts/{id}/sync). */
+    manualSync?: import("./accounts/manualSyncService.js").ManualSyncService;
     analytics?: import("./analytics/analyticsStore.js").AnalyticsStore;
     tags?: import("./tags/tagService.js").TagStore;
     attachments?: AttachmentService;
     subscriptions?: import("./billing/subscriptionService.js").SubscriptionStore;
     aiCoach?: import("./aicoach/aiCoachRoutes.js").AiCoachStore;
     admin?: import("./admin/adminRoutes.js").AdminStore;
+    /** Phase 6 — the admin console (overview, analytics, health, feeds, per-user). */
+    adminConsole?: import("./admin/adminConsoleRoutes.js").AdminConsoleCapability;
+    /** Phase 7 — the user-facing AI capability. */
+    ai?: import("./ai/aiRoutes.js").AiCapability;
+    /** Phase 7 — the admin AI configuration surface. */
+    aiAdmin?: import("./ai/aiAdminRoutes.js").AiAdminCapability;
+    /** Phase 7 — the support console's AI assists. */
+    supportAi?: import("./support/supportAiRoutes.js").SupportAiCapability;
     portfolio?: import("./portfolio/portfolioRoutes.js").PortfolioStore;
     ea?: import("./ea/eaRoutes.js").EaStore;
     eaSync?: import("./ea/eaRoutes.js").SyncTriggerPort;
@@ -207,6 +264,8 @@ async function main(): Promise<void> {
     tenancy?: import("./tenancy/tenancyRoutes.js").TenancyStore;
     developer?: import("./developer/developerRoutes.js").DeveloperStore;
     developerKeys?: import("./developer/developerAuth.js").DeveloperKeyAuth;
+    telegram?: import("./telegram/telegramRoutes.js").TelegramCapability;
+    support?: import("./support/supportService.js").SupportService;
   } = {};
   if (boot.jwtSecret !== undefined) {
     capabilities.auth = new AuthService({
@@ -214,6 +273,7 @@ async function main(): Promise<void> {
       hasher: new VeloraHasher(),
       jwt: JwtService.create(boot.jwtSecret),
       mail,
+      authEvents: authEventStore,
       // Verification/reset links must point at this environment's validated
       // origin (ADR-013); boot already guarantees it is present and canonical.
       appOrigin: boot.appOrigin,
@@ -251,6 +311,10 @@ async function main(): Promise<void> {
       getSystemOwnerUserId: async () => (await ownershipStore.getOwnership())?.ownerUserId ?? null,
       audit: auditStore,
     });
+    // SEC-03: the login-history read surface. Wired ONLY here (inside the
+    // auth-configured branch) so a deployment without authentication cannot
+    // expose an authentication-history endpoint.
+    capabilities.authEvents = authEventStore;
 
     // C-22 encrypted credential store. FAIL-CLOSED: without a valid
     // CREDENTIAL_MASTER_KEY the capability is simply ABSENT — it is never
@@ -412,10 +476,169 @@ async function main(): Promise<void> {
     capabilities.subscriptions = new PgSubscriptionStore(q);
     capabilities.aiCoach = new PgAiCoachStore(q);
     capabilities.admin = new PgAdminStore(q);
+    // Phase 6: the admin console. It reuses the SAME AdminUserService the
+    // kernel's user routes use (`capabilities.adminUsers`, constructed above with
+    // the ownership resolver and the audit store) so the console cannot hold a
+    // second, differently-guarded copy of the per-user operations.
+    if (capabilities.adminUsers !== undefined) {
+      capabilities.adminConsole = {
+        console: new AdminConsoleService({
+          store: new PgAdminConsoleStore(q, countMigrationManifest()),
+          users: capabilities.adminUsers,
+        }),
+        users: capabilities.adminUsers,
+      };
+    }
+    // ---------------------------------------------------------------------
+    // Phase 7 — AI. ONE substrate, ONE ledger, ONE chain walker.
+    //
+    // The composition order matters: secrets resolve per call (so an
+    // admin-saved key or relay config takes effect without a redeploy), the
+    // router asks the secrets whether a provider is usable, and the manager
+    // records every attempt — success, refusal and error — in the ledger 0017
+    // created and 0028 extended. Nothing here fabricates: with no credential
+    // the answer is a typed refusal, and the local OCR fallback is the only
+    // provider that works with no network at all.
+    // ---------------------------------------------------------------------
+    {
+      const aiConfig = new PgAiConfigStore(pool);
+      const aiMasterKey = resolveCredentialKey(process.env).key;
+      const envOf = (key: string): string | undefined => process.env[key];
+      const aiSecrets = new AiSecretService({ store: aiConfig, masterKey: aiMasterKey, env: envOf });
+      const aiRouteResolver = new AiRouteResolver({ store: aiConfig, env: envOf });
+      const tesseract = new TesseractProvider();
+      const aiRouter = new AiFeatureRouter({
+        store: aiConfig,
+        secrets: aiSecrets,
+        routes: aiRouteResolver,
+        env: envOf,
+        localOcrAvailable: () => tesseract.isAvailable(),
+      });
+      const aiGuard = new AiFeatureGuard({ store: aiConfig });
+      const aiAttempts = new PgAiAttemptStore(q);
+      const aiLedger = new PgAiLedger(q);
+      // The consent reader is the coach's own store: ONE consent column
+      // (users.ai_consent_at), one reader, no second notion of consent.
+      const aiConsent = capabilities.aiCoach ?? new PgAiCoachStore(q);
+      const aiExecutors: Partial<Record<AiCatalogProvider, AiExecutor>> = {
+        gemini: new GeminiExecutor({
+          apiKey: async () => (await aiSecrets.resolve("GEMINI_API_KEY")).value,
+          relayConfig: async () => ({
+            url: (await aiSecrets.resolve("GEMINI_RELAY_URL")).value,
+            token: (await aiSecrets.resolve("GEMINI_RELAY_TOKEN")).value,
+          }),
+        }),
+        tesseract: new TesseractExecutor({ provider: tesseract }),
+        // `openai` is in the ledger vocabulary (0017) but Modern has no
+        // transport for it: it is deliberately absent here, so the router
+        // reports it unavailable instead of the executor pretending.
+      };
+      const aiManager = new AiManager({
+        router: aiRouter,
+        guard: aiGuard,
+        store: aiConfig,
+        consent: aiConsent,
+        attempts: aiAttempts,
+        // No image library in this repository, so the anonymizer reports
+        // "cannot guarantee" — and the manager's fail-closed rule then keeps
+        // every image on this machine (local OCR) instead of sending an
+        // unredacted screenshot to a third party. See imageAnonymizer.ts.
+        anonymizer: new UnavailableImageAnonymizer(),
+        executors: aiExecutors,
+      });
+      const aiTradeStore = new PgTradeStore(pool);
+      capabilities.ai = {
+        analysis: new AiAnalysisService({
+          manager: aiManager,
+          store: aiConfig,
+          trades: {
+            findActiveByIdForUser: async (id, userId) => {
+              const row = await aiTradeStore.findActiveByIdForUser(id, userId);
+              return row === null ? null : {
+                id: row.id, symbol: row.symbol, direction: row.direction, status: row.status,
+                entryPrice: row.entryPrice, exitPrice: row.exitPrice, volume: row.volume,
+                netPnl: row.netPnl, rMultiple: row.rMultiple, stopLoss: row.stopLoss,
+                takeProfit: row.takeProfit, strategy: row.strategy, emotion: row.emotion,
+                openAtUtc: row.openAtUtc, closeAtUtc: row.closeAtUtc,
+              };
+            },
+          },
+          userLocale: async (userId) => {
+            const rows = await q("SELECT locale FROM users WHERE id = $1 LIMIT 1", [userId]);
+            const value = rows[0]?.["locale"];
+            return value === null || value === undefined ? null : String(value);
+          },
+        }),
+        config: aiConfig,
+        ledger: aiLedger,
+        consent: aiConsent,
+        guard: aiGuard,
+        providerConfigured: async () => (await aiRouter.buildDefaultChain(null)).entries.length > 0,
+      };
+      // The support console's assists share the SAME manager (one chain walker,
+      // one ledger, one consent rule) and answer to the support module's own
+      // permission, because they act on a ticket.
+      capabilities.supportAi = {
+        manager: aiManager,
+        ticket: async (ticketId: string) => {
+          // markRead:false — an AI assist must not have the side effect of
+          // marking a ticket read; that belongs to the operator opening it.
+          let view: Awaited<ReturnType<SupportService["supportTicket"]>>;
+          try {
+            view = await capabilities.support!.supportTicket(ticketId, { markRead: false });
+          } catch {
+            return null;
+          }
+          return {
+            id: view.conversation.id,
+            subject: view.conversation.subject,
+            status: view.conversation.status,
+            messages: view.messages.map((m) => ({
+              id: m.id, senderType: m.senderType, body: m.body, createdAt: m.createdAt,
+            })),
+          };
+        },
+        mayManage: async (routeCtx: import("./routes/types.js").ExtendedRouteContext) => {
+          const supportClaims = routeCtx.authenticate(routeCtx.req);
+          if (supportClaims === null) return false;
+          return canAct(
+            { role: supportClaims.role, isSystemOwner: await routeCtx.isSystemOwner(supportClaims.sub) },
+            "support.tickets.manage",
+          );
+        },
+      };
+      capabilities.aiAdmin = {
+        admin: new AiAdminService({
+          store: aiConfig,
+          secrets: aiSecrets,
+          routes: aiRouteResolver,
+          router: aiRouter,
+          guard: aiGuard,
+          anonymizer: new UnavailableImageAnonymizer(),
+          ledger: aiLedger,
+          executors: aiExecutors,
+          localOcrAvailable: () => tesseract.isAvailable(),
+          env: envOf,
+        }),
+      };
+      // One line at boot, no values: an operator reading the log can see whether
+      // the local OCR fallback is really there, which is the only AI provider
+      // whose availability this process can prove without a credential.
+      console.log(JSON.stringify({
+        level: "info",
+        event: "ai.composed",
+        tesseract: findTesseractBinary() !== null,
+        masterKey: aiMasterKey !== null,
+      }));
+    }
     capabilities.portfolio = new PgPortfolioStore(q);
     capabilities.ea = new PgEaStore(q);
     capabilities.tenancy = new PgTenancyStore(q);
     capabilities.developer = new PgDeveloperStore(q);
+    // Phase 5: the support ticket capability. The SERVICE wraps the store so the
+    // lifecycle rules (who may reply, what a reopen does, the note-never-moves
+    // rule) live in ONE place — the admin surface in phase 6 reuses it unchanged.
+    capabilities.support = new SupportService({ store: new PgSupportStore(q) });
     // v3.0 developer-key AUTHENTICATION. Its own lookup (hash → live key) and
     // the SAME durable limiter store the auth routes use, so the per-key
     // requests/minute limit holds across processes instead of per instance.
@@ -425,6 +648,48 @@ async function main(): Promise<void> {
       log: (event) => console.log(JSON.stringify(event)),
     });
 
+    // -----------------------------------------------------------------------
+    // ONE sync trigger for EVERY producer that can ask for a MetaAPI sync.
+    //
+    // There are three: the worker's scheduled tick (its own process), the
+    // webhook ingress, and — new in TRD-06 — the user-triggered
+    // POST /accounts/{id}/sync. They must hand the queue the SAME job shape and
+    // the SAME window, because the idempotency key `sync:{accountId}:{from}`
+    // only deduplicates jobs that agree on the window. The trigger used to be
+    // constructed inside the webhook block, which is why the ingress could
+    // drift to a 24-hour window while the tick asked for 12 months; it is now
+    // built once here and injected into both callers.
+    //
+    // Failure to start degrades to `DurableOnlySyncTrigger` (logged, code only —
+    // a queue error can carry a connection string). That is a DELAY, never a
+    // loss: the account is marked CONNECTING durably and the tick converges.
+    // -----------------------------------------------------------------------
+    let syncTrigger: SyncTrigger = new DurableOnlySyncTrigger();
+    const databaseUrl = boot.persistence.databaseUrl;
+    if (databaseUrl !== undefined) {
+      try {
+        syncTrigger = await PgBossSyncTrigger.create(databaseUrl);
+      } catch {
+        console.log(JSON.stringify({ level: "warn", event: "sync.trigger_unavailable" }));
+      }
+    }
+    console.log(JSON.stringify({ level: "info", event: "sync.trigger", trigger: syncTrigger.name }));
+
+    // The durable "awaiting sync" marker: ONE implementation, shared with the
+    // webhook ingress (see accounts/syncPending.ts for why it is conditional).
+    const markSyncPending = makeSyncPendingMarker(q);
+
+    // TRD-06 — the user-triggered sync the Legacy accounts page had and Modern
+    // did not. Wired whenever the database is: the queue is optional and the
+    // service says so truthfully in its `dispatched` field.
+    capabilities.manualSync = new ManualSyncService({
+      store: new PgManualSyncStore(q),
+      markSyncPending,
+      trigger: syncTrigger,
+      log: (event) => console.log(JSON.stringify(event)),
+    });
+    console.log(JSON.stringify({ level: "info", event: "accounts.manual_sync.enabled" }));
+
     // v0.2 webhook ingress. The SECRET decides whether the capability exists at
     // all: with no secret the route answers 503 WEBHOOK_SECRET_MISSING (the
     // Legacy contract), never an unverified accept. The secret is read through a
@@ -433,18 +698,6 @@ async function main(): Promise<void> {
     const webhookSecret = (process.env["METAAPI_WEBHOOK_SECRET"] ?? "").trim();
     if (webhookSecret !== "") {
       const webhookStore = new PgWebhookEventStore(pool);
-      let trigger: SyncTrigger = new DurableOnlySyncTrigger();
-      const databaseUrl = boot.persistence.databaseUrl;
-      if (databaseUrl !== undefined) {
-        try {
-          trigger = await PgBossSyncTrigger.create(databaseUrl);
-        } catch {
-          // Degradation, not failure: the event is already recorded durably and
-          // the worker's scheduled tick still converges. Code only in the log —
-          // never the connection string.
-          console.log(JSON.stringify({ level: "warn", event: "webhooks.sync_trigger_unavailable" }));
-        }
-      }
       capabilities.webhooks = new MetaApiWebhookService({
         store: webhookStore,
         secret: () => (process.env["METAAPI_WEBHOOK_SECRET"] ?? "").trim() || null,
@@ -463,22 +716,10 @@ async function main(): Promise<void> {
             syncCursor: row.sync_cursor === null ? null : String(row.sync_cursor),
           };
         },
-        markSyncPending: async (accountId) => {
-          // `sync_status` is constrained by 0004 to
-          // DISCONNECTED|CONNECTING|SYNCING|CONNECTED|ERROR. There is no
-          // "PENDING": the closest TRUE statement the vocabulary can make is
-          // CONNECTING ("not yet converged"), and the DURABLE record of the
-          // outstanding work is the webhook_events row plus the queued job — not
-          // this column. Writing an out-of-vocabulary value would be rejected by
-          // the engine (found by the real-PG battery).
-          await q(
-            "UPDATE trading_accounts SET sync_status = 'CONNECTING', updated_at = now() WHERE id = $1 AND sync_status NOT IN ('SYNCING', 'CONNECTED')",
-            [accountId],
-          );
-        },
-        trigger,
+        markSyncPending,
+        trigger: syncTrigger,
       });
-      console.log(JSON.stringify({ level: "info", event: "webhooks.enabled", trigger: trigger.name }));
+      console.log(JSON.stringify({ level: "info", event: "webhooks.enabled", trigger: syncTrigger.name }));
     } else {
       console.log(JSON.stringify({ level: "warn", event: "webhooks.secret_absent" }));
     }
@@ -503,6 +744,153 @@ async function main(): Promise<void> {
       console.log(JSON.stringify({ level: "info", event: "attachments.enabled", storage: "local-disk" }));
     } else {
       console.log(JSON.stringify({ level: "warn", event: "attachments.storage_absent" }));
+    }
+
+    // -----------------------------------------------------------------------
+    // Telegram journal client (ADR-018 / migration 0023).
+    //
+    // FAIL-CLOSED AND PARTIAL BY DESIGN. The capability is composed from what is
+    // actually configured, and every missing piece removes exactly the surface it
+    // belongs to:
+    //   * no bot token        → no Telegram capability at all (503 everywhere);
+    //   * no webhook secret   → no ingress (and `TELEGRAM_UPDATE_MODE=webhook`
+    //                           is refused by the resolver);
+    //   * no bot username or
+    //     no public app URL   → the bot runs, the web surface runs, but the
+    //                           onboarding button is unavailable and the API says
+    //                           so rather than returning a broken link;
+    //   * no update mode      → nobody consumes the stream (TG-006).
+    // The bot token itself is never logged, never placed on an error, and its
+    // `SecretValue` holder prints as `[redacted]`.
+    // -----------------------------------------------------------------------
+    const telegram = resolveTelegramConfig(process.env);
+    for (const finding of telegram.findings) {
+      // Finding CODE + fixed message only; the messages never embed a value.
+      console.log(JSON.stringify({ level: telegram.configured ? "warn" : "info", event: "telegram.finding", code: finding.code, message: finding.message }));
+    }
+    if (telegram.configured && telegram.botToken !== null) {
+      const telegramStore = new PgTelegramStore(pool);
+      const telegramApi = new HttpTelegramBotApi(telegram.botToken);
+      // The SAME append-only audit trail every other privileged mutation writes
+      // to (a second PgAuditStore over the same table — the store is stateless
+      // beyond its executor, so this is one trail, not two).
+      const telegramAudit = new PgAuditStore(pool);
+      const links = new TelegramLinkService({
+        store: telegramStore,
+        audit: telegramAudit,
+        botUsername: () => resolveTelegramConfig(process.env).botUsername,
+      });
+
+      // Profile lookups. Both are read per call: a user who changes their
+      // timezone or language sees the change on their next message.
+      const profileQuery = async (userId: string): Promise<{ locale: "fa" | "en"; timezone: string } | null> => {
+        const rows = await q("SELECT locale, timezone FROM users WHERE id = $1 LIMIT 1", [userId]);
+        const row = rows[0];
+        if (row === undefined) return null;
+        return { locale: row["locale"] === "en" ? "en" : "fa", timezone: String(row["timezone"] ?? "UTC") };
+      };
+
+      // ONE attempt ledger for the whole AI surface: coaching, journal
+      // extraction, transcription and vision all land in `ai_coaching_logs`
+      // tagged by `feature`, which is what makes the cost/outcome answerable in
+      // one query instead of several partial ones.
+      const attempts = new PgAiAttemptStore(q);
+      const consent = capabilities.aiCoach ?? new PgAiCoachStore(q);
+
+      // Journal analysis reuses the PLATFORM's coaching pipeline: consent gate,
+      // payload bound, provider port, output validation, durable attempt record.
+      // Nothing about that governance is re-implemented for Telegram.
+      const geminiKey = (process.env["GEMINI_API_KEY"] ?? "").trim();
+      const provider = geminiKey === "" ? undefined : new GeminiAiProvider({ apiKey: geminiKey });
+      const coach = new AiCoachService({
+        provider: provider ?? new UnconfiguredAiProvider(),
+        consent,
+        attempts,
+        allowedProviders: AI_PROVIDERS,
+      });
+
+      // Media interpretation is a SEPARATE capability with its own key decision:
+      // a deployment may enable journal analysis and decline voice/vision, and
+      // the bot degrades to "send it as text" instead of failing.
+      let interpreter: MediaInterpreter = new UnconfiguredMediaInterpreter();
+      if (geminiKey !== "") interpreter = new GeminiMediaInterpreter({ apiKey: geminiKey });
+
+      // A DEDICATED TradeService over the same durable ledger.
+      //
+      // WHY NOT REUSE `capabilities.trades`: that one is composed next to the
+      // HTTP auth capability and therefore exists only when a boot JWT secret
+      // does. The bot's write path must not depend on the presence of the HTTP
+      // login surface — the webhook ingress is unauthenticated by design, and a
+      // deployment that consumes updates but has no JWT secret still has to be
+      // able to journal (and to refuse to, explicitly, if it cannot). Both
+      // instances are thin wrappers over the SAME stores, so the ADR-002 fold,
+      // validation and event log are identical on either path.
+      const journalTrades = new TradeService({
+        store: new PgTradeStore(pool),
+        getUserTimezone: async (userId) => (await profileQuery(userId))?.timezone ?? "UTC",
+        verifyAccountOwnership: async (accountId, userId) =>
+          (await q("SELECT 1 FROM trading_accounts WHERE id = $1 AND user_id = $2 LIMIT 1", [accountId, userId])).length > 0,
+      });
+      const journal = new JournalApplicationService({
+        trades: journalTrades,
+        drafts: telegramStore,
+        getUserTimezone: async (userId) => (await profileQuery(userId))?.timezone ?? "UTC",
+      });
+
+      const bot = new TelegramBot({
+        api: telegramApi,
+        store: telegramStore,
+        links,
+        journal,
+        analysis: new JournalAnalysisService({ coach, journal }),
+        media: { interpreter, attempts },
+        attachments: capabilities.attachments,
+        // One durable limiter store across every process, so the limit a user
+        // hits does not depend on which replica answered.
+        limiter: new FixedWindowRateLimiter(rateLimitStore),
+        appUrl: () => resolveTelegramConfig(process.env).appUrl,
+        getUserLocale: async (userId) => (await profileQuery(userId))?.locale ?? null,
+        log: (event) => console.log(JSON.stringify(event)),
+      });
+
+      const pipeline = new TelegramUpdatePipeline({
+        bot,
+        mode: () => resolveTelegramConfig(process.env).updateMode,
+        log: (event) => console.log(JSON.stringify(event)),
+      });
+
+      capabilities.telegram = {
+        config: () => resolveTelegramConfig(process.env),
+        links,
+        store: telegramStore,
+        pipeline,
+        limiter: new FixedWindowRateLimiter(rateLimitStore),
+        audit: telegramAudit,
+        log: (event: Record<string, unknown>) => console.log(JSON.stringify(event)),
+      };
+
+      // THE SECOND CONSUMER IS NEVER STARTED. The resolver has already refused
+      // polling in production (TG-007); here the mode is the only thing that can
+      // start the loop, and webhook mode reaches the bot exclusively through the
+      // ingress route.
+      if (telegram.updateMode === "polling") {
+        const poller = new TelegramPoller({ api: telegramApi, pipeline, log: (event) => console.log(JSON.stringify(event)) });
+        void poller.run();
+        console.log(JSON.stringify({ level: "warn", event: "telegram.polling_enabled" }));
+      }
+      console.log(
+        JSON.stringify({
+          level: "info",
+          event: "telegram.enabled",
+          updateMode: telegram.updateMode,
+          linking: telegram.linkingConfigured,
+          ingress: telegram.webhookConfigured,
+          analysis: provider !== undefined,
+          media: geminiKey !== "",
+        }),
+      );
+    } else {
+      console.log(JSON.stringify({ level: "info", event: "telegram.disabled" }));
     }
   }
   void withTransaction;
@@ -533,3 +921,22 @@ async function main(): Promise<void> {
 }
 
 void main();
+
+/**
+ * How many migrations this BUILD expects, read from `db/migrations/*.sql`.
+ *
+ * Read at boot rather than hard-coded so the number cannot drift from what the
+ * repository actually ships, and returns `null` when the directory is not
+ * readable from this process — the console then reports the migration component
+ * as UNKNOWN instead of inventing an expectation. That distinction matters: a
+ * process that cannot see the manifest must not claim the schema is current.
+ */
+function countMigrationManifest(): number | null {
+  try {
+    const dir = new URL("../../../db/migrations", import.meta.url);
+    const files = readdirSync(dir).filter((f) => f.endsWith(".sql"));
+    return files.length;
+  } catch {
+    return null;
+  }
+}

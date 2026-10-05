@@ -5,6 +5,7 @@
 import {
   type UserRecord,
   type SessionRecord,
+  type DeviceRecord,
   type VerificationRecord,
   type PasswordResetRecord,
   type UserStore,
@@ -23,6 +24,12 @@ export class MemoryUserStore implements UserStore {
   private readonly verifications = new Map<string, VerificationRecord>();
   private readonly passwordResets = new Map<string, PasswordResetRecord>();
   private readonly sessionsByRefreshHash = new Map<string, string>();
+  /**
+   * Device fingerprints. EMPTY in every running system — nothing writes
+   * `user_devices` yet (MG-DEVICE-TRACKING). The map exists so the port has a
+   * contract-identical double; seeding it must be done explicitly by a test.
+   */
+  private readonly devices = new Map<string, DeviceRecord>();
   private readonly emailPrefs = new Map<string, EmailPreferences>();
   private idCounter = 0;
 
@@ -32,6 +39,7 @@ export class MemoryUserStore implements UserStore {
     fullName: string;
     timezone: string;
     locale: "fa" | "en";
+    localeSource?: "user" | "default";
     now: Date;
   }): Promise<UserRecord> {
     for (const u of this.users.values()) {
@@ -45,6 +53,8 @@ export class MemoryUserStore implements UserStore {
       fullName: input.fullName,
       timezone: input.timezone,
       locale: input.locale,
+      localeSource: input.localeSource ?? "default",
+      localeUpdatedAt: input.localeSource === "user" ? iso(input.now) : null,
       role: "user",
       plan: "free",
       status: "active",
@@ -206,9 +216,14 @@ export class MemoryUserStore implements UserStore {
       userAgent: string | null;
       expiresAt: Date;
     },
-  ): Promise<void> {
+    expectedRefreshTokenHash: string,
+  ): Promise<boolean> {
     const s = this.sessions.get(id);
-    if (!s) return;
+    if (!s) return false;
+    // Same compare-and-swap as PgUserStore: a rotation whose expectation no
+    // longer matches is a NO-OP that reports failure, so the in-memory batteries
+    // exercise the production race semantics rather than a friendlier variant.
+    if (s.refreshTokenHash !== expectedRefreshTokenHash) return false;
     this.sessionsByRefreshHash.delete(s.refreshTokenHash);
     this.sessionsByRefreshHash.set(input.refreshTokenHash, id);
     this.sessions.set(id, {
@@ -219,6 +234,7 @@ export class MemoryUserStore implements UserStore {
       userAgent: input.userAgent,
       expiresAt: iso(input.expiresAt),
     });
+    return true;
   }
 
   async revokeSession(id: string, revokedAt: Date): Promise<void> {
@@ -234,6 +250,80 @@ export class MemoryUserStore implements UserStore {
     }
   }
 
+  // --- Phase 6: the admin console's account operations -----------------------
+  // Contract-identical doubles of the pg adapter. They are TEST doubles, never
+  // database evidence: the Phase 6 real-PostgreSQL battery
+  // (db/tests/adminConsole.pg.test.ts) is what exercises the SQL below.
+
+  async listSessions(
+    userId: string,
+    limit: number,
+    offset: number,
+  ): Promise<{ items: readonly SessionRecord[]; total: number }> {
+    const all = [...this.sessions.values()]
+      .filter((s) => s.userId === userId)
+      .sort((a, b) =>
+        a.createdAt === b.createdAt
+          ? Number(b.id) - Number(a.id)
+          : a.createdAt < b.createdAt
+            ? 1
+            : -1,
+      );
+    return { items: all.slice(offset, offset + limit), total: all.length };
+  }
+
+  async revokeUserSession(
+    userId: string,
+    sessionId: string,
+    revokedAt: Date,
+    audit?: AuditWrite,
+  ): Promise<boolean> {
+    const s = this.sessions.get(sessionId);
+    if (s === undefined || s.userId !== userId || s.revokedAt !== null) return false;
+    this.sessions.set(sessionId, { ...s, revokedAt: iso(revokedAt) });
+    if (audit !== undefined) await audit(undefined);
+    return true;
+  }
+
+  async revokeAllUserSessions(
+    userId: string,
+    revokedAt: Date,
+    audit?: AuditWrite,
+  ): Promise<number> {
+    let n = 0;
+    for (const [id, s] of this.sessions) {
+      if (s.userId === userId && s.revokedAt === null) {
+        this.sessions.set(id, { ...s, revokedAt: iso(revokedAt) });
+        n += 1;
+      }
+    }
+    if (audit !== undefined) await audit(undefined);
+    return n;
+  }
+
+  async verifyEmailOnce(
+    userId: string,
+    verifiedAt: Date,
+    audit?: AuditWrite,
+  ): Promise<UserRecord | null> {
+    const u = this.users.get(userId);
+    if (u === undefined || u.emailVerifiedAt !== null) return null;
+    const updated: UserRecord = {
+      ...u,
+      emailVerifiedAt: iso(verifiedAt),
+      updatedAt: iso(verifiedAt),
+    };
+    this.users.set(userId, updated);
+    if (audit !== undefined) await audit(undefined);
+    return updated;
+  }
+
+  async listDevices(userId: string): Promise<readonly DeviceRecord[]> {
+    return [...this.devices.values()]
+      .filter((d) => d.userId === userId)
+      .sort((a, b) => (a.lastSeen < b.lastSeen ? 1 : -1));
+  }
+
   async updateUserPreferences(
     userId: string,
     patch: { locale?: "fa" | "en"; aiConsentAt?: string | null },
@@ -243,7 +333,9 @@ export class MemoryUserStore implements UserStore {
     if (u === undefined) return null;
     const updated: UserRecord = {
       ...u,
-      ...(patch.locale !== undefined ? { locale: patch.locale } : {}),
+      ...(patch.locale !== undefined
+        ? { locale: patch.locale, localeSource: "user", localeUpdatedAt: iso(now) }
+        : {}),
       ...(patch.aiConsentAt !== undefined ? { aiConsentAt: patch.aiConsentAt } : {}),
       updatedAt: iso(now),
     };

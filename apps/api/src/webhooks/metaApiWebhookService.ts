@@ -38,7 +38,7 @@
 // The response keeps the Legacy field names (account_id/inserted/skipped/fills)
 // so an existing caller does not break, and adds `sync` to report what was
 // actually requested.
-import { WEBHOOK_SOURCES, type WebhookResult } from "@velora/contracts";
+import { WEBHOOK_SOURCES, syncWindow, type WebhookResult } from "@velora/contracts";
 import type { WebhookEventStore } from "./webhookStore.js";
 import type { SyncTrigger } from "./syncTrigger.js";
 import {
@@ -268,12 +268,22 @@ export class MetaApiWebhookService {
     let sync: "requested" | "deferred" | "unknown-account" = "unknown-account";
     if (account !== null) {
       await this.deps.markSyncPending(account.accountId);
-      const dispatched = await this.deps.trigger.requestSync({
-        accountId: account.accountId,
-        metaapiAccountId: account.metaapiAccountId,
-        from: account.syncCursor ?? new Date(this.now().getTime() - 86_400_000).toISOString(),
-        to: this.now().toISOString(),
-      });
+      // The SAME window rule the scheduled tick and the manual sync use. This
+      // ingress previously asked for 24 hours while the tick asked for 12
+      // months, so "give me this account's history" depended on which trigger
+      // fired — and the two could not be deduplicated against each other even
+      // though they share the `sync:{accountId}:{from}` key. `null` means the
+      // window is empty (cursor already at/after now): nothing to request, and
+      // the durable event record is what makes the promise honest.
+      const window = syncWindow(account.syncCursor, this.now());
+      const dispatched =
+        window !== null &&
+        (await this.deps.trigger.requestSync({
+          accountId: account.accountId,
+          metaapiAccountId: account.metaapiAccountId,
+          from: window.from,
+          to: window.to,
+        }));
       sync = dispatched ? "requested" : "deferred";
     }
 

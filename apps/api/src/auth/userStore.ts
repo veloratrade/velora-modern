@@ -19,6 +19,16 @@ export interface UserRecord {
   readonly fullName: string;
   readonly timezone: string;
   readonly locale: "fa" | "en";
+  /**
+   * How `locale` was established — Legacy's `locale_source` vocabulary
+   * (default|browser|cookie|user). Modern writes 'user' when the account holder
+   * picked it (register-with-locale or PATCH /auth/me/preferences) and leaves
+   * 'default' otherwise. Never exposed on the public DTO; it exists so the
+   * provenance survives, exactly as Legacy's `add_user_locale_preference` intended.
+   */
+  readonly localeSource: string;
+  /** When the user last set the locale explicitly (NULL until they do). */
+  readonly localeUpdatedAt: string | null;
   /** Application role (OD-9). NOT a PostgreSQL identity — see contracts/rbac.ts. */
   readonly role: AppRoleName;
   readonly plan: string;
@@ -39,6 +49,22 @@ export interface SessionRecord {
   readonly expiresAt: string;
   readonly revokedAt: string | null;
   readonly createdAt: string;
+}
+
+/**
+ * A device fingerprint seen for an account (0001_core.sql `user_devices`).
+ *
+ * Phase 6 (admin console) reads this table for the operator's user detail. The
+ * table has existed since 0001 but NOTHING in Modern writes to it yet, so the
+ * console renders a real, empty state rather than a fabricated list — the
+ * finding is recorded in the phase-6 report as MG-DEVICE-TRACKING.
+ */
+export interface DeviceRecord {
+  readonly id: string;
+  readonly userId: string;
+  readonly fingerprint: string;
+  readonly firstSeen: string;
+  readonly lastSeen: string;
 }
 
 export interface VerificationRecord {
@@ -100,6 +126,8 @@ export interface UserStore {
     fullName: string;
     timezone: string;
     locale: "fa" | "en";
+    /** 'user' when the registration carried an explicit UI locale, else 'default'. */
+    localeSource?: "user" | "default";
     now: Date;
   }): Promise<UserRecord>;
   findUserByEmail(email: string): Promise<UserRecord | null>;
@@ -141,6 +169,19 @@ export interface UserStore {
     createdAt: Date;
   }): Promise<SessionRecord>;
   findSessionByRefreshTokenHash(refreshTokenHash: string): Promise<SessionRecord | null>;
+  /**
+   * SEC-04 — rotate a session, ATOMICALLY.
+   *
+   * `expectedRefreshTokenHash` is the hash this caller READ; the rotation only
+   * applies if the stored hash is still that value, otherwise it is a no-op and
+   * the call reports `false`.
+   *
+   * WHY: the previous contract ("UPDATE … WHERE id = $id") let two concurrent
+   * refreshes of the SAME token both succeed — both callers received a fresh
+   * pair, but the row kept only the last writer's hash, so the other caller's
+   * brand-new refresh token was dead on arrival. A compare-and-swap makes the
+   * race detectable at the moment it happens instead of one request later.
+   */
   rotateSession(
     id: string,
     input: {
@@ -150,7 +191,8 @@ export interface UserStore {
       userAgent: string | null;
       expiresAt: Date;
     },
-  ): Promise<void>;
+    expectedRefreshTokenHash: string,
+  ): Promise<boolean>;
   revokeSession(id: string, revokedAt: Date): Promise<void>;
   /** Revoke ALL active sessions of a user (change-password; both lineages). */
   revokeAllSessionsForUser(userId: string, revokedAt: Date): Promise<void>;
@@ -222,4 +264,68 @@ export interface UserStore {
   getEmailPreferences(userId: string): Promise<EmailPreferences>;
   /** Upsert the full preference set (partial merge happens above the port). */
   upsertEmailPreferences(userId: string, prefs: EmailPreferences, now: Date): Promise<void>;
+
+  // --- Phase 6: the admin console's account operations -----------------------
+  // Same rule as the Phase 3B-4 block above: authorization happens in the
+  // service/route layer, never here.
+
+  /**
+   * Page a user's sessions, newest first, including REVOKED ones.
+   *
+   * Revoked rows are part of the answer on purpose: "this account was signed out
+   * at 14:02" is exactly what an operator investigating a compromise needs to
+   * see, and hiding them would make a session list that only ever appears empty
+   * after a revocation.
+   */
+  listSessions(
+    userId: string,
+    limit: number,
+    offset: number,
+  ): Promise<{ items: readonly SessionRecord[]; total: number }>;
+
+  /**
+   * Revoke ONE session of ONE user, conditionally.
+   *
+   * Returns false when the session does not exist, belongs to another user, or
+   * is already revoked — the `user_id` predicate is what makes a mismatched id
+   * unactionable instead of a cross-user write. With `audit`, the UPDATE and the
+   * audit INSERT share one transaction (C-34), and a false result writes nothing.
+   */
+  revokeUserSession(
+    userId: string,
+    sessionId: string,
+    revokedAt: Date,
+    audit?: AuditWrite,
+  ): Promise<boolean>;
+
+  /**
+   * Revoke every LIVE session of a user, reporting how many were live.
+   *
+   * The count is the difference between "the account had three sessions and now
+   * has none" and "there was nothing to revoke": the console reports it, and the
+   * audit entry records it. `audit` follows the same transactional contract.
+   */
+  revokeAllUserSessions(
+    userId: string,
+    revokedAt: Date,
+    audit?: AuditWrite,
+  ): Promise<number>;
+
+  /**
+   * Admin-triggered e-mail verification (Legacy `users.verify_email`).
+   *
+   * SINGLE-SHOT by construction: the UPDATE carries `email_verified_at IS NULL`,
+   * so a second call — including one racing the first — changes nothing and
+   * returns null. That is what lets the service distinguish "verified now"
+   * (audited) from "already verified" (silent no-op) without a read-then-write
+   * window in which two admins could each claim credit for the same grant.
+   */
+  verifyEmailOnce(
+    userId: string,
+    verifiedAt: Date,
+    audit?: AuditWrite,
+  ): Promise<UserRecord | null>;
+
+  /** A user's known device fingerprints (empty until device tracking lands). */
+  listDevices(userId: string): Promise<readonly DeviceRecord[]>;
 }

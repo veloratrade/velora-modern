@@ -290,10 +290,12 @@ test("MetaAPI provisioning — real PostgreSQL", { skip: URL === undefined ? "DA
       // An imported trade with a ledger event, as the sync path would write it.
       // Column names are the ACTUAL 0001/0005 schema, not assumed ones.
       const trade = await pool.query<{ id: string }>(
+        // Mirrors the real importer's column set (syncRepository): a synced CLOSED
+        // row carries exit price, close instant and realized PnL together.
         `INSERT INTO trades
            (user_id, account_id, external_deal_id, symbol, direction, status,
-            entry_price, volume, net_pnl, occurred_at, source)
-         VALUES ($1,$2,$3,'EURUSD','buy','CLOSED',1.10000000,1.00000000,42.50,now(),'metaapi')
+            entry_price, exit_price, volume, net_pnl, occurred_at, occurred_close_at_utc, source)
+         VALUES ($1,$2,$3,'EURUSD','buy','CLOSED',1.10000000,1.10000000,1.00000000,42.50,now(),now(),'metaapi')
          RETURNING id`,
         [userId, accountId, `deal-${Math.random().toString(36).slice(2)}`],
       );

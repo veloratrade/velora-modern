@@ -62,6 +62,54 @@ export const PERMISSIONS = [
    * delegated to `admin`.
    */
   "users.change_role",
+
+  // --- Phase 5 (support). The capability Legacy named `communication.view` /
+  // `communication.reply`. Both are granted to `admin` AND `super_admin` in
+  // Legacy (api/src/Auth/Role.php: lines 107-108 for admin, 130-131 for
+  // super_admin), which is why neither is super-admin-exclusive here.
+  /** Read any user's support tickets (the support inbox). */
+  "support.tickets.view",
+  /** Reply to, close, reopen or archive a support ticket. */
+  "support.tickets.manage",
+
+  // --- Phase 6 (admin console). Every name below is a Legacy permission
+  // identifier carried over VERBATIM from api/src/Auth/Role.php so the Modern
+  // grant table can be diffed against Legacy's by name, not by interpretation.
+  // The capability each one guards is implemented in the Phase 6 slice; the
+  // Legacy permissions whose capability still has no Modern substrate (AI,
+  // integrations, settings, feature flags, billing) are deliberately NOT
+  // declared here — a permission with nothing to guard would be a fabricated
+  // authorization surface (the same rule the earlier phases applied).
+  /** The operator dashboard: platform-wide counts and their breakdowns. */
+  "overview.view",
+  /** Read-only platform analytics (users / trading) over a bounded range. */
+  "analytics.view",
+  /** Live system health: database, migrations, and the components that can
+   *  actually be attested in this phase. */
+  "system.health.view",
+  /** Administrative audit trail and the platform-wide signup/login feeds. */
+  "audit.view",
+  /**
+   * SUPER-ADMIN ONLY (Legacy: audit.view_sensitive is one of the six
+   * super_admin-exclusive permissions). Gates the RAW network identity
+   * (ip_address / user_agent) on every audit and security read: an `admin`
+   * holds audit.view and sees the events with those fields OMITTED from the
+   * response body; the System Owner and any super_admin receive them.
+   */
+  "audit.view_sensitive",
+  /** Admin-triggered e-mail verification for a user who cannot complete it. */
+  "users.verify_email",
+
+  // --- Phase 7 (AI). Legacy names these two WITHOUT dots (`aiManage`,
+  // `aiRouteManage`) because `ai.*` is its i18n namespace; the identifiers are
+  // carried over verbatim so Role.php can be diffed by name. `admin` holds
+  // aiManage (Legacy grants P_AI_MANAGE to admin); only super_admin holds
+  // aiRouteManage, which is the privilege-adjacent half: choosing the route,
+  // holding the secrets and spending money on a probe.
+  /** Read the AI configuration, chains, flags, quotas and usage ledger. */
+  "aiManage",
+  /** Write the AI route/secrets/relay, and probe a provider. SUPER-ADMIN ONLY. */
+  "aiRouteManage",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -73,7 +121,27 @@ export const ROLE_PERMISSIONS: Readonly<Record<AppRole, readonly Permission[]>> 
   // A normal user holds ZERO administrative permissions (Legacy: `user => []`).
   // Ownership of their own resources is a separate mechanism and is unaffected.
   user: ["rbac.self.view"],
-  admin: ["rbac.self.view", "admin.panel.access", "users.view", "users.manage_status"],
+  admin: [
+    "rbac.self.view",
+    "admin.panel.access",
+    "users.view",
+    "users.manage_status",
+    "support.tickets.view",
+    "support.tickets.manage",
+    // Phase 6 — Legacy api/src/Auth/Role.php @edede31 grants every one of these
+    // to `admin` (lines 95-113). Only users.change_role, audit.view_sensitive,
+    // settings.manage, feature_flags.edit, integrations.manage and
+    // ai.route_manage are super_admin-exclusive, and none of those is granted
+    // here.
+    "overview.view",
+    "analytics.view",
+    "system.health.view",
+    "audit.view",
+    "users.verify_email",
+    // Phase 7 — Legacy grants P_AI_MANAGE to `admin` (Role.php), and withholds
+    // P_AI_ROUTE_MANAGE for super_admin only.
+    "aiManage",
+  ],
   super_admin: [
     "rbac.self.view",
     "admin.panel.access",
@@ -82,6 +150,21 @@ export const ROLE_PERMISSIONS: Readonly<Record<AppRole, readonly Permission[]>> 
     "users.manage_status",
     // The one user-management permission an `admin` must NOT hold.
     "users.change_role",
+    "support.tickets.view",
+    "support.tickets.manage",
+    "overview.view",
+    "analytics.view",
+    "system.health.view",
+    "audit.view",
+    // Super-admin-exclusive (Legacy Role.php line 118): the raw client address
+    // on audit/security reads.
+    "audit.view_sensitive",
+    "users.verify_email",
+    // Phase 7 — Legacy grants both AI permissions to super_admin, and
+    // aiRouteManage to super_admin ONLY (Role.php: P_AI_ROUTE_MANAGE is one of the
+    // six SA-exclusive permissions).
+    "aiManage",
+    "aiRouteManage",
   ],
 };
 

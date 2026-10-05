@@ -133,13 +133,33 @@ test("PG: sessions — create, find by refresh hash, rotate, revoke, revoke-all"
     assert.notEqual(found, null);
     assert.equal(found!.id, s1.id);
 
-    await h.store.rotateSession(s1.id, {
-      refreshTokenHash: "rt-2", accessTokenHash: "at-2",
-      ipAddress: null, userAgent: null, expiresAt: T2,
-    });
+    // SEC-04: the rotation is a compare-and-swap against the hash the caller
+    // read. The right expectation wins; a stale one is a NO-OP that reports false.
+    assert.equal(
+      await h.store.rotateSession(
+        s1.id,
+        { refreshTokenHash: "rt-2", accessTokenHash: "at-2", ipAddress: null, userAgent: null, expiresAt: T2 },
+        "rt-1",
+      ),
+      true,
+      "the caller that read the current hash performs the rotation",
+    );
     assert.equal(await h.store.findSessionByRefreshTokenHash("rt-1"), null, "old refresh hash gone after rotation");
     const rotated = await h.store.findSessionByRefreshTokenHash("rt-2");
     assert.notEqual(rotated, null);
+
+    // The race: a second caller presenting the SAME (now stale) expectation must
+    // not be able to rotate the session a second time.
+    assert.equal(
+      await h.store.rotateSession(
+        s1.id,
+        { refreshTokenHash: "rt-2b", accessTokenHash: "at-2b", ipAddress: null, userAgent: null, expiresAt: T2 },
+        "rt-1",
+      ),
+      false,
+      "a stale expectation must not overwrite the winner's rotation",
+    );
+    assert.notEqual(await h.store.findSessionByRefreshTokenHash("rt-2"), null, "the winner's token is intact");
 
     await h.store.createSession({
       userId: u.id, refreshTokenHash: "rt-3", accessTokenHash: "at-3",
@@ -200,9 +220,22 @@ test("PG: preferences — locale patch, aiConsentAt set/null-clear, email prefs 
     // explicit null CLEARS ai_consent_at (the CASE pair — null-clear law)
     const set2 = await h.store.updateUserPreferences(u.id, { aiConsentAt: null }, T2);
     assert.equal(set2!.aiConsentAt, null);
-    // locale flip
+    // locale flip — and the PROVENANCE columns Legacy wrote with it
+    // (UserRepository::updateLocalePreference): source='user' + stamped moment.
+    // Asserted against the raw row, not only the mapper, so a mapper-only fix
+    // could not fake it.
     const set3 = await h.store.updateUserPreferences(u.id, { locale: "en" }, T2);
     assert.equal(set3!.locale, "en");
+    assert.equal(set3!.localeSource, "user");
+    assert.equal(set3!.localeUpdatedAt, T2.toISOString());
+    const raw = await h.pool.query("SELECT locale, locale_source, locale_updated_at FROM users WHERE id = $1", [u.id]);
+    assert.deepEqual(raw.rows[0].locale_source, "user");
+    assert.equal(new Date(raw.rows[0].locale_updated_at).toISOString(), T2.toISOString());
+
+    // …and an AI-consent-only update must NOT restamp the language provenance.
+    const set4 = await h.store.updateUserPreferences(u.id, { aiConsentAt: T1.toISOString() }, T1);
+    assert.equal(set4!.localeSource, "user", "consent-only update keeps the source");
+    assert.equal(set4!.localeUpdatedAt, T2.toISOString(), "consent-only update keeps the original timestamp");
     assert.equal(await h.store.updateUserPreferences("999999999", { locale: "en" }, T2), null);
 
     // email preferences: default-ON when no row; upsert round-trips

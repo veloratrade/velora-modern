@@ -401,8 +401,9 @@ export class TradeService {
       ? interpretDatetime(query.to, "UTC", "to").iso
       : undefined;
     // PHP-evidenced order whitelist (open_time|profit_loss|close_time);
-    // absent/unknown → open_time (Remote-lineage default; PHP defaults to
-    // close_time — documented difference).
+    // absent/unknown → close_time. TRD-04: this used to default to open_time
+    // (Remote lineage); Legacy's controller defaults to `close_time`, and the
+    // default decides what a journal shows first, so it follows Legacy.
     const order = trimmed(query.order);
     const filter: TradeSearchFilter = {
       userId,
@@ -411,7 +412,7 @@ export class TradeService {
       q: trimmed(query.q), // journal search (PHP): symbol | strategy | notes
       from,
       to,
-      sort: order === "close_time" || order === "profit_loss" || order === "open_time" ? order : "open_time",
+      sort: order === "close_time" || order === "profit_loss" || order === "open_time" ? order : "close_time",
     };
 
     const { items, total } = await this.deps.store.searchTrades(filter, page, limit);

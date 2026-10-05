@@ -1,6 +1,66 @@
 "use client";
 import * as api from "./client";
 
+// --- Account & identity (Phase 1: /profile overview + /settings sections) -----
+// Shapes mirror the Modern kernel handlers (`GET /api/v1/auth/me`,
+// `POST /api/v1/auth/change-password`, `GET|PUT /api/v1/auth/email-preferences`,
+// `PATCH /api/v1/auth/me/preferences`). Nothing here invents a field: the kernel
+// answers `PublicUserDto` and the six email-preference keys by name.
+
+/** `GET /api/v1/auth/me` payload (kernel PublicUserDto). */
+export interface AccountUserView {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
+  plan: string;
+  timezone: string;
+  locale: string;
+  createdAt: string;
+  aiConsent: boolean;
+}
+
+/** The six categories the API stores — named exactly as the server names them. */
+export type EmailPreferenceKey =
+  | "welcome_email"
+  | "security_alerts"
+  | "trade_notifications"
+  | "weekly_report"
+  | "monthly_report"
+  | "achievement_notifications";
+
+export type EmailPreferences = Record<EmailPreferenceKey, 0 | 1>;
+
+export function getMe(): Promise<{ user: AccountUserView }> {
+  return api.request<{ user: AccountUserView }>("/api/v1/auth/me").then((data) => ({
+    // Modern answers numeric ids on this route; the browser session normalizes
+    // ids to strings (client.setSession), so normalize here too rather than let
+    // one surface hold a number and the rest strings.
+    user: { ...data.user, id: String(data.user.id) },
+  }));
+}
+
+export function changePassword(input: { currentPassword: string; newPassword: string }): Promise<{ changed: true; messageKey: string; params: Record<string, never> }> {
+  return api.request("/api/v1/auth/change-password", { method: "POST", body: input });
+}
+
+export function getEmailPreferences(): Promise<{ preferences: EmailPreferences; messageKey?: string }> {
+  return api.request("/api/v1/auth/email-preferences");
+}
+
+/**
+ * Partial update: the server merges the booleans it recognises onto the stored
+ * (or default) row, so an omitted category is never reset — Legacy's merge
+ * semantics, preserved on both sides.
+ */
+export function updateEmailPreferences(patch: Partial<Record<EmailPreferenceKey, boolean>>): Promise<{ updated: true; preferences: EmailPreferences; messageKey?: string }> {
+  return api.request("/api/v1/auth/email-preferences", { method: "PUT", body: patch });
+}
+
+export function updatePreferences(input: { locale?: "fa" | "en"; ai_consent?: boolean }): Promise<{ locale: string; ai_consent: boolean; ai_consent_at: string | null }> {
+  return api.request("/api/v1/auth/me/preferences", { method: "PATCH", body: input });
+}
+
 // --- Accounts ---
 export interface AccountRecord {
   id: string;
@@ -57,6 +117,25 @@ export interface SyncStatusView {
 
 export function getSyncStatus(accountId: string): Promise<SyncStatusView> {
   return api.request(`/api/v1/accounts/${encodeURIComponent(accountId)}/sync-status`);
+}
+
+/**
+ * TRD-06 — ask for a sync now (POST /accounts/{id}/sync).
+ *
+ * Three outcomes, all of them ordinary: `queued` (202 — dispatched says whether
+ * a queue accepted it immediately, deduplicated says the same window was already
+ * queued), `up-to-date` (200 — the cursor is already at/after now) and a thrown
+ * ApiError carrying the API's own code (`METAAPI_REQUIRED` for an account with
+ * no provider link, `TOO_MANY_REQUESTS` past 20/300).
+ */
+export function triggerSync(accountId: string): Promise<{
+  accountId: string;
+  status: "queued" | "up-to-date";
+  dispatched?: boolean;
+  deduplicated?: boolean;
+  window?: { from: string; to: string };
+}> {
+  return api.request(`/api/v1/accounts/${encodeURIComponent(accountId)}/sync`, { method: "POST", body: {} });
 }
 
 export function connectMetaApi(accountId: string): Promise<{ accountId: string; metaapiAccountId: string; status: string; alreadyConnected?: boolean }> {
@@ -163,20 +242,84 @@ export function getTradeSymbols(): Promise<{ symbols: string[] }> {
 }
 
 // --- Analytics ---
+// SHAPES ARE THE API'S, NOT A GUESS. These interfaces used to declare
+// `totalTrades`/`winningTrades`/`totalPnL`/`period` and an `equity`/`balance`
+// curve point — none of which `/api/v1/analytics/*` returns. The dashboard read
+// the invented names through `??` fallbacks and rendered 0 / a flat zero line
+// with no error anywhere. The fields below mirror `SummaryMetrics`
+// (`packages/domain/src/metrics.ts`), `EquityPointView` and the by-symbol
+// projection in `apps/api/src/analytics`, and
+// `apps/web/src/lib/api/analyticsContract.test.ts` compares them against the
+// domain's real output so the two cannot drift again.
+//
+// Ratio and money fields are DECIMAL STRINGS at a fixed scale (ratios 4 dp,
+// money 2 dp, R 8 dp) — the scale is part of the wire contract, so they are
+// typed as strings and formatted, never parsed into money.
+
+/**
+ * The summary fields this client actually consumes, at runtime.
+ *
+ * `satisfies` ties every entry to the interface above (a typo or a removed field
+ * fails the build), and `analyticsContract.test.ts` compares this list with the
+ * keys the domain's `computeSummary` really returns — so the wire contract is
+ * checked against the implementation, not against a comment.
+ */
+export const ANALYTICS_SUMMARY_FIELDS = [
+  "tradeCount",
+  "wins",
+  "losses",
+  "breakeven",
+  "winRate",
+  "totalPnl",
+  "profitFactor",
+  "averageR",
+  "bestTrade",
+  "worstTrade",
+] as const satisfies readonly (keyof AnalyticsSummary)[];
+
+/** One strategy group inside `/analytics/summary`. */
+export interface AnalyticsStrategyRow extends AnalyticsSummary {
+  strategy: string;
+}
+
 export interface AnalyticsSummary {
-  totalTrades: number;
-  winningTrades: number;
-  losingTrades: number;
-  winRate: number;
-  profitFactor: number;
-  totalPnL: string;
-  avgWin: string;
-  avgLoss: string;
+  tradeCount: number;
+  wins: number;
+  losses: number;
+  breakeven: number;
+  /** Ratio, 4 dp decimal string ("0.5333"). */
+  winRate: string;
+  /** Money, 2 dp decimal string. */
+  totalPnl: string;
+  /** Ratio, 4 dp decimal string; null means "no losses but some profit" (infinite). */
+  profitFactor: string | null;
+  /** Ratio, 4 dp decimal string. */
+  averageR: string;
   bestTrade: string;
   worstTrade: string;
-  maxDrawdown: string;
-  sharpeRatio?: number;
-  period?: { from: string | null; to: string | null };
+  /** Present on `/analytics/summary`. */
+  byStrategy?: AnalyticsStrategyRow[];
+  window?: { from: string | null; to: string | null; accountId: string | null };
+}
+
+/** One cumulative point of `/analytics/equity-curve`. */
+export interface AnalyticsCurvePoint {
+  /** Calendar day (UTC) the P&L belongs to. */
+  day: string;
+  /** Cumulative net P&L from the start of the window, 2 dp decimal string. */
+  cumulativePnl: string;
+}
+
+/** One instrument group of `/analytics/by-symbol`. */
+export interface AnalyticsSymbolRow extends AnalyticsSummary {
+  symbol: string;
+}
+
+/** One weekday×hour bucket of `/analytics/heatmap`. */
+export interface AnalyticsHeatmapCell {
+  weekday: number;
+  hour: number;
+  metrics: AnalyticsSummary;
 }
 
 export function getAnalyticsSummary(params?: Record<string, string>): Promise<AnalyticsSummary> {
@@ -184,17 +327,497 @@ export function getAnalyticsSummary(params?: Record<string, string>): Promise<An
   return api.request(`/api/v1/analytics/summary${qs}`);
 }
 
-export function getEquityCurve(params?: Record<string, string>): Promise<{ points: Array<{ date: string; equity: string; balance: string }> }> {
+export function getEquityCurve(params?: Record<string, string>): Promise<{ points: AnalyticsCurvePoint[] }> {
   const qs = params ? "?" + new URLSearchParams(params).toString() : "";
   return api.request(`/api/v1/analytics/equity-curve${qs}`);
 }
 
-export function getHeatmap(params?: Record<string, string>): Promise<{ cells: Array<{ day: string; hour: number; pnl: string; count: number }> }> {
+export function getHeatmap(params?: Record<string, string>): Promise<{ cells: AnalyticsHeatmapCell[] }> {
   const qs = params ? "?" + new URLSearchParams(params).toString() : "";
   return api.request(`/api/v1/analytics/heatmap${qs}`);
 }
 
-export function getBySymbol(params?: Record<string, string>): Promise<{ symbols: Array<{ symbol: string; trades: number; pnl: string; winRate: number }> }> {
+export function getBySymbol(params?: Record<string, string>): Promise<{ symbols: AnalyticsSymbolRow[] }> {
   const qs = params ? "?" + new URLSearchParams(params).toString() : "";
   return api.request(`/api/v1/analytics/by-symbol${qs}`);
+}
+
+// --- Telegram (journal client, ADR-018) ---
+// Mirrors the shapes `apps/api/src/telegram/telegramRoutes.ts` answers. The web
+// app never sends a user id, an account id or a Telegram id: the API resolves all
+// three from the bearer claims, and this surface only ever describes the RESULT.
+
+/** The six states the Settings screen must be able to tell apart. */
+export type TelegramLinkState = "NOT_LINKED" | "LINK_PENDING" | "LINKED" | "LINK_EXPIRED" | "LINK_REVOKED" | "LINK_ERROR";
+
+export interface TelegramIdentityView {
+  /** Last four digits only — the API never sends the full Telegram id. */
+  maskedTelegramUserId: string;
+  username: string | null;
+  linkedAt: string;
+  lastSeenAt: string | null;
+}
+
+export interface TelegramChannelView {
+  title: string;
+  chatType: string;
+  status: string;
+  canPost: boolean;
+  verifiedAt: string | null;
+}
+
+export interface TelegramStatusView {
+  bot: { username: string | null; deepLinkAvailable: boolean };
+  updateMode: "off" | "polling" | "webhook";
+  state: TelegramLinkState;
+  identity: TelegramIdentityView | null;
+  pendingLinkExpiresAt: string | null;
+  channel: TelegramChannelView | null;
+}
+
+export function getTelegramStatus(): Promise<TelegramStatusView> {
+  return api.request("/api/v1/telegram/status");
+}
+
+/** Mint the one-time deep link. The returned token is opaque and single-use. */
+export function startTelegramLink(): Promise<{ deepLink: string; expiresAt: string }> {
+  return api.request("/api/v1/telegram/link/start", { method: "POST", body: {} });
+}
+
+export function unlinkTelegram(): Promise<{ unlinked: boolean }> {
+  return api.request("/api/v1/telegram/link/unlink", { method: "POST", body: {} });
+}
+
+export function getTelegramChannel(): Promise<{ channel: TelegramChannelView | null }> {
+  return api.request("/api/v1/telegram/channel");
+}
+
+/** Channel BINDING is Telegram-only (the server verifies posting rights); the web
+ *  can only unbind something the caller owns. */
+export function unbindTelegramChannel(): Promise<{ channel: null }> {
+  return api.request("/api/v1/telegram/channel", { method: "DELETE" });
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin console (Phase 6)
+//
+// ONE client surface for the operator's capabilities. The shapes mirror the
+// server contracts exactly (admin/adminConsoleRoutes.ts + admin/adminRoutes.ts)
+// and the permissions come from the SERVER (`/admin/rbac/self`) — the console
+// hides a tab a caller cannot use, but every route enforces it again, because a
+// hidden control is never an authorization boundary.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface AdminSelfView {
+  role: string;
+  isSystemOwner: boolean;
+  permissions: string[];
+}
+
+/** The operator dashboard: named groups, never a flat bag of numbers. */
+export interface AdminOverviewView {
+  users: {
+    total: number;
+    active: number;
+    suspended: number;
+    verified: number;
+    admins: number;
+    superAdmins: number;
+    byPlan: { key: string; count: number }[];
+    byLocale: { key: string; count: number }[];
+    newLast7Days: number;
+  };
+  trading: {
+    accounts: number;
+    connectedAccounts: number;
+    accountsWithSyncError: number;
+    trades: number;
+    openTrades: number;
+    closedTrades: number;
+    tradesLast7Days: number;
+    netPnl: string;
+    equity: string;
+  };
+  subscriptions: { active: number; trialing: number; pastDue: number; canceled: number; byPlan: { key: string; count: number }[] };
+  support: { open: number; pending: number; closed: number; archived: number; unreadForAdmins: number };
+  telegram: { linkedAccounts: number; activeChannels: number };
+}
+
+export type AdminComponentStatus =
+  | "healthy"
+  | "degraded"
+  | "unhealthy"
+  | "not_configured"
+  | "not_applicable"
+  | "unknown";
+
+export interface AdminHealthView {
+  checkedAt: string;
+  overall: "healthy" | "degraded" | "unhealthy" | "unknown";
+  components: { key: string; status: AdminComponentStatus; detail: string | null; latencyMs?: number }[];
+  facts: {
+    appliedMigrations: number;
+    expectedMigrations: number | null;
+    migrationHead: string | null;
+    tables: number;
+    rateLimitBuckets: number;
+    auditRows: number;
+    authEvents: number;
+    processUptimeSeconds: number;
+    nodeVersion: string;
+  };
+}
+
+export interface AdminRangeView {
+  from: string;
+  to: string;
+  preset: string | null;
+}
+
+export interface AdminUsersAnalyticsView {
+  range: AdminRangeView;
+  totals: { total: number; newInRange: number; active: number; suspended: number; verified: number };
+  byRole: { key: string; count: number }[];
+  byLocale: { key: string; count: number }[];
+  byPlan: { key: string; count: number }[];
+  byStatus: { key: string; count: number }[];
+  registrationTrend: { day: string; count: number }[];
+}
+
+export interface AdminTradingAnalyticsView {
+  range: AdminRangeView;
+  totals: {
+    trades: number;
+    openTrades: number;
+    closedTrades: number;
+    volume: string;
+    netPnl: string;
+    wins: number;
+    losses: number;
+    breakEven: number;
+    distinctTraders: number;
+  };
+  bySymbol: { key: string; count: number }[];
+  byDirection: { key: string; count: number }[];
+  pnlTrend: { day: string; netPnl: string; count: number }[];
+}
+
+export interface AdminUserRow {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
+  status: string;
+  plan: string;
+  locale: string;
+  timezone: string;
+  emailVerifiedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminSessionRow {
+  id: string;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  /** Present ONLY for a caller holding audit.view_sensitive. */
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}
+
+export interface AdminDeviceRow {
+  id: string;
+  fingerprint: string;
+  firstSeen: string;
+  lastSeen: string;
+}
+
+export interface AdminAccountRow {
+  id: string;
+  userId: string;
+  ownerEmail: string;
+  label: string;
+  provider: string;
+  platform: string;
+  brokerServer: string | null;
+  accountNumberMasked: string;
+  currency: string;
+  syncStatus: string;
+  status: string;
+  balance: string;
+  equity: string;
+  lastError: string | null;
+  lastIncrementalAt: string | null;
+  createdAt: string;
+}
+
+export interface AdminTradeRow {
+  id: string;
+  userId: string;
+  ownerEmail: string;
+  accountId: string | null;
+  symbol: string;
+  direction: string;
+  status: string;
+  volume: string;
+  entryPrice: string;
+  exitPrice: string | null;
+  netPnl: string | null;
+  rMultiple: string | null;
+  occurredAt: string;
+  closedAt: string | null;
+  createdAt: string;
+}
+
+export interface AdminAuditRow {
+  id: string;
+  occurredAt: string;
+  action: string;
+  outcome: string;
+  actorUserId: string;
+  actorEmail?: string | null;
+  targetUserId: string | null;
+  targetEmail?: string | null;
+  beforeState?: string | null;
+  afterState?: string | null;
+  requestId: string | null;
+}
+
+export interface AdminSecurityRow {
+  id: string;
+  occurredAt: string;
+  userId: string | null;
+  email: string | null;
+  eventType: string;
+  result: string;
+  reason: string | null;
+  /** Present ONLY for a caller holding audit.view_sensitive. */
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}
+
+export interface AdminPage<T> {
+  items: T[];
+  total: number;
+  page?: number;
+  perPage?: number;
+  limit?: number;
+}
+
+function qs(params: Record<string, string | number | undefined>): string {
+  const usable = Object.entries(params).filter(([, v]) => v !== undefined && v !== "");
+  if (usable.length === 0) return "";
+  return `?${usable.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&")}`;
+}
+
+/** The caller's effective role, ownership flag and permission set. */
+export function getAdminSelf(): Promise<AdminSelfView> {
+  return api.request("/api/v1/admin/rbac/self");
+}
+
+export function getAdminOverview(): Promise<AdminOverviewView> {
+  return api.request("/api/v1/admin/overview");
+}
+
+export function getAdminHealth(): Promise<AdminHealthView> {
+  return api.request("/api/v1/admin/system/health");
+}
+
+export function getAdminUsersAnalytics(range: string): Promise<AdminUsersAnalyticsView> {
+  return api.request(`/api/v1/admin/analytics/users${qs({ range })}`);
+}
+
+export function getAdminTradingAnalytics(range: string): Promise<AdminTradingAnalyticsView> {
+  return api.request(`/api/v1/admin/analytics/trading${qs({ range })}`);
+}
+
+export function listAdminUsers(filter: { search?: string; role?: string; status?: string; page?: number }): Promise<{
+  items: AdminUserRow[];
+  total: number;
+  page: number;
+  perPage: number;
+}> {
+  return api.request(`/api/v1/admin/users${qs(filter)}`);
+}
+
+export function getUserSessions(id: string, perPage = 25): Promise<AdminPage<AdminSessionRow> & { sensitive: boolean }> {
+  return api.request(`/api/v1/admin/users/${encodeURIComponent(id)}/sessions${qs({ perPage })}`);
+}
+
+export function getUserDevices(id: string): Promise<AdminPage<AdminDeviceRow>> {
+  return api.request(`/api/v1/admin/users/${encodeURIComponent(id)}/devices`);
+}
+
+export function getUserAccounts(id: string, perPage = 25): Promise<AdminPage<AdminAccountRow>> {
+  return api.request(`/api/v1/admin/users/${encodeURIComponent(id)}/accounts${qs({ perPage })}`);
+}
+
+export function getUserTrades(id: string, perPage = 25): Promise<AdminPage<AdminTradeRow>> {
+  return api.request(`/api/v1/admin/users/${encodeURIComponent(id)}/trades${qs({ perPage })}`);
+}
+
+export function revokeUserSessions(id: string, sessionId?: string): Promise<{ revoked: number; scope: string; sessionId?: string }> {
+  return api.request(`/api/v1/admin/users/${encodeURIComponent(id)}/session-revocations`, {
+    method: "POST",
+    body: sessionId === undefined ? {} : { sessionId },
+  });
+}
+
+export function verifyUserEmail(id: string): Promise<{ user: AdminUserRow; changed: boolean }> {
+  return api.request(`/api/v1/admin/users/${encodeURIComponent(id)}/email-verification`, { method: "POST", body: {} });
+}
+
+export function setUserRole(id: string, role: string): Promise<{ user: AdminUserRow; sessionsRevoked: boolean }> {
+  return api.request(`/api/v1/admin/users/${encodeURIComponent(id)}/role`, { method: "PATCH", body: { role } });
+}
+
+export function setUserStatus(id: string, status: string): Promise<{ user: AdminUserRow; sessionsRevoked: boolean }> {
+  return api.request(`/api/v1/admin/users/${encodeURIComponent(id)}/status`, { method: "PATCH", body: { status } });
+}
+
+export function listAuditLog(filter: {
+  action?: string;
+  actorUserId?: string;
+  targetUserId?: string;
+  since?: string;
+  until?: string;
+  limit?: number;
+}): Promise<{ entries: AdminAuditRow[]; total: number; limit: number }> {
+  return api.request(`/api/v1/admin/audit-logs${qs(filter)}`);
+}
+
+export function listSecurityFeed(
+  kind: "signups" | "logins",
+  filter: { result?: string; since?: string; until?: string; limit?: number } = {},
+): Promise<AdminPage<AdminSecurityRow> & { sensitive: boolean }> {
+  return api.request(`/api/v1/admin/security/${kind}${qs(filter)}`);
+}
+
+export function listPlatformTrades(filter: {
+  userId?: string;
+  status?: string;
+  symbol?: string;
+  page?: number;
+  perPage?: number;
+}): Promise<AdminPage<AdminTradeRow>> {
+  return api.request(`/api/v1/admin/trades${qs(filter)}`);
+}
+
+export function listPlatformAccounts(filter: {
+  userId?: string;
+  syncStatus?: string;
+  page?: number;
+  perPage?: number;
+}): Promise<AdminPage<AdminAccountRow>> {
+  return api.request(`/api/v1/admin/trading-accounts${qs(filter)}`);
+}
+
+// ── The support queue (the ADMIN side of the Phase 5 capability) ─────────────
+
+/**
+ * A queue row. The server's admin projection is the SAME ticket shape the user
+ * sees (`SupportTicketRecord`), which is why there is no separate owner e-mail
+ * here: the modern ticket carries its owner id, and inventing a field the API
+ * does not return would put a fabricated column in the console.
+ */
+export interface SupportQueueTicketView {
+  id: string;
+  subject: string;
+  status: SupportStatus;
+  waitingFor: SupportWaiting;
+  unreadAdminCount: number;
+  lastMessageAt: string;
+  createdAt: string;
+}
+
+export interface SupportQueueView {
+  tickets: SupportQueueTicketView[];
+  total: number;
+  page: number;
+  perPage: number;
+  counters: { open: number; pending: number; unread: number };
+}
+
+export function listSupportQueue(status?: SupportStatus): Promise<SupportQueueView> {
+  return api.request(`/api/v1/admin/communications/tickets${qs({ status })}`);
+}
+
+export function getSupportQueueTicket(id: string): Promise<SupportThreadView> {
+  return api.request(`/api/v1/admin/communications/tickets/${encodeURIComponent(id)}`);
+}
+
+export function replySupportQueueTicket(
+  id: string,
+  message: string,
+  internal = false,
+): Promise<{ message: { id: string; status: SupportStatus; waitingFor: SupportWaiting; firstReply?: boolean } }> {
+  return api.request(`/api/v1/admin/communications/tickets/${encodeURIComponent(id)}/messages`, {
+    method: "POST",
+    body: { message, internal },
+  });
+}
+
+export function actOnSupportQueueTicket(
+  id: string,
+  action: "close" | "reopen" | "archive",
+): Promise<{ status: SupportStatus; waitingFor: SupportWaiting }> {
+  return api.request(`/api/v1/admin/communications/tickets/${encodeURIComponent(id)}/status`, {
+    method: "POST",
+    body: { action },
+  });
+}
+
+// --- Support (Phase 5: the support center) -----------------------------------
+// Shapes mirror the Modern kernel handlers in `apps/api/src/support/supportRoutes.ts`.
+// The WIRE FIELD IS `message`, not `body` — Legacy's own field name, kept on
+// purpose so the two implementations answer the same request. Status and
+// `waitingFor` are DERIVED SERVER-SIDE; nothing here sends them.
+
+export type SupportStatus = "open" | "pending" | "closed" | "archived";
+export type SupportWaiting = "admin" | "user" | "none";
+
+export interface SupportTicketView {
+  id: string;
+  subject: string;
+  status: SupportStatus;
+  waitingFor: SupportWaiting;
+  lastMessageAt: string;
+  unreadUserCount: number;
+  createdAt: string;
+}
+
+export interface SupportMessageView {
+  id: string;
+  senderType: "user" | "admin" | "system";
+  body: string;
+  createdAt: string;
+}
+
+export interface SupportThreadView {
+  conversation: SupportTicketView;
+  messages: SupportMessageView[];
+}
+
+export function listSupportTickets(status?: SupportStatus): Promise<{ tickets: SupportTicketView[]; total: number; page: number; perPage: number; unreadTotal: number }> {
+  const qs = status === undefined ? "" : `?status=${encodeURIComponent(status)}`;
+  return api.request(`/api/v1/support/tickets${qs}`);
+}
+
+export function createSupportTicket(input: { subject: string; message: string }): Promise<{ ticket: { id: string } }> {
+  return api.request("/api/v1/support/tickets", { method: "POST", body: input });
+}
+
+/** Opening a ticket is also a READ: the server clears the user's unread marker. */
+export function getSupportTicket(id: string): Promise<SupportThreadView> {
+  return api.request(`/api/v1/support/tickets/${encodeURIComponent(id)}`);
+}
+
+export function replySupportTicket(id: string, message: string): Promise<{ message: { id: string; status: SupportStatus; waitingFor: SupportWaiting } }> {
+  return api.request(`/api/v1/support/tickets/${encodeURIComponent(id)}/messages`, { method: "POST", body: { message } });
+}
+
+export function reopenSupportTicket(id: string): Promise<{ status: SupportStatus; waitingFor: SupportWaiting }> {
+  return api.request(`/api/v1/support/tickets/${encodeURIComponent(id)}/reopen`, { method: "POST", body: {} });
 }

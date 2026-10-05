@@ -1,5 +1,5 @@
 {
-  "$comment": "VELORA-MODERN machine-readable migration gap register — twin of docs/state/MIGRATION_GAP_REGISTER.md (update both in the same change). Validated by tools/agent-context.mjs. Status: OPEN|PARTIAL|CLOSED. Verification states: STATIC|RECORDED_RUNTIME|CURRENT_RUNTIME_VERIFIED|NOT_VERIFIED|OWNER_DECISION_REQUIRED.",
+  "$comment": "VELORA-MODERN machine-readable migration gap register — twin of docs/state/MIGRATION_GAP_REGISTER.md (update both in the same change). Validated by tools/agent-context.mjs. Status: OPEN|PARTIAL|CLOSED. Verification states: STATIC|RECORDED_RUNTIME|CURRENT_RUNTIME_VERIFIED|NOT_VERIFIED|OWNER_DECISION_REQUIRED. | Reconciled 2026-10-05: union of two parallel lineages (feat/telegram-journal-client and feat/mg-domain-legacy-only-achievements), both from main @ 0e9c4d7. See CHANGE_LOG AC-27.",
   "schema_version": 1,
   "source_audit": {
     "path": "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
@@ -22,7 +22,9 @@
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
       ],
       "decisions": [],
-      "closure_criteria": "76 missing routes ported or owner-dropped with recorded decisions"
+      "closure_criteria": "76 missing routes ported or owner-dropped with recorded decisions",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC."
     },
     {
       "id": "MG-G02",
@@ -41,7 +43,9 @@
       "decisions": [
         "R1"
       ],
-      "closure_criteria": "MG-API-CONTRACT-DIVERGENCE closed"
+      "closure_criteria": "MG-API-CONTRACT-DIVERGENCE closed",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC."
     },
     {
       "id": "MG-G03",
@@ -61,7 +65,11 @@
       "decisions": [
         "OD-AC-SUBMAP"
       ],
-      "closure_criteria": "MG-SCHEMA-MAPPING closed"
+      "closure_criteria": "MG-SCHEMA-MAPPING closed",
+      "last_updated": "2026-10-04",
+      "closure_note": "Phase 4 progress 2026-10-04: schema mapping now enforced per column (A12) and the load rehearsal is executable",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC."
     },
     {
       "id": "MG-G04",
@@ -79,7 +87,9 @@
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
       ],
       "decisions": [],
-      "closure_criteria": "MG-METAAPI-ASSEMBLY + MG-RMULTIPLE-SCALE closed"
+      "closure_criteria": "MG-METAAPI-ASSEMBLY + MG-RMULTIPLE-SCALE closed",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC."
     },
     {
       "id": "MG-G05",
@@ -96,7 +106,9 @@
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
       ],
       "decisions": [],
-      "closure_criteria": "MG-FRONTEND-SURFACES closed"
+      "closure_criteria": "MG-FRONTEND-SURFACES closed",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC."
     },
     {
       "id": "MG-G06",
@@ -116,7 +128,9 @@
       "decisions": [
         "OD-AC-R8"
       ],
-      "closure_criteria": "MG-SEC-EDGE-AUTHZ resolved + R8 decided"
+      "closure_criteria": "MG-SEC-EDGE-AUTHZ resolved + R8 decided",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC."
     },
     {
       "id": "MG-G07",
@@ -133,7 +147,9 @@
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
       ],
       "decisions": [],
-      "closure_criteria": "S1/S2/S4 regressions resolved"
+      "closure_criteria": "S1/S2/S4 regressions resolved",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC."
     },
     {
       "id": "MG-G08",
@@ -150,7 +166,9 @@
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
       ],
       "decisions": [],
-      "closure_criteria": "MetaAPI assembly + cadence; Resend email types"
+      "closure_criteria": "MetaAPI assembly + cadence; Resend email types",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC."
     },
     {
       "id": "MG-G09",
@@ -172,7 +190,9 @@
       "decisions": [
         "OD-AC-WORKER"
       ],
-      "closure_criteria": "MG-WORKER-DEPLOY closed with runtime evidence. Local progress 2026-10-03 (AC-10): analytics one-tick chain proven end-to-end on real PG 17.11 + real pg-boss timekeeper (cron fire -> due user -> recompute -> user_analytics_daily row); MG-OBS-7 crash fixed. Still OPEN: no deployment (OD-AC-WORKER); FX/MetaAPI/copy ticks not executed (external-call / token / transport gates)."
+      "closure_criteria": "MG-WORKER-DEPLOY closed with runtime evidence",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/NOT_VERIFIED, domain=OPEN/RECORDED_RUNTIME."
     },
     {
       "id": "MG-G10",
@@ -192,7 +212,9 @@
       "decisions": [
         "OD-AC-ADR004"
       ],
-      "closure_criteria": "ADR-004 sampling decided + rehearsal executed"
+      "closure_criteria": "ADR-004 sampling decided + rehearsal executed",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/NOT_VERIFIED, domain=OPEN/NOT_VERIFIED."
     },
     {
       "id": "MG-G11",
@@ -210,7 +232,9 @@
         "tools/run-tests.mjs"
       ],
       "decisions": [],
-      "closure_criteria": "Coverage extends as capabilities land; D1 smoke expectation fix (MG-OBS-6, owner-gated). Evidence: 804/804 local + next build exit 0 (AC-3/AC-5) + real-PG batteries 23 files x 2 orders, 0 fail/0 skipped on disposable PG 17.11 (AC-6)."
+      "closure_criteria": "Coverage extends as capabilities land; D1 smoke expectation fix (MG-OBS-6, owner-gated). Evidence: 804/804 local + next build exit 0 (AC-3/AC-5) + real-PG batteries 23 files x 2 orders, 0 fail/0 skipped on disposable PG 17.11 (AC-6).",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/CURRENT_RUNTIME_VERIFIED, domain=PARTIAL/CURRENT_RUNTIME_VERIFIED."
     },
     {
       "id": "MG-G12",
@@ -227,15 +251,17 @@
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
       ],
       "decisions": [],
-      "closure_criteria": "remaining: MG-DOC-3 row-level roadmap reconciliation (owner-reviewed) + ADR-004/009 open sub-items (MG-DOC-1/2/4/5/6 closed by AC-2)"
+      "closure_criteria": "remaining: MG-DOC-3 row-level roadmap reconciliation (owner-reviewed) + ADR-004/009 open sub-items (MG-DOC-1/2/4/5/6 closed by AC-2)",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC."
     },
     {
       "id": "MG-G13",
       "section": "A",
       "title": "Operational tooling, backup and restore proven",
-      "status": "OPEN",
+      "status": "PARTIAL",
       "priority": "P1",
-      "verification_state": "RECORDED_RUNTIME",
+      "verification_state": "CURRENT_RUNTIME_VERIFIED",
       "audit_refs": [
         "§19.1 gate 13",
         "§17.2"
@@ -249,7 +275,11 @@
       "decisions": [
         "OD-AC-RPORTO"
       ],
-      "closure_criteria": "MG-BACKUP-RESTORE closed"
+      "closure_criteria": "MG-BACKUP-RESTORE closed",
+      "last_updated": "2026-10-04",
+      "closure_note": "Phase 4 progress 2026-10-04: a real backup + restore drill was executed and verified (see MG-BACKUP-RESTORE); offsite storage verification and the production drill remain",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/CURRENT_RUNTIME_VERIFIED, domain=OPEN/RECORDED_RUNTIME."
     },
     {
       "id": "MG-G14",
@@ -272,7 +302,9 @@
         "OD-AC-WORKER",
         "OD-AC-OD1"
       ],
-      "closure_criteria": "Worker service defined; digests pinned; R2 wired; production host exists"
+      "closure_criteria": "Worker service defined; digests pinned; R2 wired; production host exists",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC."
     },
     {
       "id": "MG-G15",
@@ -298,7 +330,9 @@
         "OD-AC-SUBMAP",
         "OD-AC-WORKER"
       ],
-      "closure_criteria": "All §C decisions resolved with recorded owner sign-off"
+      "closure_criteria": "All §C decisions resolved with recorded owner sign-off",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC."
     },
     {
       "id": "MG-METAAPI-ASSEMBLY",
@@ -320,7 +354,9 @@
         "OD-M-PA-2",
         "OD-M-PA-3"
       ],
-      "closure_criteria": "Position-level volume-weighted assembly + convergence path, verified"
+      "closure_criteria": "Position-level volume-weighted assembly + convergence path, verified",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC."
     },
     {
       "id": "MG-WORKER-DEPLOY",
@@ -342,7 +378,10 @@
       "decisions": [
         "OD-AC-WORKER"
       ],
-      "closure_criteria": "Worker service defined + one tick of each scheduler proven in a real environment. Local progress 2026-10-03 (AC-10): analytics tick proven on real PG 17.11 (see evidence record); MG-OBS-7 first-cron crash fixed + regression-tested. Remaining: service definition (OD-AC-WORKER) and deployed-runtime ticks; FX tick not fired (live ECB call, charter-excluded locally); MetaAPI tick token-gated; copy tick no transport."
+      "closure_criteria": "Worker service defined + one tick of each scheduler proven in a real environment",
+      "note": "2026-10-04 (TRD-06 runtime check, local): with the API running against a fresh local PostgreSQL, `pgboss.queue` held ONLY the queues the local worker created — no pg-boss schema from any deployment — and a manual sync job sat in state `created` with `retry_count 0` until a worker started. The queue path is real and observable; in production it has no consumer until this gap closes.",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/NOT_VERIFIED, domain=OPEN/RECORDED_RUNTIME."
     },
     {
       "id": "MG-SEC-COOKIE",
@@ -359,7 +398,9 @@
         "apps/api/src/kernel/server.ts"
       ],
       "decisions": [],
-      "closure_criteria": "__Host- prefix + SameSite=Strict restored; body acceptance removed; regression tests"
+      "closure_criteria": "__Host- prefix + SameSite=Strict restored; body acceptance removed; regression tests",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC."
     },
     {
       "id": "MG-SEC-CSP",
@@ -376,7 +417,9 @@
         "apps/web/src/proxy.ts"
       ],
       "decisions": [],
-      "closure_criteria": "Pinning model decided and implemented; weak-entropy fallback removed"
+      "closure_criteria": "Pinning model decided and implemented; weak-entropy fallback removed",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC."
     },
     {
       "id": "MG-SEC-HSTS",
@@ -392,7 +435,9 @@
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
       ],
       "decisions": [],
-      "closure_criteria": "HSTS verified at the deployed edge"
+      "closure_criteria": "HSTS verified at the deployed edge",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/NOT_VERIFIED, domain=OPEN/NOT_VERIFIED."
     },
     {
       "id": "MG-SEC-EDGE-AUTHZ",
@@ -411,34 +456,53 @@
       "decisions": [
         "OD-AC-R8"
       ],
-      "closure_criteria": "Edge boundary reproduced or owner accepts client-side gating in writing"
+      "closure_criteria": "Edge boundary reproduced or owner accepts client-side gating in writing",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/NOT_VERIFIED, domain=OPEN/NOT_VERIFIED."
     },
     {
       "id": "MG-ADMIN",
       "section": "B",
-      "title": "Admin console 93% absent (59/62 endpoints, 38 modules)",
-      "status": "OPEN",
+      "title": "Admin console: 75 Legacy routes / 19 segments — core operator surface migrated, AI+integrations+settings/flags/billing still open",
+      "status": "PARTIAL",
       "priority": "P1",
-      "verification_state": "STATIC",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§4.2",
         "§6.2"
       ],
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "docs/audits/2026-10-04-PHASE6-ADMIN-CAPABILITY-MAP.md",
+        "docs/audits/2026-10-04-PHASE6-STATUS.md",
+        "apps/api/src/admin/adminConsoleRoutes.ts",
+        "apps/api/src/admin/adminConsoleRoutes.test.ts",
+        "apps/api/src/admin/adminConsoleService.test.ts",
+        "db/migrations/0027_admin_console.sql",
+        "db/tests/adminConsole.pg.test.ts",
+        "apps/web/src/app/(app)/admin/page.tsx",
+        "apps/web/src/i18n/adminSurface.test.ts",
         "apps/api/src/kernel/adminUserRoutes.test.ts",
+        "docs/audits/phase6-ui/visual-qa-results.json",
+        "docs/audits/phase6-ui/README.md",
+        "tools/visual-qa/phase6-admin.mjs",
+        "docs/security/RBAC-CAPABILITY-MAP.md",
         "apps/web/src/app/(app)/admin"
       ],
       "decisions": [],
-      "closure_criteria": "Admin surface ported or owner-scoped"
+      "closure_criteria": "Admin surface ported or owner-scoped",
+      "closure_note": "PARTIAL 2026-10-04 (Phase 6). The audit's \"59/62 endpoints, 38 modules\" figure is superseded by a reproducible inventory: parsing every $router statement in Legacy api/index.php 109-251 (method + path + permission constant, multi-line included) yields 75 /api/v1/admin/* routes across 19 path segments (method in docs/audits/2026-10-04-PHASE6-ADMIN-CAPABILITY-MAP.md §1). Migrated and verified this phase: overview, users 360 (list/filters/paging, role, status, verify-email, session revocation, sessions, devices, audit trail, support), the admin support queue (phase 5), audit logs with before/after state and six filters, security feeds (signups/logins) gated by audit.view_sensitive, system health over nine attested components (unbuilt subsystems report not_applicable with the phase reason — never a green check), analytics over five range presets, and the RBAC matrix. 14 console routes + the extended per-user admin API; 17/17 route tests, 16/16 service tests, 14/14 real-PG, 8/8 i18n+design guard, and a 62/62 browser QA run against the production build on live PostgreSQL (docs/audits/phase6-ui/) that found three defects which were fixed in the same phase — wide tables widened the page on mobile (123px at 390, 515px on the audit tab; now 0 at 1440/390/320 in both locales), raw enums (`open`, `admin`) leaked into the Persian console, and the ticket thread offered transitions the service refuses while dismissing the record on close; the /admin page is no longer a 34-line shell (seven tabs, fa+en, 148 catalog keys of which 119 are byte copies of Legacy's own admin vocabulary). STILL OPEN, each with a named dependency and never stubbed: AI module (14 routes) → phase 7; integrations (12) + worker/e-mail + A2 logs → phase 8; settings (3), feature flags (2), log viewer (1), billing (2) and the ai/operations/revenue analytics blocks → phase 9 or until a reader exists (a table with no consumer would be speculative infrastructure); user creation + invitations (2) → owner decision on invite policy; per-user login history (1) → phase-6 follow-up. Device tracking has no writer in Modern (MG-DEVICE-TRACKING), so that panel is legitimately empty.",
+      "last_updated": "2026-10-05",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/RECORDED_RUNTIME, domain=OPEN/STATIC."
     },
     {
       "id": "MG-AI-OCR",
       "section": "B",
-      "title": "AI layer is a provider boundary only (no live provider, OCR, extraction, quota, retention, audit)",
-      "status": "OPEN",
+      "title": "AI layer: chains, quotas, flags, the n8n relay and local OCR migrated; live provider round trip, the web surfaces and image redaction still open",
+      "status": "PARTIAL",
       "priority": "P1",
-      "verification_state": "STATIC",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§12.5",
         "§4.2",
@@ -446,10 +510,20 @@
       ],
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
-        "apps/api/src/aicoach"
+        "apps/api/src/aicoach",
+        "docs/audits/2026-10-05-PHASE7-AI-CAPABILITY-MAP.md",
+        "docs/audits/2026-10-05-PHASE7-STATUS.md",
+        "db/migrations/0028_ai_capability.sql",
+        "apps/api/src/ai/",
+        "db/tests/aiCapability.pg.test.ts"
       ],
       "decisions": [],
-      "closure_criteria": "AI/OCR capability implemented or owner-scoped"
+      "closure_criteria": "AI/OCR capability implemented or owner-scoped",
+      "note": "2026-10-04 (TRD-03 recon): Legacy's extraction endpoint was read end to end; its core deliverable is the deterministic OCR output (`texts`/`times`) plus AI-or-fallback extraction, with a sha256 dedup cache, consent gate, feature flag, audit rows and a 501 when no engine exists. Modern has none of it, and this host has no OCR engine (no tesseract binary), so the endpoint's deterministic half is a fail-closed dependency, not something to stub. Phase 7 owns the AI half; the OCR contract is designed in phase 3.",
+      "closure_note": "PARTIAL 2026-10-05 (Phase 7, API slice — commit d5710fe). Migrated and tested: migration 0028 (chains, flags with deterministic rollout, per-provider daily budgets with ONE atomic reservation, credential metadata with an HMAC fingerprint and no secret column, admin-managed secrets encrypted with the EXISTING credentialCrypto envelope, settings, feedback); the chain walker (flag → chain → deadline → consent → quota → fail-closed anonymization → call → validate → record, every attempt in the ONE ledger 0017/0023 created and 0028 extended with route, fallback_index, latency_ms, input_hash); the n8n Gemini relay on Legacy's exact contract (https-only, token in the header only, normalized error mapping); the LOCAL Tesseract OCR fallback proved against the real binary 5.5.0 reading a real screenshot (XAUUSD / BUY / 2000.50 / SL 1995.00 / TP 2020.00); the three user routes with Legacy's prompts, whitelists, locale rule and rate limits; 21 admin routes (aiManage / aiRouteManage); and the three support assists phase 5 deferred. Gates: typecheck clean, npm test 1148 + 63 (0 fail / 0 skip), real-PG batteries 31 files × 2 orders = 62 runs / 0 failures, secret-scan 0 findings, aiCapability 23/23 + aiRoutes 19/19 + aiCapability.pg 12/12. STILL OPEN, each named: the web surfaces (/intelligence is still a shell, the console has no AI tab) → the next slice; a LIVE provider round trip → NOT_VERIFIED, no Gemini/OpenAI key and no relay URL+token in scope; image redaction → no image library in this repository, so the anonymizer reports 'cannot guarantee' and images stay local (Legacy's own rule when GD is missing) — recorded as MG-AI-ANONYMIZE; Claude → not migrated (no transport, and declaring it would put a fabricated option in an operator's dropdown); ai_jobs → phase 8 with the worker.",
+      "last_updated": "2026-10-05",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/RECORDED_RUNTIME, domain=OPEN/STATIC."
     },
     {
       "id": "MG-BACKUP-RESTORE",
@@ -457,19 +531,27 @@
       "title": "No real backup taken; no restore drill run",
       "status": "PARTIAL",
       "priority": "P1",
-      "verification_state": "RECORDED_RUNTIME",
+      "verification_state": "CURRENT_RUNTIME_VERIFIED",
       "audit_refs": [
         "§17.2"
       ],
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
         "infra/backup/DR-RUNBOOK.md",
+        "ops/backup/restore_drill.mjs",
+        "ops/backup/restoreDrillCore.mjs",
+        "ops/backup/tests/restoreDrill.test.ts",
+        "ops/backup/evidence/restore-drill-staging-20261004T095454Z.json",
         "docs/evidence/BACKUP-RESTORE-LOCAL-DRILL-2026-10-03.md"
       ],
       "decisions": [
         "OD-AC-RPORTO"
       ],
-      "closure_criteria": "Real backup taken from the real staging/production database, stored in veloratrade/velora-backups (STORAGE_VERIFIED), and a restore drill run with application-level recovery verified. LOCAL PROGRESS 2026-10-03 (AC-11): first real backup + restore drill executed on a disposable local PG 17.11 - real producer (pg_dump custom+gzip, sha256, INTEGRITY_VERIFIED), gate correctly BLOCKED on un-stored evidence (exit 1, fail-closed proven against real output), pg_restore exit 0, per-table content hashes all MATCH (see evidence record). Remaining: staging/production backup, official storage + storage verification, API-level health check, RPO/RTO decision, ADR-012 A.6 deploy wiring."
+      "closure_criteria": "One real backup + one restore drill, evidence captured",
+      "closure_note": "PARTIAL 2026-10-04 (Phase 4). A REAL backup was produced by the project's own producer (db-backup-staging-20261004095454-bb023e0cab03, 32 926 bytes, sha256 b289558f...), restored with pg_restore into a disposable database (343 ms), and verified: parity PASS across 44 tables and 49 numeric columns (table set, row counts, exact decimal SUMs), schema_migrations head 0025, and the application smoke 11/11 (S1a..S9) against the RESTORED copy. Integrity is recorded as storage_status=NONE and the ADR-012 gate still REJECTS the record (release_tag absent, storage not verified) — the drill uploads nothing and claims nothing. REMAINING for closure: (1) an offsite upload through ops/backup/upload_backup.py to veloratrade/velora-backups with a re-hash of the STORED bytes (needs a storage credential); (2) the same drill against staging/production data; (3) RPO/RTO targets (owner decision).",
+      "last_updated": "2026-10-04",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/CURRENT_RUNTIME_VERIFIED, domain=PARTIAL/RECORDED_RUNTIME."
     },
     {
       "id": "MG-API-MISSING-ROUTES",
@@ -485,7 +567,9 @@
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
       ],
       "decisions": [],
-      "closure_criteria": "Routes ported or owner-dropped"
+      "closure_criteria": "Routes ported or owner-dropped",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC."
     },
     {
       "id": "MG-API-CONTRACT-DIVERGENCE",
@@ -504,7 +588,9 @@
       "decisions": [
         "R1"
       ],
-      "closure_criteria": "Each divergence reconciled or owner-accepted"
+      "closure_criteria": "Each divergence reconciled or owner-accepted",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC."
     },
     {
       "id": "MG-SCHEMA-MAPPING",
@@ -519,12 +605,19 @@
       ],
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
-        "db/migrations/0022_legacy_contract_parity.sql"
+        "db/migrations/0022_legacy_contract_parity.sql",
+        "db/MIGRATION_MAP.md",
+        "tools/lib/legacyLoadGates.ts",
+        "db/data-step/fixtures/legacy-export.FIXTURE/decisions.json"
       ],
       "decisions": [
         "OD-AC-SUBMAP"
       ],
-      "closure_criteria": "Explicit mapping decision per table/column"
+      "closure_criteria": "Explicit mapping decision per table/column",
+      "closure_note": "PARTIAL 2026-10-04 (Phase 4). Unmapped data is no longer a written-off list: A12 requires every exported column to be declared either with a target column or with target:null + a reason, and an undeclared column now FAILS the load. db/MIGRATION_MAP.md carries the per-table/per-column record for the tables in the rehearsal, and the fixtures' decisions file demonstrates the shape. A REAL FINDING from writing it down: Modern subscriptions (0017) is the Stripe object (provider CHECK = 'stripe', plan pro|enterprise, partial UNIQUE on active rows) and is NOT a target for the legacy provider-less lifecycle (none|active|past_due|grace|expired|cancelled + plan_started_at/plan_expires_at/plan_updated_at); those columns are recorded, not loaded, and the user-visible fact survives in users.plan. Still open: a mapping decision for that lifecycle, and targets for the tables owned by later phases (support_tickets, ai_*, user_achievements, content_translations, system_logs, integration_health, notifications) — each phase closes its own rows.",
+      "last_updated": "2026-10-04",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC."
     },
     {
       "id": "MG-FRONTEND-SURFACES",
@@ -537,12 +630,23 @@
         "§6"
       ],
       "evidence": [
-        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+        "apps/api/src/support/supportRoutes.test.ts",
+        "db/migrations/0026_support_tickets.sql",
+        "db/tests/supportTickets.pg.test.ts",
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "docs/audits/2026-10-04-PHASE5-STATUS.md",
+        "docs/audits/phase5-ui/visual-qa-results.json",
+        "docs/audits/2026-10-04-PHASE6-STATUS.md",
+        "apps/web/src/app/(app)/admin/page.tsx"
       ],
       "decisions": [
         "OD-AC-R8"
       ],
-      "closure_criteria": "Surfaces implemented or owner-scoped"
+      "closure_criteria": "Surfaces implemented or owner-scoped",
+      "closure_note": "PARTIAL 2026-10-05 (Phases 5-6). Two more badged shells became real surfaces: `/support` (Phase 5 — 0026 + SupportService/SupportRoutes + the page, verified by a real-PG battery, an HTTP route battery and a 29/29 browser QA run, docs/audits/phase5-ui/) and `/admin` (Phase 6 — 0027 + the console API + seven permission-driven tabs, verified by 17/17 route, 16/16 service, 14/14 real-PG tests and a 62/62 browser QA run, docs/audits/phase6-ui/). `/profile`, `/settings`, `/trades` and `/dashboard` were already real. Still open in this row: `/performance` and `/wallet` (phase 9), `/intelligence` (phase 7, AI), blog/privacy/terms (TRD-10 content) and checkout (PLT-11). `/markets` and `/news` are LEGACY_ONLY content surfaces (TRD-11), not shells to fill.",
+      "last_updated": "2026-10-05",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC."
     },
     {
       "id": "MG-I18N-COVERAGE",
@@ -559,7 +663,9 @@
         "apps/web/messages/fa/common.json"
       ],
       "decisions": [],
-      "closure_criteria": "Missing chunks migrate with their surfaces"
+      "closure_criteria": "Missing chunks migrate with their surfaces",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC."
     },
     {
       "id": "MG-EMAIL-TYPES",
@@ -575,7 +681,9 @@
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
       ],
       "decisions": [],
-      "closure_criteria": "Email types ported or owner-scoped"
+      "closure_criteria": "Email types ported or owner-scoped",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC."
     },
     {
       "id": "MG-RBAC-VOCAB",
@@ -592,7 +700,9 @@
         "packages/contracts/src/rbac.ts"
       ],
       "decisions": [],
-      "closure_criteria": "Permissions land with their admin operations"
+      "closure_criteria": "Permissions land with their admin operations",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC."
     },
     {
       "id": "MG-AUTH-EVENTS",
@@ -608,7 +718,9 @@
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
       ],
       "decisions": [],
-      "closure_criteria": "Event recording + admin data source"
+      "closure_criteria": "Event recording + admin data source",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC."
     },
     {
       "id": "MG-METAAPI-CADENCE",
@@ -622,26 +734,41 @@
         "§4.2"
       ],
       "evidence": [
-        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "docs/audits/2026-10-04-CAPABILITY-AUDIT-legacy-to-modern.md",
+        "apps/api/src/accounts/manualSyncService.ts",
+        "apps/api/src/accounts/manualSyncRoutes.ts",
+        "packages/contracts/src/metaapiSync.ts",
+        "apps/worker/src/scheduler/syncScheduler.ts",
+        "db/tests/manualSync.pg.test.ts"
       ],
       "decisions": [],
-      "closure_criteria": "Cadence decided + manual trigger or owner-acceptance"
+      "closure_criteria": "Cadence decided + manual trigger or owner-acceptance",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=PARTIAL/STATIC."
     },
     {
       "id": "MG-RMULTIPLE-SCALE",
       "section": "B",
       "title": "r_multiple scale 4 (legacy) vs 8 (modern)",
-      "status": "OPEN",
+      "status": "CLOSED",
       "priority": "P2",
-      "verification_state": "STATIC",
+      "verification_state": "CURRENT_RUNTIME_VERIFIED",
       "audit_refs": [
         "§9.1"
       ],
       "evidence": [
-        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "packages/domain/src/legacyParity.ts",
+        "packages/domain/src/legacyParity.test.ts",
+        "tools/load_rehearsal.ts"
       ],
       "decisions": [],
-      "closure_criteria": "Scale decision recorded + migration mapping"
+      "closure_criteria": "Scale decision recorded + migration mapping",
+      "closure_note": "CLOSED 2026-10-04 (Phase 4). The storage side was already decided (ADR-001 §3: numeric(20,8), 'storing at higher precision than display never loses parity'); what was missing was the COMPARISON rule, now in packages/domain/src/legacyParity.ts: imported values are preserved BY VALUE (the column normalises '1.6450' -> 1.64500000 and nothing rounds them again), and a historical recomputation is compared at the legacy scale (4) with the legacy rounding mode (bcmath-truncate). The mode is load-bearing: 1.000099999 truncates to '1.0000' but half-even rounds to '1.0001', so a recomputation using the modern default would fail ~1 in 10,000 non-terminating quotients. Truncation is toward zero and idempotent (the migration's own property). Verified by 8 unit tests and by the load rehearsal's gate 6, which recomputed 5 migrated trades with the production computePnl and matched both net PnL and R at scale 4.",
+      "last_updated": "2026-10-04",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=CLOSED/CURRENT_RUNTIME_VERIFIED, domain=OPEN/STATIC."
     },
     {
       "id": "MG-RANGE-GUARD",
@@ -661,7 +788,9 @@
         "apps/api/src/trades/tradeService.test.ts"
       ],
       "decisions": [],
-      "closure_criteria": "Guard implemented or owner-waived. Implemented 2026-10-04 (AC-13): legacy PnlCalculator::assertFits port - computePnl returns an explicit out-of-range result kind (netPnl 16 integer/8 fraction digits, rMultiple 10/8 - the legacy limits, stricter than the modern NUMERIC(20,2)/(20,8) columns so schema fit is guaranteed); tradeService maps it to the legacy error vocabulary (422 VALIDATION_FAILED, code OUT_OF_RANGE, messageKey errors.validation.range, field profitLoss/rMultiple) at both call sites (create + exit recompute). Verified: domain 17/17 incl. 6 boundary tests (16-digit pass / 17-digit reject, negative, shadowing order, 10-digit r pass / 11-digit reject); service 28/28 incl. 3 integration tests; full battery ALL PASS; typecheck 0 errors; secret-scan 0 findings. Mechanism divergence (deliberate, documented): result kind instead of throw, per ADR-001 §5 house style - the audit itself notes modern 'makes the branch explicit'."
+      "closure_criteria": "Guard implemented or owner-waived. Implemented 2026-10-04 (AC-13): legacy PnlCalculator::assertFits port - computePnl returns an explicit out-of-range result kind (netPnl 16 integer/8 fraction digits, rMultiple 10/8 - the legacy limits, stricter than the modern NUMERIC(20,2)/(20,8) columns so schema fit is guaranteed); tradeService maps it to the legacy error vocabulary (422 VALIDATION_FAILED, code OUT_OF_RANGE, messageKey errors.validation.range, field profitLoss/rMultiple) at both call sites (create + exit recompute). Verified: domain 17/17 incl. 6 boundary tests (16-digit pass / 17-digit reject, negative, shadowing order, 10-digit r pass / 11-digit reject); service 28/28 incl. 3 integration tests; full battery ALL PASS; typecheck 0 errors; secret-scan 0 findings. Mechanism divergence (deliberate, documented): result kind instead of throw, per ADR-001 §5 house style - the audit itself notes modern 'makes the branch explicit'.",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=CLOSED/RECORDED_RUNTIME."
     },
     {
       "id": "MG-DOMAIN-LEGACY-ONLY",
@@ -683,7 +812,9 @@
         "packages/domain/src/achievements.test.ts"
       ],
       "decisions": [],
-      "closure_criteria": "Ported or owner-dropped. PROGRESS 2026-10-04 (AC-14): JalaliCalendar ported to packages/domain/src/jalali.ts (pure, IO-free; gregorianToJalali verbatim, jalaliToGregorian + isJalaliLeap from the legacy single-owner TradeTimeNormalizer, formatJalaliDate; 11/11 tests incl. legacy golden vectors J1-J8 and full-day sweeps). OBSERVATION (verified against the executed legacy PHP itself): the legacy header's round-trip claim '1925..2124 / jy 1304..1503' is INACCURATE - the measured clean windows are gregorian-first 2000..2100 (every day) and jalali-first jy 1379..1478 except Esfand-30 of the 9 in-window leap years; outside them the legacy pair drifts (e.g. 1925-01-01 -> 1303/10/11 -> 1924-12-31). The port preserves legacy behavior verbatim (parity over correction); out-of-window drift is pinned by tests so any future algorithm change is loud; correcting the algorithm is an owner decision. PROGRESS 2026-10-04 (AC-15): TradingSessionEngine + SessionWindow ported to packages/domain/src/tradingSession.ts (never invents windows; explicit IANA zones; DST via platform tz database; cross-midnight; half-open [start,end); legacy validation rules incl. EST/offset rejection). 19/19 tests (legacy vectors S1-S21) PLUS a direct cross-check: the ACTUAL legacy PHP classes and the modern port produce IDENTICAL output on all 14 classification vectors (summer/winter DST, boundaries, cross-midnight, weekday filter). PROGRESS 2026-10-04 (AC-16): achievements engine ported at the DOMAIN level - packages/domain/src/achievements.ts: the complete two-definition legacy catalog (FIRST_TRADE, EMAIL_VERIFIED with their i18n keys - nothing invented), key normalization, exact metadata_json/timestamp formats (gmdate shapes), the idempotent first-unlock decision and fail-silent error semantics (legacy catch(Throwable) parity), and listForUser - with storage modeled as the injected AchievementStore port (domain stays IO-free per house rules). 11/11 tests. ALL THREE §9.3 dimensions now have domain ports. REMAINING for full parity (product-integration layer, not domain): user_achievements storage (additive migration), unlock triggers at first-trade / email-verification call sites, and the achievements email (live-service boundary; the achievement_notifications email flag already survives)."
+      "closure_criteria": "Ported or owner-dropped. PROGRESS 2026-10-04 (AC-14): JalaliCalendar ported to packages/domain/src/jalali.ts (pure, IO-free; gregorianToJalali verbatim, jalaliToGregorian + isJalaliLeap from the legacy single-owner TradeTimeNormalizer, formatJalaliDate; 11/11 tests incl. legacy golden vectors J1-J8 and full-day sweeps). OBSERVATION (verified against the executed legacy PHP itself): the legacy header's round-trip claim '1925..2124 / jy 1304..1503' is INACCURATE - the measured clean windows are gregorian-first 2000..2100 (every day) and jalali-first jy 1379..1478 except Esfand-30 of the 9 in-window leap years; outside them the legacy pair drifts (e.g. 1925-01-01 -> 1303/10/11 -> 1924-12-31). The port preserves legacy behavior verbatim (parity over correction); out-of-window drift is pinned by tests so any future algorithm change is loud; correcting the algorithm is an owner decision. PROGRESS 2026-10-04 (AC-15): TradingSessionEngine + SessionWindow ported to packages/domain/src/tradingSession.ts (never invents windows; explicit IANA zones; DST via platform tz database; cross-midnight; half-open [start,end); legacy validation rules incl. EST/offset rejection). 19/19 tests (legacy vectors S1-S21) PLUS a direct cross-check: the ACTUAL legacy PHP classes and the modern port produce IDENTICAL output on all 14 classification vectors (summer/winter DST, boundaries, cross-midnight, weekday filter). PROGRESS 2026-10-04 (AC-16): achievements engine ported at the DOMAIN level - packages/domain/src/achievements.ts: the complete two-definition legacy catalog (FIRST_TRADE, EMAIL_VERIFIED with their i18n keys - nothing invented), key normalization, exact metadata_json/timestamp formats (gmdate shapes), the idempotent first-unlock decision and fail-silent error semantics (legacy catch(Throwable) parity), and listForUser - with storage modeled as the injected AchievementStore port (domain stays IO-free per house rules). 11/11 tests. ALL THREE §9.3 dimensions now have domain ports. REMAINING for full parity (product-integration layer, not domain): user_achievements storage (additive migration), unlock triggers at first-trade / email-verification call sites, and the achievements email (live-service boundary; the achievement_notifications email flag already survives).",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=PARTIAL/RECORDED_RUNTIME."
     },
     {
       "id": "MG-OPS-TOOLING",
@@ -699,27 +830,38 @@
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
       ],
       "decisions": [],
-      "closure_criteria": "Modern equivalent or owner-dropped"
+      "closure_criteria": "Modern equivalent or owner-dropped",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC."
     },
     {
       "id": "MG-DATA-MIGRATION",
       "section": "B",
       "title": "ADR-004 sampling blocked; no cutover rehearsal; unmapped tables = data loss risk",
-      "status": "OPEN",
+      "status": "PARTIAL",
       "priority": "P1",
-      "verification_state": "NOT_VERIFIED",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§14"
       ],
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
-        "docs/migration-strategy.md"
+        "docs/migration-strategy.md",
+        "tools/load_rehearsal.ts",
+        "tools/lib/legacyLoadGates.ts",
+        "tools/legacyLoadGates.test.ts",
+        "db/data-step/fixtures/legacy-export.FIXTURE/",
+        "ops/backup/evidence/load-rehearsal-20261004T095828Z.json"
       ],
       "decisions": [
         "OD-AC-ADR004",
         "OD-AC-SUBMAP"
       ],
-      "closure_criteria": "Sampling decided; rehearsal executed with full validation gates"
+      "closure_criteria": "Sampling decided; rehearsal executed with full validation gates",
+      "closure_note": "PARTIAL 2026-10-04 (Phase 4). The gates are now executable and refusing: tools/load_rehearsal.ts runs the A-gates (source/locale/leverage/direction vocabularies, money fraction digits, symbol canonicalisation, time census, canonical-email uniqueness, referential integrity, the v0.3 financial guards, and A12 field-level mapping), loads id-preservingly, then runs the B-gates plus gate 6 (PnL golden recomputation under the legacy rounding mode). A rehearsal was EXECUTED against a disposable PostgreSQL on the synthetic fixture: A-gates reported MAPPED/QUARANTINE/RECORDED, the load preserved ids (4 users / 3 accounts / 5 trades / 2 exits), row-count and money parity matched exactly (commission 16.50, swap -1.00, net 1484.50) and all 5 trades recomputed to their stored values including R at scale 4. BLOCKED on the owner (unchanged): (a) the ADR-004 naive-datetime sampling decision — unresolved rows were QUARANTINED, never interpreted; (b) a REAL export produced by the transform tool, which needs the read-only source access the audit registers as an owner decision. Also open: the legacy plan/subscription lifecycle has no target (see MG-SCHEMA-MAPPING).",
+      "last_updated": "2026-10-04",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/RECORDED_RUNTIME, domain=OPEN/NOT_VERIFIED."
     },
     {
       "id": "MG-DOC-1",
@@ -736,7 +878,9 @@
       ],
       "decisions": [],
       "closure_criteria": "README status corrected",
-      "closure_note": "README rewritten (CHANGE_LOG AC-2, commit 59047b8)"
+      "closure_note": "README rewritten (CHANGE_LOG AC-2, commit 59047b8)",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=CLOSED/STATIC, domain=CLOSED/STATIC."
     },
     {
       "id": "MG-DOC-2",
@@ -753,7 +897,9 @@
       ],
       "decisions": [],
       "closure_criteria": "README corrected",
-      "closure_note": "ADR count corrected + docs/adr/README.md (AC-2, 59047b8)"
+      "closure_note": "ADR count corrected + docs/adr/README.md (AC-2, 59047b8)",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=CLOSED/STATIC, domain=CLOSED/STATIC."
     },
     {
       "id": "MG-DOC-3",
@@ -774,7 +920,9 @@
       ],
       "decisions": [],
       "closure_criteria": "Roadmap reconciled with audit + main in an owner-reviewed docs change",
-      "closure_note": "Reconciliation banner added; rows unedited per owner instruction; row-level reconciliation owner-gated (AC-2, 59047b8)"
+      "closure_note": "Reconciliation banner added; rows unedited per owner instruction; row-level reconciliation owner-gated (AC-2, 59047b8)",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC."
     },
     {
       "id": "MG-DOC-4",
@@ -791,7 +939,9 @@
       ],
       "decisions": [],
       "closure_criteria": "Citation corrected",
-      "closure_note": "Citation corrected in attachmentService.ts; battery 804/804 + migrations 19/19 at fix commit (AC-2/AC-3, 59047b8)"
+      "closure_note": "Citation corrected in attachmentService.ts; battery 804/804 + migrations 19/19 at fix commit (AC-2/AC-3, 59047b8)",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=CLOSED/STATIC, domain=CLOSED/STATIC."
     },
     {
       "id": "MG-DOC-5",
@@ -810,7 +960,9 @@
       ],
       "decisions": [],
       "closure_criteria": "Supersession markers added",
-      "closure_note": "Lineage banners on all three reports; content unedited (AC-2, 59047b8)"
+      "closure_note": "Lineage banners on all three reports; content unedited (AC-2, 59047b8)",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=CLOSED/STATIC, domain=CLOSED/STATIC."
     },
     {
       "id": "MG-DOC-6",
@@ -827,7 +979,9 @@
       ],
       "decisions": [],
       "closure_criteria": "Gap explained or ADR-015 created",
-      "closure_note": "docs/adr/README.md documents ADR-015 as intentionally unassigned (AC-2, 59047b8)"
+      "closure_note": "docs/adr/README.md documents ADR-015 as intentionally unassigned (AC-2, 59047b8)",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=CLOSED/STATIC, domain=CLOSED/STATIC."
     },
     {
       "id": "MG-OBS-1",
@@ -844,7 +998,9 @@
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
       ],
       "decisions": [],
-      "closure_criteria": "Owner rules which reading is authoritative IF the split ever becomes decision-relevant"
+      "closure_criteria": "Owner rules which reading is authoritative IF the split ever becomes decision-relevant",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/OWNER_DECISION_REQUIRED, domain=OPEN/OWNER_DECISION_REQUIRED."
     },
     {
       "id": "MG-OBS-2",
@@ -858,7 +1014,9 @@
         "docs/provenance/REMOTE_LINEAGE.md"
       ],
       "decisions": [],
-      "closure_criteria": "Tag pushed or REMOTE_LINEAGE.md amended by owner decision"
+      "closure_criteria": "Tag pushed or REMOTE_LINEAGE.md amended by owner decision",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC."
     },
     {
       "id": "MG-OBS-3",
@@ -873,7 +1031,9 @@
         "docs/reconciliation/METAAPI_OWNER_DECISIONS.md"
       ],
       "decisions": [],
-      "closure_criteria": "Owner accepts absence or orders recovery"
+      "closure_criteria": "Owner accepts absence or orders recovery",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/NOT_VERIFIED, domain=OPEN/NOT_VERIFIED."
     },
     {
       "id": "MG-OBS-4",
@@ -887,7 +1047,9 @@
         "AGENTS.md"
       ],
       "decisions": [],
-      "closure_criteria": "Fixed by the ADR-017 introducing commit (CHANGE_LOG AC-1)"
+      "closure_criteria": "Fixed by the ADR-017 introducing commit (CHANGE_LOG AC-1)",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=CLOSED/STATIC, domain=CLOSED/STATIC."
     },
     {
       "id": "MG-OBS-5",
@@ -905,22 +1067,119 @@
       "decisions": [
         "OD-M-PA-3"
       ],
-      "closure_criteria": "Owner confirms the source-verified reading (OD-M-PA-3)"
+      "closure_criteria": "Owner confirms the source-verified reading (OD-M-PA-3)",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC."
     },
     {
       "id": "MG-OBS-6",
       "section": "E",
-      "title": "tools/pg-smoke.ts S1b asserts stale D1-era migration list [0001..0005] vs tree 0001..0022 — D1 smoke cannot pass on current tree (migrations themselves apply cleanly; batteries unaffected)",
+      "title": "tools/pg-smoke.ts S1b asserts stale D1-era migration list [0001..0005] vs tree 0001..0023 — D1 smoke could not pass on current tree (migrations themselves apply cleanly; batteries unaffected)",
       "status": "CLOSED",
+      "priority": "P3",
+      "verification_state": "CURRENT_RUNTIME_VERIFIED",
+      "audit_refs": [
+        "AC-10"
+      ],
+      "evidence": [
+        "tools/pg-smoke.ts (expected migration set now discovered from db/migrations/)",
+        "npx tsx tools/pg-smoke.ts → S1–S9 ALL PASSED on fresh PostgreSQL 16.15, 23/23 migrations, re-run no-op (2026-10-04)",
+        "tools/pg-smoke.ts"
+      ],
+      "decisions": [
+        "The owner's own fix is pushed as feat/mg-obs-6-pg-smoke-expectation (9d59bca, not merged); this branch carries that file's EXACT content (byte-identical, verified) so the two branches cannot conflict. The change is test-only and reversible."
+      ],
+      "closure_criteria": "MET 2026-10-04 (AC-10)",
+      "related": [],
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=CLOSED/CURRENT_RUNTIME_VERIFIED, domain=CLOSED/STATIC."
+    },
+    {
+      "id": "MG-TG-4",
+      "section": "E",
+      "title": "Audit round two (AC-10): telegram:journal and telegram:analyze were declared in the contract and SECURITY.md but enforced nowhere; the media path ignored getFile's declared file_size before downloading; the webhook ingress was bounded at the kernel's 1 MiB JSON default",
+      "status": "CLOSED",
+      "priority": "P2",
+      "verification_state": "CURRENT_RUNTIME_VERIFIED",
+      "audit_refs": [
+        "AC-10"
+      ],
+      "evidence": [
+        "apps/api/src/telegram/telegramBot.ts (withinJournalBudget / withinAnalyzeBudget, checked BEFORE the download and the model call)",
+        "apps/api/src/telegram/telegramBot.ts fetchBytes (declared-size pre-check, 5 MiB) + telegramApi.ts downloadFile (post-check retained)",
+        "apps/api/src/telegram/telegramRoutes.ts TELEGRAM_WEBHOOK_MAX_BODY_BYTES = 256 KiB → 400 VALIDATION_FAILED",
+        "tests: 6 new bot-wiring tests + 1 webhook bound assertion; each fails without its fix",
+        "SECURITY.md §7 key→call-site table; ADR-018 Amendment 1"
+      ],
+      "decisions": [
+        "Contract rate-limit VALUES unchanged — nothing loosened to make a test pass.",
+        "No new error code invented for the webhook bound; the kernel's existing oversized-body contract is reused."
+      ],
+      "closure_criteria": "MET 2026-10-04 (AC-10)"
+    },
+    {
+      "id": "MG-TG-1",
+      "section": "E",
+      "title": "Telegram journal client (ADR-018) is implemented and tested against scripted transports, but NO live round trip exists: no bot token and no provider credential are in scope, so real Telegram delivery, real Gemini calls and a deployed webhook remain unproven",
+      "status": "OPEN",
+      "priority": "P2",
+      "verification_state": "NOT_VERIFIED",
+      "audit_refs": [],
+      "evidence": [
+        "docs/telegram/DEPLOYMENT.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "Owner supplies TELEGRAM_BOT_TOKEN + GEMINI_API_KEY in a deployed environment; setWebhook registered; one journal confirmed end-to-end from a real Telegram account and observed in the web journal"
+    },
+    {
+      "id": "MG-TG-2",
+      "section": "E",
+      "title": "n8n relay transport for media/AI is deliberately NOT implemented: the Remote/PHP era's `n8n_relay` variant has no relay URL, contract or deployment in Modern, so building one would invent an integration rather than reuse one. The `MediaInterpreter` seam is the single place it would be added",
+      "status": "PARTIAL",
       "priority": "P3",
       "verification_state": "STATIC",
       "audit_refs": [],
       "evidence": [
-        "tools/pg-smoke.ts"
+        "docs/adr/ADR-018-telegram-journal-client.md",
+        "apps/api/src/ai/n8nRelayTransport.ts"
       ],
       "decisions": [],
-      "closure_criteria": "Test-side expectation update (owner-gated)",
-      "closure_note": "Fixed by AC-9 (2026-10-03, charter-authorized): S1b now derives its expectation from db/migrations (sorted .sql files, floor >= 22). Evidence: fixed smoke on fresh disposable PostgreSQL 17.11 - PASS S1a..S9 ALL CHECKS PASSED, 22 migrations applied, idempotency re-confirmed. Branch feat/mg-obs-6-pg-smoke-expectation. PG 17.11 caveat (not PG16)."
+      "closure_criteria": "Owner decision: implement a relay transport behind `MediaInterpreter` (with an owner-provided relay contract) or record the drop permanently",
+      "closure_note": "PARTIAL 2026-10-05 (Phase 7). The relay is no longer 'deliberately not implemented': apps/api/src/ai/n8nRelayTransport.ts speaks Legacy's contract exactly (POST {url} with X-Velora-Relay-Token, body {request_id, prompt, image_base64?, mime_type?}, 200 {success, model, extraction, meta}, failure {success:false, error:{code, http_status}} mapped onto typed errors), is https-only, keeps the token out of every URL, log, error and response, and is admin-configurable at /api/v1/admin/ai/relay with the value stored encrypted and never returned (only host + configured + tokenPresent). The route precedence is Legacy's (admin setting → env → direct). Contract-tested with an injected fetch: a LIVE relay round trip remains NOT_VERIFIED because no relay URL/token is in scope.",
+      "last_updated": "2026-10-05"
+    },
+    {
+      "id": "MG-TG-3",
+      "section": "E",
+      "title": "Telegram work runs synchronously in the API process (deferred after the webhook 200); no queue/worker path is used because `apps/worker` is not deployed. A long media download plus a model call therefore occupies an API request slot after the answer",
+      "status": "OPEN",
+      "priority": "P3",
+      "verification_state": "STATIC",
+      "audit_refs": [],
+      "evidence": [
+        "apps/api/src/telegram/telegramUpdatePipeline.ts"
+      ],
+      "decisions": [],
+      "closure_criteria": "Worker deployed (MG-WORKER-DEPLOY) and the deferred task moved onto the existing queue with the claim row already in place"
+    },
+    {
+      "id": "MG-AI-ANONYMIZE",
+      "section": "C",
+      "title": "Image redaction before external AI egress has no implementation — the gate fails closed instead",
+      "status": "OPEN",
+      "priority": "P2",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§3.4"
+      ],
+      "evidence": [
+        "apps/api/src/ai/imageAnonymizer.ts",
+        "apps/api/src/ai/aiManager.ts",
+        "docs/audits/2026-10-05-PHASE7-STATUS.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "An anonymizer that can actually redact is wired, or the owner accepts that external vision stays disabled",
+      "closure_note": "Legacy blurs the top 15% of an image with GD before any external provider sees it, and returns null when GD is missing — callers MUST then refuse to send the original. Modern has no image library, so UnavailableImageAnonymizer reports 'cannot guarantee' and AiManager refuses external image egress, which routes screenshot extraction to the LOCAL Tesseract fallback. The security property holds (no unredacted screenshot leaves the machine); the capability lost is Gemini vision. Adding an image dependency is an owner decision, not a migration step, so it is recorded rather than silently taken.",
+      "last_updated": "2026-10-05"
     },
     {
       "id": "MG-OBS-7",
@@ -939,7 +1198,8 @@
       ],
       "decisions": [],
       "closure_criteria": "Schedule() carries a full descriptor; malformed jobs DLQ instead of crashing",
-      "closure_note": "Fixed by AC-10 (2026-10-03, charter Wave-1 Task 2): pgBossAdapter.schedule() now passes a complete maintenance-policy JobDescriptor as the schedule data (pg-boss timekeeper copies it verbatim into fired jobs); runner routes descriptor-less jobs to the no-handler/DLQ path with reason NO_HANDLER:unknown instead of crashing. Evidence: pre-fix crash reproduced (process exit 1); post-fix, a malformed job is DLQed with the process alive AND the real timekeeper fired the analytics tick end-to-end on disposable PG 17.11 (scheduler.analytics_tick count=1 -> job.done analytics.recompute-tick -> analytics.recomputed count=1 -> job.done analytics.recompute-daily; user_analytics_daily row materialized). Gates: unit battery ALL PASS; pgBossAdapter.pg.test.ts 16/16 on real PG (3 new subtests); typecheck 0 errors; secret-scan 0 findings. Branch feat/mg-obs-7-worker-tick-descriptor (unmerged; no PR merge authorization). PG 17.11 caveat: not PG16. Deployment itself remains MG-WORKER-DEPLOY (OPEN). DLQ precision (owner-directed, 2026-10-04): physical velora.dlq persistence is proven ONLY for send()-enqueued jobs (pre-existing exhaustion test); the malformed raw-inserted job is terminally failed IN PLACE (state=failed, output={dlq:true, reason:NO_HANDLER:unknown}, never redelivered - integration test, direct SQL). The live-cluster malformed job's final DB state was not inspected; only the no-handler log line and process survival are live evidence."
+      "closure_note": "Fixed by AC-10 (2026-10-03, charter Wave-1 Task 2): pgBossAdapter.schedule() now passes a complete maintenance-policy JobDescriptor as the schedule data (pg-boss timekeeper copies it verbatim into fired jobs); runner routes descriptor-less jobs to the no-handler/DLQ path with reason NO_HANDLER:unknown instead of crashing. Evidence: pre-fix crash reproduced (process exit 1); post-fix, a malformed job is DLQed with the process alive AND the real timekeeper fired the analytics tick end-to-end on disposable PG 17.11 (scheduler.analytics_tick count=1 -> job.done analytics.recompute-tick -> analytics.recomputed count=1 -> job.done analytics.recompute-daily; user_analytics_daily row materialized). Gates: unit battery ALL PASS; pgBossAdapter.pg.test.ts 16/16 on real PG (3 new subtests); typecheck 0 errors; secret-scan 0 findings. Branch feat/mg-obs-7-worker-tick-descriptor (unmerged; no PR merge authorization). PG 17.11 caveat: not PG16. Deployment itself remains MG-WORKER-DEPLOY (OPEN). DLQ precision (owner-directed, 2026-10-04): physical velora.dlq persistence is proven ONLY for send()-enqueued jobs (pre-existing exhaustion test); the malformed raw-inserted job is terminally failed IN PLACE (state=failed, output={dlq:true, reason:NO_HANDLER:unknown}, never redelivered - integration test, direct SQL). The live-cluster malformed job's final DB state was not inspected; only the no-handler log line and process survival are live evidence.",
+      "reconciled_2026_10_05": "2026-10-05 lineage union: row originated on feat/mg-domain-legacy-only-achievements (AC-19..AC-26)."
     }
   ],
   "owner_decisions": [
@@ -1101,6 +1361,16 @@
       "verification_state": "STATIC",
       "evidence": [
         "apps/worker/src/index.ts"
+      ]
+    },
+    {
+      "area": "Telegram journal client (ADR-018)",
+      "claim": "First-class client on the existing platform: migration 0023 (6 tables + widened audit vocabulary), one-time SHA-256 link tokens with single-use consumption in one conditional UPDATE, identity from bearer/Telegram id only, journal writes through TradeService, AI behind the existing AiProvider boundary, one update-stream consumer enforced three ways. Runtime NOT VERIFIED against live Telegram/Gemini services (MG-TG-1)",
+      "verification_state": "RECORDED_RUNTIME",
+      "evidence": [
+        "docs/telegram/DEPLOYMENT.md",
+        "docs/telegram/SECURITY.md",
+        "docs/telegram/README.md"
       ]
     }
   ]

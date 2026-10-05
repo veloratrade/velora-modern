@@ -71,3 +71,52 @@
 .text-error{color:#fca5a5}
 .code-block{background:rgba(255,255,255,.04);padding:12px;border-radius:10px;overflow-x:auto;font-size:11px}
 .font-900{font-weight:900}
+
+/* --- Phase 1 account surface (profile + settings) ---------------------------
+   Additive only: the identity fact list and the preference rows reuse the
+   existing hairline separators, radii and type scale. No existing class is
+   replaced, and nothing here changes the look of the pages that shipped before.
+   The profile avatar is the sidebar's own `.sb-av` (shell.css) — not a new one. */
+.pf-facts{margin:0;}
+.pf-fact{display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.06);}
+.pf-fact:last-child{border-bottom:none;}
+.pf-fact dt{margin:0;}
+.pf-fact dd{margin:0;font-size:13px;font-weight:700;color:#edeae0;}
+.pref-row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06);}
+.pref-row:last-child{border-bottom:none;}
+.pref-row .label{margin-bottom:0;}
+
+/* Phase 1 polish: inline `style={{…}}` was replaced by these utilities so the
+   account surface ships zero inline styles under the nonce CSP. Names follow
+   the existing scale (.mt-4/.mb-8/.flex-gap-8) — additive, nothing replaced. */
+.flex-center{align-items:center}
+.inline-block{display:inline-block}
+.mb-2{margin-bottom:2px}
+.select-locale{min-width:160px}
+
+/* Phase 5 — support center. Same rule the Phase 1 polish established: NO inline
+   `style={{…}}` on the page, because the production CSP ships `style-src 'self'
+   'nonce-…'` and a style ATTRIBUTE is blocked unless `unsafe-hashes` is granted
+   (observed in the browser: the thread's grid/colors silently degraded while the
+   build stayed green). Names extend the existing scale — additive, nothing
+   replaced, and the palette is the app's own gold/green/blue. */
+.clickable{cursor:pointer}
+.ms-auto{margin-inline-start:auto}
+.bubble{padding:12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);}
+.bubble-mine{border-color:rgba(252,227,138,.3)}
+.bubble-support{border-color:rgba(76,211,154,.3)}
+.thread-msg{margin-top:8px;font-size:13px;line-height:1.9;color:#e8eef7;white-space:pre-wrap;}
+.role-mine{color:#fce38a}
+.role-support{color:#4CD39A}
+.kpi-gold{color:#fce38a}
+.kpi-green{color:#4CD39A}
+.kpi-blue{color:#3B82F6}
+/* A MIXED date+time string in a Persian sentence. `.v-latn-num` carries
+   `direction:ltr`, which is right for a NUMBER or a raw ISO stamp (Legacy used it
+   that way) but WRONG for a formatted date: in an LTR embedding the Jalali date
+   and the clock time swap places around the comma (measured in the browser by
+   character position: an RTL paragraph reads it in the natural order, the LTR
+   embedding does not). Latin digits are still guaranteed — `fmtDateLong` runs
+   every formatted value through `toLatin` — so this class only restores the
+   reading order. */
+.ts-mixed{font-variant-numeric:lining-nums}

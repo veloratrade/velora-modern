@@ -1,0 +1,58 @@
+{
+  "schema": "velora-backup/2",
+  "backup_id": "db-backup-staging-20261004095454-bb023e0cab03",
+  "environment": "staging",
+  "backup_type": "database",
+  "source_commit_sha": "1c847b8b898d8fe9d76650ff540697f3a924468c",
+  "created_at": "2026-10-04T09:54:54Z",
+  "sha256": "b289558f1219a5b4822333ebeed5723436dfff52f90aafeb3069828f35d55c57",
+  "size_bytes": 32926,
+  "db_engine": "postgresql",
+  "verification_status": "RESTORE_VERIFIED",
+  "storage_status": "NONE",
+  "stored_at": null,
+  "release_tag": null,
+  "backup_repo": "veloratrade/velora-backups",
+  "creation_mechanism": "pg_dump custom+gzip via ops/backup/create_pg_backup.sh",
+  "restore_drill": {
+    "drill_id": "restore-drill-staging-20261004T095454Z",
+    "drill_at": "2026-10-04T09:54:55.920Z",
+    "restored_into": "127.0.0.1:54329/velora_phase4_drill",
+    "source": "127.0.0.1:54329/velora_phase1",
+    "durations_ms": {
+      "backup_ms": 169,
+      "restore_ms": 343,
+      "parity_ms": 162,
+      "smoke_ms": 856,
+      "total_ms": 1533
+    },
+    "parity": {
+      "ok": true,
+      "tables_compared": 44,
+      "numeric_columns_compared": 49,
+      "mismatches": [],
+      "observations": []
+    },
+    "ledger": {
+      "ok": true,
+      "mismatches": []
+    },
+    "smoke": {
+      "ok": true,
+      "passed": 11,
+      "failed": 0,
+      "detail": "S1..S9 passed against the restored copy"
+    },
+    "backup_gate": {
+      "ok": false,
+      "reasons": [
+        "missing evidence: release_tag",
+        "storage_status must be exactly 'STORAGE_VERIFIED' (uploaded is not verified), got 'NONE'"
+      ]
+    },
+    "notes": [
+      "Parity gates on row counts and exact decimal SUMs per numeric column, discovered from pg_catalog; physical relation sizes are recorded as observations only (a live source accumulates dead tuples).",
+      "storage_status is NOT_NONE only after an uploader re-hashes the stored bytes (ADR-012); this drill does not upload."
+    ]
+  }
+}

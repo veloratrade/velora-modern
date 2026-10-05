@@ -45,6 +45,49 @@ export interface MetaApiSyncPayload extends SafeJobPayload {
 }
 
 /**
+ * How far back a FIRST-EVER sync reaches — 12 months.
+ *
+ * Mirrors the VERIFIED Legacy bound (`months` clamped to 12, floor `-12 months`)
+ * and is the same number the worker's tick used; it lives here because THREE
+ * producers now ask for a sync (the scheduled tick, the webhook ingress and the
+ * user-triggered POST /accounts/{id}/sync) and a window rule that exists in
+ * three places is a window rule that eventually disagrees with itself. It
+ * already did once: the ingress used 24 hours while the tick used 12 months for
+ * the SAME idempotency key shape, so the two producers could ask for different
+ * windows for one account.
+ */
+export const SYNC_INITIAL_LOOKBACK_MS = 365 * 24 * 60 * 60 * 1000;
+
+/** A half-open sync window: `from` inclusive, `to` exclusive, both ISO-8601 UTC. */
+export interface SyncWindow {
+  readonly from: string;
+  readonly to: string;
+}
+
+/**
+ * The ONE window rule: start at the durable cursor, or at the lookback bound on
+ * a first-ever sync, and end at `now`.
+ *
+ * Returns `null` when the window would be empty or inverted (`from >= to`) —
+ * an empty window asks the provider for nothing, and manufacturing a job that
+ * asks for nothing is work invented to be discarded. Callers treat null as
+ * "nothing to sync", never as an error.
+ *
+ * A cursor that does not parse as a date (corrupt row, hand-edited value) is
+ * treated as ABSENT rather than trusted: the window then falls back to the
+ * lookback bound, which over-asks bounded history instead of sending a garbage
+ * bound to the provider.
+ */
+export function syncWindow(cursor: string | null, now: Date): SyncWindow | null {
+  const parsed = cursor === null ? Number.NaN : Date.parse(cursor);
+  const from = Number.isFinite(parsed)
+    ? new Date(parsed).toISOString()
+    : new Date(now.getTime() - SYNC_INITIAL_LOOKBACK_MS).toISOString();
+  const to = now.toISOString();
+  return from < to ? { from, to } : null;
+}
+
+/**
  * One MetaAPI history deal, as consumed after transport-level validation.
  *
  * Field names mirror the provider's documented response. Everything is

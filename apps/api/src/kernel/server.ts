@@ -28,6 +28,7 @@ import { dispatchExtendedRoutes } from "../routes/extendedRoutes.js";
 import { AuthService, AuthError } from "../auth/authService.js";
 import { AdminUserService, type ActorContext } from "../auth/adminUserService.js";
 import { OwnershipService } from "../auth/ownershipService.js";
+import type { AuthEventStore } from "../auth/authEventStore.js";
 import { AccountService, AccountError } from "../accounts/accountService.js";
 import { TradeService, TradeError } from "../trades/tradeService.js";
 import { CredentialService, CredentialError } from "../credentials/credentialService.js";
@@ -55,6 +56,12 @@ export interface ApiConfig {
   readonly trades?: TradeService;
   /** Phase 3B-4 admin user management. Absent → admin user routes fail closed (503). */
   readonly adminUsers?: AdminUserService;
+  /**
+   * Authentication-attempt history (SEC-03, migration 0024). Absent → the
+   * login-history route fails closed (503) rather than answering "no events",
+   * which would state a fact it cannot know.
+   */
+  readonly authEvents?: AuthEventStore;
   /** System Owner bootstrap. Absent → ownership routes fail closed (503). */
   readonly ownership?: OwnershipService;
   /**
@@ -90,20 +97,55 @@ export interface ApiConfig {
   readonly webhooks?: import("../webhooks/metaApiWebhookService.js").MetaApiWebhookService;
   /** v0.2 connection status monitor. */
   readonly syncStatus?: import("../accounts/syncStatusService.js").SyncStatusStore;
+  /**
+   * v0.2 user-triggered sync (TRD-06). Absent ⇒ POST /accounts/{id}/sync answers
+   * the documented fail-closed 503 rather than silently accepting a request no
+   * queue will ever see.
+   */
+  readonly manualSync?: import("../accounts/manualSyncService.js").ManualSyncService;
   /** v0.5 analytics reads. */
   readonly analytics?: import("../analytics/analyticsStore.js").AnalyticsStore;
   /** v0.5 journal tags. */
   readonly tags?: import("../tags/tagService.js").TagStore;
   /** v0.5 trade attachments (screenshots). */
   readonly attachments?: import("../attachments/attachmentService.js").AttachmentService;
+  /** Phase 5: the support ticket capability (Legacy api/src/Support/, migrated). */
+  readonly support?: import("../support/supportService.js").SupportService;
   /** v1.0 subscriptions (Stripe). */
   readonly subscriptions?: import("../billing/subscriptionService.js").SubscriptionStore;
   /** v1.0 AI coach insight store + consent. */
   readonly aiCoach?: import("../aicoach/aiCoachRoutes.js").AiCoachStore;
   /** v1.0 admin read surface (audit trail + platform KPIs). */
   readonly admin?: import("../admin/adminRoutes.js").AdminStore;
+  /**
+   * Phase 6 admin console (overview, analytics, system health, security feeds,
+   * the per-user account operations and the platform-wide lists).
+   *
+   * Absent → every console route answers the documented fail-closed 503. It is a
+   * SEPARATE slot from `admin` above because the two have different lifetimes: the
+   * audit/KPI store is a leaf read port, while the console composes that store's
+   * neighbourhood with the admin user service and the ownership resolver.
+   */
+  readonly adminConsole?: import("../admin/adminConsoleRoutes.js").AdminConsoleCapability;
+  /** Phase 7 — the AI capability: analysis, report, feedback, status, ledger reads. */
+  readonly ai?: import("../ai/aiRoutes.js").AiCapability;
+  /** Phase 7 — the admin AI configuration surface (chains, secrets, route, relay, usage). */
+  readonly aiAdmin?: import("../ai/aiAdminRoutes.js").AiAdminCapability;
+  /** Phase 7 — the support console's AI assists (translate, copilot, draft). */
+  readonly supportAi?: import("../support/supportAiRoutes.js").SupportAiCapability;
   /** v1.5 portfolio / prop drawdown / FX reads. */
   readonly portfolio?: import("../portfolio/portfolioRoutes.js").PortfolioStore;
+  /**
+   * Telegram journal client (ADR-018 / migration 0023): linking, the bot
+   * surface and the webhook ingress, composed in one place because they share
+   * one store, one config resolution and one update pipeline.
+   *
+   * Absent when the bot token is missing, or when `TELEGRAM_UPDATE_MODE` does
+   * not name a consumer, or when polling was refused in production — the whole
+   * surface then answers its documented fail-closed 503 and the rest of the
+   * product is unaffected.
+   */
+  readonly telegram?: import("../telegram/telegramRoutes.js").TelegramCapability;
   /** v2.0 EA ingestion store. */
   readonly ea?: import("../ea/eaRoutes.js").EaStore;
   /** v2.0 sync dispatch used by EA ingestion (falls back to durable-only). */
@@ -124,10 +166,16 @@ export interface ApiConfig {
   readonly developerKeys?: import("../developer/developerAuth.js").DeveloperKeyAuth;
 }
 
-/** Throttled routes (inc 7): the implemented Local auth routes with
- * PHP-verified dispatch-level limits (C-14). Phase H/I/J routes have no Local
- * route yet — their C-14 defaults light up when those routes land. */
-export const THROTTLED_AUTH_ROUTES: Readonly<Record<string, RateLimitKey>> = {
+/**
+ * Throttled routes with a STATIC path.
+ *
+ * Started (inc 7) as the Local auth routes with PHP dispatch-level limits
+ * (C-14); SEC-02 added the provider/ingress routes, so the name is no longer
+ * auth-only. Phase H/I/J routes still have no Local route — their C-14 defaults
+ * light up when those routes land. Dynamic paths live in
+ * THROTTLED_PATTERN_ROUTES below; `throttleKeyFor()` reads both.
+ */
+export const THROTTLED_ROUTES: Readonly<Record<string, RateLimitKey>> = {
   "POST /api/v1/auth/register": "auth:register",
   "POST /api/v1/auth/login": "auth:login",
   "POST /api/v1/auth/refresh": "auth:refresh",
@@ -138,9 +186,74 @@ export const THROTTLED_AUTH_ROUTES: Readonly<Record<string, RateLimitKey>> = {
   "POST /api/v1/auth/resend-verification": "auth:resend-verification",
   "POST /api/v1/auth/forgot-password": "auth:forgot-password",
   "POST /api/v1/auth/reset-password": "auth:reset-password",
+  // SEC-02: routes whose work leaves the process — a provider login check and
+  // an ingress that a third party drives. Legacy throttled both at dispatch.
+  "POST /api/v1/accounts/detect-server": "accounts:detect-server",
+  "POST /api/v1/webhooks/metaapi": "webhooks:metaapi",
+  // Phase 5: support writes (create / reply / reopen). Opening a ticket and
+  // replying are the two operations that can be used to flood the inbox, so they
+  // share one bucket per user. Reads are unbounded but cheap and ownership-scoped.
+  "POST /api/v1/support/tickets": "support:write",
+  // Phase 7: the three AI operations whose work leaves the process and costs
+  // money. Legacy's per-user limits, carried over verbatim (AIController):
+  // analyze 10/3600, weekly report 5/3600, feedback 20/3600.
+  "POST /api/v1/ai/analyze-trades": "ai:analyze",
+  "POST /api/v1/ai/weekly-report": "ai:report",
+  "POST /api/v1/ai/feedback": "ai:feedback",
 };
 
-type RouteResult = { status: number; body: unknown; headers?: Record<string, string> };
+/**
+ * Throttled routes with a DYNAMIC segment (SEC-02).
+ *
+ * PHP matched these with `preg_match('~\A/api/v1/accounts/\d+/sync\z~D', …)`;
+ * the exact-match map above cannot express a path that carries a resource id,
+ * so dynamic paths get their own ordered rule list. Rules are tried in order and
+ * the FIRST match wins, so a more specific rule must be listed before a broader
+ * one. The method is part of every rule for the same reason it is part of the
+ * map key: throttling must not accidentally cover a read.
+ *
+ * `throttleKeyFor()` is the single lookup both the dispatcher and the tests use,
+ * so the table cannot drift from the behaviour it claims to describe.
+ */
+export const THROTTLED_PATTERN_ROUTES: readonly {
+  readonly method: string;
+  readonly pattern: RegExp;
+  readonly key: RateLimitKey;
+}[] = [
+  // The provisioning call: it verifies a broker login against the provider and
+  // is the expensive, abuse-worthy operation Legacy limited to 5 per 15 min
+  // ("metaapi-connect"). `[^/]+` matches Modern's account-id contract (ids are
+  // opaque strings, not integers as in PHP).
+  // TRD-06: Legacy throttled POST /accounts/{id}/sync at 20/300. It is a cheap
+  // route (it enqueues; the WORKER does the provider call) but an unbounded one
+  // would let a single user hammer the queue, so the bucket is carried over
+  // verbatim now that the route exists.
+  // Phase 5: the id-bearing support writes. `messages` and `reopen` mutate a
+  // ticket's state (and `reopen` is the loop that could be used to re-open a
+  // closed ticket forever), so they carry the same bucket as creation.
+  { method: "POST", pattern: /^\/api\/v1\/support\/tickets\/[^/]+\/(messages|reopen)$/, key: "support:write" },
+  { method: "POST", pattern: /^\/api\/v1\/admin\/communications\/tickets\/[^/]+\/(messages|status)$/, key: "support:write" },
+  { method: "POST", pattern: /^\/api\/v1\/accounts\/[^/]+\/sync$/, key: "accounts:sync" },
+  { method: "POST", pattern: /^\/api\/v1\/accounts\/[^/]+\/metaapi\/connect$/, key: "accounts:metaapi-connect" },
+  // SEC-02: Legacy threw `admin-user-action` (30/300) inside the two handlers
+  // that mutate a user — setStatus and setRole — rather than at dispatch. Modern
+  // has the same two operations, so the same limit covers the same surface; the
+  // ids are opaque strings here, hence a pattern rather than the exact map.
+  { method: "PATCH", pattern: /^\/api\/v1\/admin\/users\/[^/]+\/role$/, key: "admin:user-action" },
+  { method: "PATCH", pattern: /^\/api\/v1\/admin\/users\/[^/]+\/status$/, key: "admin:user-action" },
+];
+
+/** The bucket a request falls into, or undefined when the route is unthrottled. */
+export function throttleKeyFor(method: string, path: string): RateLimitKey | undefined {
+  const exact = THROTTLED_ROUTES[`${method} ${path}`];
+  if (exact !== undefined) return exact;
+  for (const rule of THROTTLED_PATTERN_ROUTES) {
+    if (rule.method === method && rule.pattern.test(path)) return rule.key;
+  }
+  return undefined;
+}
+
+type RouteResult = { status: number; body: unknown; headers?: Record<string, string | string[]> };
 
 class BodyParseError extends Error {}
 
@@ -235,10 +348,32 @@ type EffectiveApiConfig = ApiConfig & { readonly rateLimiter: RateLimiter };
 
 async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { requestId: string; nonce: string }): Promise<RouteResult> {
   // ---- Phase C identity route helpers (Remote-verified cookie/body contracts) ----
-  const REFRESH_COOKIE_NAME = "refresh_token";
+  // SEC-04 — the refresh credential's cookie contract, now Legacy's.
+  //
+  // Legacy (api/src/Core/Response.php, source-read) emits its refresh credential
+  // as `__Host-velora_refresh` with Path=/, Secure, HttpOnly, SameSite=Strict.
+  // Modern emitted `refresh_token` with SameSite=Lax. Two of those three
+  // differences are security-relevant, so they are closed here:
+  //
+  //   * the `__Host-` PREFIX is enforced by the BROWSER, not by us: a cookie
+  //     carrying it must be Secure, must have Path=/, and must have NO Domain,
+  //     so a subdomain (or a MITM on a sibling subdomain) cannot overwrite it.
+  //     That is strictly stronger than any attribute we can set by hand.
+  //   * SameSite=Strict, not Lax: the refresh call is a same-site fetch, so the
+  //     cookie is still sent on it, while a cross-site request can no longer
+  //     carry it at all.
+  //
+  // RENAME TRANSITION: the old name is CLEARED alongside the new one (see
+  // LEGACY_REFRESH_COOKIE_CLEAR) instead of being read as a fallback. A stale
+  // cookie from the previous contract must not survive in any browser, and no
+  // compatibility read path is introduced.
+  const REFRESH_COOKIE_NAME = "__Host-velora_refresh";
+  const LEGACY_REFRESH_COOKIE_NAME = "refresh_token";
   const REFRESH_COOKIE_MAX_AGE = 2_592_000; // 30 days (Remote + PHP jwt_refresh_ttl_sec)
-  const REFRESH_COOKIE_ATTRS = "Path=/; HttpOnly; Secure; SameSite=Lax";
+  const REFRESH_COOKIE_ATTRS = "Path=/; HttpOnly; Secure; SameSite=Strict";
   const REFRESH_COOKIE_CLEAR = `${REFRESH_COOKIE_NAME}=; ${REFRESH_COOKIE_ATTRS}; Max-Age=0`;
+  /** Expire the pre-SEC-04 cookie name so the rename leaves nothing behind. */
+  const LEGACY_REFRESH_COOKIE_CLEAR = `${LEGACY_REFRESH_COOKIE_NAME}=; ${REFRESH_COOKIE_ATTRS}; Max-Age=0`;
   const refreshCookie = (token: string): string =>
     `${REFRESH_COOKIE_NAME}=${token}; ${REFRESH_COOKIE_ATTRS}; Max-Age=${REFRESH_COOKIE_MAX_AGE}`;
   const extractRefreshToken = (
@@ -307,6 +442,39 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
     }
   }
 
+  // SEC-04 edge gate: "is the presented refresh cookie a live session?"
+  //
+  // This exists because Legacy's HTML layer decided whether to serve a protected
+  // page with a READ of the session table (locale-router.php: `SELECT … FROM
+  // user_sessions … WHERE` before any protected file, 302 to the login page and
+  // `no-store` otherwise, and the same answer when the query failed). Modern's
+  // web tier has no database credentials by contract, so the question travels
+  // over HTTP — and it must NOT be asked with POST /auth/refresh, which rotates
+  // the token (a page view would then spend the 30/300 refresh bucket and turn
+  // every navigation into a rotation event).
+  //
+  // READ-ONLY: no writes, no rotation, no auth event, no rate-limit bucket of
+  // its own (it runs once per protected page load, which is exactly what Legacy
+  // ran once per protected page load). `no-store` because the answer is a
+  // function of the caller's credential.
+  //
+  // The response is deliberately narrow: `{authenticated, role|null}`. It names
+  // the caller's OWN role because the admin-route gate needs it — the same
+  // server-authoritative rule Legacy applied ("the Admin shell must never be
+  // delivered to a signed-in non-admin, regardless of client-side guards").
+  // No id, no email, no reason for a refusal: an anonymous visitor learns only
+  // that they are not authenticated.
+  if (method === "GET" && path === "/api/v1/auth/session") {
+    return authRouteResult(async (auth) => {
+      const probe = await auth.sessionProbe(extractRefreshToken(req.headers.cookie, {}) ?? "");
+      return {
+        status: 200,
+        body: ok(probe.authenticated ? { authenticated: true, role: probe.role } : { authenticated: false, role: null }),
+        headers: { "Cache-Control": "no-store" },
+      };
+    });
+  }
+
   // State-changing routes: same-origin guard (verified PHP behavior parity)
   if (method === "POST" && path === "/api/v1/auth/logout") {
     const origin = req.headers.origin;
@@ -320,15 +488,15 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
       return {
         status: 200,
         body: ok({ loggedOut: true }),
-        headers: { "Set-Cookie": REFRESH_COOKIE_CLEAR },
+        headers: { "Set-Cookie": [REFRESH_COOKIE_CLEAR, LEGACY_REFRESH_COOKIE_CLEAR] },
       };
     });
   }
 
-  // ---- Rate limiting (inc 7 — PHP dispatch-level, C-14 verified limits) ----
+  // ---- Rate limiting (inc 7 + SEC-02 — PHP dispatch-level, C-14 limits) ----
   // PHP parity: applied BEFORE validation/auth/capability checks — attempts
   // count even when the request would fail them (brute-force semantics).
-  const throttleKey = THROTTLED_AUTH_ROUTES[`${method} ${path}`];
+  const throttleKey = throttleKeyFor(method, path);
   if (throttleKey !== undefined) {
     const xffHeader = req.headers["x-forwarded-for"];
     const clientIp = resolveClientIp(
@@ -412,7 +580,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
       return {
         status: 200,
         body: ok({ tokens }), // refresh credential only in the cookie, never the body
-        headers: { "Set-Cookie": refreshCookie(refreshToken) },
+        headers: { "Set-Cookie": [refreshCookie(refreshToken), LEGACY_REFRESH_COOKIE_CLEAR] },
       };
     });
   }
@@ -425,7 +593,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
         return {
           status: 401,
           body: fail("REFRESH_COOKIE_MISSING", "Refresh cookie is missing.", sec.requestId),
-          headers: { "Set-Cookie": REFRESH_COOKIE_CLEAR },
+          headers: { "Set-Cookie": [REFRESH_COOKIE_CLEAR, LEGACY_REFRESH_COOKIE_CLEAR] },
         };
       }
       try {
@@ -437,7 +605,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
         return {
           status: 200,
           body: ok({ tokens }),
-          headers: { "Set-Cookie": refreshCookie(rotated) },
+          headers: { "Set-Cookie": [refreshCookie(rotated), LEGACY_REFRESH_COOKIE_CLEAR] },
         };
       } catch (err) {
         // Remote-verified: any refresh failure clears the HttpOnly cookie.
@@ -445,7 +613,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
           return {
             status: err.status,
             body: fail(err.code, err.message, sec.requestId, err.details),
-            headers: { "Set-Cookie": REFRESH_COOKIE_CLEAR },
+            headers: { "Set-Cookie": [REFRESH_COOKIE_CLEAR, LEGACY_REFRESH_COOKIE_CLEAR] },
           };
         }
         throw err;
@@ -1017,6 +1185,82 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
     });
   }
 
+  // SEC-03 — a user's authentication history, for the admin review surface.
+  //
+  // The capability is Legacy's `GET /api/v1/admin/users/{id}/login-history`
+  // (UserManagementController::loginHistory + AuthEventRepository::listForUser),
+  // including its three contract details: the target must exist (404 otherwise),
+  // the `result` filter is a closed vocabulary (anything else is a validation
+  // error, not a silently empty page), and pagination is bounded 1..100.
+  //
+  // ONE DELIBERATE DIVERGENCE, recorded in the capability document: Legacy
+  // returned raw IP/user-agent to any holder of `users.view` on this endpoint
+  // while it masked them for plain admins on the GLOBAL login listing (its
+  // decision D3: a super_admin-only sensitive view). Modern applies the SAME
+  // rule here, because "who may see the raw address" should not depend on which
+  // of two endpoints the reviewer happened to open: the fields are omitted from
+  // the response body itself for non-super_admin callers (never hidden in the
+  // client), while super_admin and the System Owner receive them.
+  if (method === "GET" && /^\/api\/v1\/admin\/users\/[^/]+\/login-history$/.test(path)) {
+    if (config.authEvents === undefined) {
+      return {
+        status: 503,
+        body: fail("SERVICE_UNAVAILABLE", "auth events not configured", sec.requestId),
+      };
+    }
+    const authEvents = config.authEvents;
+    return adminUsersRoute("users.view", async (svc, actor) => {
+      const id = decodeURIComponent(path.split("/")[5] ?? "");
+      // Existence first: a missing user is a 404, NOT an empty history.
+      await svc.getUser(id);
+
+      const q = url.searchParams;
+      const rawResult = q.get("result");
+      const resultFilter =
+        rawResult === null || rawResult.trim() === "" ? undefined : rawResult.trim();
+      if (resultFilter !== undefined && resultFilter !== "success" && resultFilter !== "failure") {
+        return {
+          status: 400,
+          body: fail("VALIDATION_FAILED", "Invalid result filter.", sec.requestId, {
+            result: "INVALID_CHOICE",
+          }),
+        };
+      }
+      const num = (raw: string | null): number | undefined => {
+        if (raw === null || raw.trim() === "" || !Number.isFinite(Number(raw))) return undefined;
+        return Number(raw);
+      };
+      const page = await authEvents.listForUser(id, {
+        ...(num(q.get("page")) !== undefined ? { page: num(q.get("page"))! } : {}),
+        ...(num(q.get("perPage")) !== undefined ? { perPage: num(q.get("perPage"))! } : {}),
+        ...(resultFilter !== undefined ? { result: resultFilter } : {}),
+      });
+
+      const maySeeSensitive = actor.isSystemOwner || actor.role === "super_admin";
+      return {
+        status: 200,
+        body: ok({
+          events: page.events.map((e) => ({
+            id: e.id,
+            eventType: e.eventType,
+            result: e.result,
+            reason: e.reason,
+            createdAt: e.occurredAt,
+            // Omitted (not null) for a caller who may not see them, so the
+            // response cannot be mistaken for "the address was not recorded".
+            ...(maySeeSensitive ? { ipAddress: e.ipAddress, userAgent: e.userAgent } : {}),
+          })),
+          pagination: {
+            total: page.total,
+            page: page.page,
+            perPage: page.perPage,
+            hasMore: page.page * page.perPage < page.total,
+          },
+        }),
+      };
+    });
+  }
+
   // Role assignment is the privilege-granting operation: super_admin only.
   if (method === "PATCH" && /^\/api\/v1\/admin\/users\/[^/]+\/role$/.test(path)) {
     return adminUsersRoute("users.change_role", async (svc, actor) => {
@@ -1195,7 +1439,7 @@ export function createApp(config: ApiConfig): Server {
     const sec = newSecurityContext();
     void route(req, effective, sec)
       .then((r) => {
-        const headers: Record<string, string> = {
+        const headers: Record<string, string | string[]> = {
           "Content-Type": "application/json; charset=utf-8",
           "X-Request-Id": sec.requestId,
           "Content-Security-Policy": buildCsp(sec.nonce),
@@ -1214,7 +1458,7 @@ export function createApp(config: ApiConfig): Server {
         if (Buffer.isBuffer(r.body)) {
           // Binary payload (an attachment's bytes). The handler already set the
           // exact Content-Type/Length; the JSON envelope does not apply.
-          headers["Content-Type"] = r.headers?.["Content-Type"] ?? "application/octet-stream";
+          headers["Content-Type"] = (r.headers?.["Content-Type"] as string | undefined) ?? "application/octet-stream";
           res.writeHead(r.status, headers);
           res.end(r.body);
           return;

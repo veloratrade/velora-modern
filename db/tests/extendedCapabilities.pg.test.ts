@@ -86,10 +86,16 @@ async function harness(label: string): Promise<Ctx> {
   };
 }
 
+// A CLOSED trade is financially complete by contract (0025_trade_financial_guards):
+// exit price, realized PnL and a close instant. The aggregates under test read the
+// STORED net_pnl / r_multiple — they never recompute either from prices (that is the
+// golden-vector battery's job) — so the fixture supplies the full closed SHAPE:
+// same instant for open and close (a zero-duration fill), exit price = entry price.
 async function insertTrade(ctx: Ctx, input: { symbol: string; netPnl: string | null; r: string | null; occurredAt: string }): Promise<string> {
   const rows = await ctx.q(
-    `INSERT INTO trades (user_id, account_id, symbol, direction, entry_price, volume, occurred_at, net_pnl, r_multiple, source)
-     VALUES ($1, $2, $3, 'buy', 1.10000000, 0.10000000, $4::timestamptz, $5, $6, 'manual')
+    `INSERT INTO trades (user_id, account_id, symbol, direction, status, entry_price, exit_price,
+                         volume, occurred_at, occurred_close_at_utc, net_pnl, r_multiple, source)
+     VALUES ($1, $2, $3, 'buy', 'CLOSED', 1.10000000, 1.10000000, 0.10000000, $4::timestamptz, $4::timestamptz, $5, $6, 'manual')
      RETURNING id`,
     [ctx.userId, ctx.accountId, input.symbol, input.occurredAt, input.netPnl, input.r],
   );
@@ -375,9 +381,13 @@ test("admin metrics count real rows", { skip: SKIP }, async () => {
     assert.ok(metrics.users >= 2);
     assert.ok(metrics.tradingAccounts >= 1);
     assert.equal(typeof metrics.trades, "number");
-    // The audit trail is readable and ordered newest-first.
-    const entries = await store.auditLog(5, null);
-    assert.ok(Array.isArray(entries));
+    // The audit trail is readable and ordered newest-first. Since Phase 6 it
+    // returns a PAGE (`{items,total}`) because the console filters it and needs
+    // the count; the assertion follows the new contract and checks both halves.
+    const entries = await store.auditLog({ limit: 5, before: null });
+    assert.ok(Array.isArray(entries.items));
+    assert.ok(entries.items.length <= 5);
+    assert.equal(typeof entries.total, "number");
   } finally {
     await ctx.close();
   }

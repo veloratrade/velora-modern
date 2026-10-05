@@ -10,6 +10,12 @@
 // PASS/FAIL log from a real PostgreSQL run is the evidence. A local SKIP run
 // proves only the gate, never PostgreSQL behavior.
 //
+// PG_SMOKE_SCHEMA=restored (optional, used by the restore drill): the database
+// under test ALREADY carries the schema — a restored backup — so S1b asserts the
+// LEDGER (every migration in db/migrations present, in order) instead of a fresh
+// apply, and S1c still asserts that running the migrator is a no-op. Both modes
+// make a real claim about the schema; neither weakens the other.
+//
 // Checks (each prints "PASS <label>" so the Actions log is self-describing):
 //   S1  server_version + the full db/migrations set applies on real PG (+ re-run no-op)
 //   S2  NUMERIC(20,8)/(20,2) round-trip as EXACT strings with scale padding (ADR-001)
@@ -80,15 +86,30 @@ async function main(): Promise<void> {
       expected.length >= 22,
       `expected the full migration set (>=22 files), found ${expected.length}`,
     );
-    const ran = await migrate(engine, migrationsDir);
-    assert.deepEqual(
-      ran,
-      expected,
-      "every migration in db/migrations must apply on real PostgreSQL, in order",
-    );
-    console.log(
-      `PASS S1b migrations ${expected[0]}…${expected[expected.length - 1]} applied (${expected.length} files, schema_migrations tracking)`,
-    );
+    if (process.env.PG_SMOKE_SCHEMA === "restored") {
+      // The restored-copy mode: the ledger must already BE the current schema.
+      const ledger = (await engine.query("SELECT name FROM schema_migrations ORDER BY name")).rows.map((r) =>
+        String((r as Record<string, unknown>)["name"]),
+      );
+      assert.deepEqual(
+        ledger,
+        expected,
+        "the restored copy's migration ledger must contain every migration in db/migrations, in order",
+      );
+      console.log(
+        `PASS S1b restored schema ledger matches db/migrations ${expected[0]}…${expected[expected.length - 1]} (${expected.length} files)`,
+      );
+    } else {
+      const ran = await migrate(engine, migrationsDir);
+      assert.deepEqual(
+        ran,
+        expected,
+        "every migration in db/migrations must apply on real PostgreSQL, in order",
+      );
+      console.log(
+        `PASS S1b migrations ${expected[0]}…${expected[expected.length - 1]} applied (${expected.length} files, schema_migrations tracking)`,
+      );
+    }
     const reran = await migrate(engine, migrationsDir);
     assert.deepEqual(reran, [], "second migrate() run must be a no-op");
     console.log("PASS S1c migrate() re-run no-op (idempotency)");
@@ -100,10 +121,11 @@ async function main(): Promise<void> {
     );
     const userId = await str(engine, "SELECT id FROM users WHERE email = $1", ["smoke@example.test"]);
     await engine.query(
-      `INSERT INTO trades (user_id, symbol, direction, entry_price, exit_price, volume,
-         commission, net_pnl, r_multiple, occurred_at)
-       VALUES ($1, 'XAUUSD', 'buy', $2, $3, $4, $5, $6, $7, $8)`,
-      [userId, "1.10000000", "1.35000000", "2.00000000", "5.00", "493.50", "1.64500000", "2026-09-13T10:00:00Z"],
+      // A CLOSED trade carries exit price, realized PnL and a close instant (0025).
+      `INSERT INTO trades (user_id, symbol, direction, status, entry_price, exit_price, volume,
+         commission, net_pnl, r_multiple, occurred_at, occurred_close_at_utc)
+       VALUES ($1, 'XAUUSD', 'buy', 'CLOSED', $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [userId, "1.10000000", "1.35000000", "2.00000000", "5.00", "493.50", "1.64500000", "2026-09-13T10:00:00Z", "2026-09-13T11:00:00Z"],
     );
     const tradeId = await str(engine, "SELECT id FROM trades WHERE user_id = $1", [userId]);
     const t = (await engine.query("SELECT * FROM trades WHERE id = $1", [tradeId])).rows[0];

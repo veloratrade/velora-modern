@@ -19,16 +19,23 @@ export { capabilityAbsent, forbidden, notFound, unauthenticated, validation } fr
 
 import { handleWebhookRoutes } from "../webhooks/webhookRoutes.js";
 import { handleSyncStatusRoutes } from "../accounts/syncStatusRoutes.js";
+import { handleManualSyncRoutes } from "../accounts/manualSyncRoutes.js";
 import { handleAnalyticsRoutes } from "../analytics/analyticsRoutes.js";
 import { handleTagRoutes } from "../tags/tagRoutes.js";
 import { handleAttachmentRoutes } from "../attachments/attachmentRoutes.js";
 import { handleBillingRoutes } from "../billing/billingRoutes.js";
 import { handleAiCoachRoutes } from "../aicoach/aiCoachRoutes.js";
 import { handleAdminRoutes } from "../admin/adminRoutes.js";
+import { handleAdminConsoleRoutes } from "../admin/adminConsoleRoutes.js";
+import { handleAiRoutes } from "../ai/aiRoutes.js";
+import { handleAiAdminRoutes } from "../ai/aiAdminRoutes.js";
+import { handleSupportAiRoutes } from "../support/supportAiRoutes.js";
 import { handlePortfolioRoutes } from "../portfolio/portfolioRoutes.js";
 import { handleEaRoutes } from "../ea/eaRoutes.js";
 import { handleTenancyRoutes } from "../tenancy/tenancyRoutes.js";
 import { handleDeveloperRoutes } from "../developer/developerRoutes.js";
+import { handleTelegramRoutes } from "../telegram/telegramRoutes.js";
+import { handleSupportRoutes } from "../support/supportRoutes.js";
 
 /**
  * Registration order is significant only for readability: each handler matches
@@ -38,14 +45,26 @@ const ROUTE_HANDLERS: readonly ExtendedRouteHandler[] = [
   // Ingress first: it is unauthenticated (signature-authenticated) and must not
   // be reachable behind any bearer check.
   handleWebhookRoutes,
+  // Telegram: the webhook ingress is registered here for the same reason (its
+  // secret-token check precedes any bearer handling), and its authenticated
+  // routes resolve identity from `claims.sub` only.
+  handleTelegramRoutes,
+  // Support: user routes are ownership-scoped, the /admin/communications ones
+  // carry their own capability check.
+  handleSupportRoutes,
   // Authenticated capability surface.
   handleSyncStatusRoutes,
+  handleManualSyncRoutes,
   handleAnalyticsRoutes,
   handleTagRoutes,
   handleAttachmentRoutes,
   handleBillingRoutes,
   handleAiCoachRoutes,
   handleAdminRoutes,
+  handleAdminConsoleRoutes,
+  handleAiRoutes,
+  handleAiAdminRoutes,
+  handleSupportAiRoutes,
   handlePortfolioRoutes,
   handleEaRoutes,
   handleTenancyRoutes,

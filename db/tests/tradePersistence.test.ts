@@ -352,8 +352,8 @@ test("PGlite: migration 0005 schema contract (columns, CHECKs, EXIT_CANCELLED wi
 
     // event vocabulary widened, still closed (FK requires a real parent trade)
     const tradeId = String((await h.engine.query(
-      `INSERT INTO trades (user_id, symbol, direction, entry_price, volume, occurred_at)
-       VALUES (1, 'EURUSD', 'buy', '1.10000000', '1.00000000', now()) RETURNING id`,
+      `INSERT INTO trades (user_id, symbol, direction, status, entry_price, volume, occurred_at)
+       VALUES (1, 'EURUSD', 'buy', 'OPEN', '1.10000000', '1.00000000', now()) RETURNING id`,
     )).rows[0]!.id);
     await h.engine.query(
       `INSERT INTO trade_events (event_uid, trade_id, type, actor, expected_version, payload)

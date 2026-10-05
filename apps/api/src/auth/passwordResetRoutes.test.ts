@@ -91,15 +91,32 @@ test("HTTP forgot-password: 200 success envelope for a KNOWN address", async () 
   });
 });
 
-test("HTTP forgot-password: UNKNOWN address is byte-identical (no enumeration)", async () => {
+test("HTTP forgot-password: KNOWN and UNKNOWN addresses are indistinguishable (no enumeration)", async () => {
   await withServer(async ({ base, mail }) => {
     await seedUser(base, mail, "known@velora.example");
 
     const a = await post(base, "/api/v1/auth/forgot-password", { email: "known@velora.example" });
     const b = await post(base, "/api/v1/auth/forgot-password", { email: "ghost@velora.example" });
+    const aBody = (await a.json()) as Record<string, unknown>;
+    const bBody = (await b.json()) as Record<string, unknown>;
 
+    // The claim is INDISTINGUISHABILITY, not byte-equality of an envelope that
+    // carries a per-response `timestamp`. Comparing raw bytes made this test flaky:
+    // it failed whenever the two requests straddled a second boundary (observed
+    // 2026-10-04 at 10:00:34 vs 10:00:35) — a property of the clock, not of the
+    // endpoint. Everything an attacker can read is still compared: the status line,
+    // the content type, and the whole body except that one volatile field.
     assert.equal(a.status, b.status);
-    assert.equal(JSON.stringify(await a.json()), JSON.stringify(await b.json()));
+    assert.equal(a.headers.get("content-type"), b.headers.get("content-type"));
+    // …and both envelopes really do carry the field being excluded, so the exclusion
+    // cannot hide a missing or divergent body:
+    assert.equal(typeof aBody["timestamp"], "string");
+    assert.equal(typeof bBody["timestamp"], "string");
+    const strip = (body: Record<string, unknown>): string => {
+      const { timestamp: _timestamp, ...rest } = body;
+      return JSON.stringify(rest);
+    };
+    assert.equal(strip(aBody), strip(bBody));
   });
 });
 

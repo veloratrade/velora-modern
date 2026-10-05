@@ -1,0 +1,328 @@
+{
+  "phase": 6,
+  "surface": "admin console",
+  "run_at": "2026-10-05T02:51:32.829Z",
+  "web": "http://127.0.0.1:3000",
+  "api": "http://127.0.0.1:8080",
+  "persistence": "postgres (real cluster, migration head 0027_admin_console.sql)",
+  "accounts": {
+    "super_admin": "adm-qa-owner-1791168597930@velora.test",
+    "admin": "adm-qa-staff-1791168597930@velora.test",
+    "user": "adm-qa-user-1791168597930@velora.test",
+    "seeded_ticket": "5"
+  },
+  "findings": [
+    {
+      "name": "fa/admin renders with dir=rtl",
+      "ok": true
+    },
+    {
+      "name": "fa/admin title is Persian",
+      "ok": true,
+      "detail": "تحلیل و درآمد"
+    },
+    {
+      "name": "a super_admin sees all seven console tabs",
+      "ok": true,
+      "detail": "نمای کل | کاربر 360 درجه | صف پشتیبانی | ممیزی | امنیت و دسترسی | سیستم و سلامت | تحلیل و درآمد"
+    },
+    {
+      "name": "tab labels are Legacy's own Persian words",
+      "ok": true,
+      "detail": "نمای کل | کاربر 360 درجه | صف پشتیبانی | ممیزی | امنیت و دسترسی | سیستم و سلامت | تحلیل و درآمد"
+    },
+    {
+      "name": "overview KPIs render server numbers",
+      "ok": true,
+      "detail": "[\"21\",\"9\",\"12\",\"0\",\"0\",\"2\"]"
+    },
+    {
+      "name": "fa/admin has no horizontal overflow (1440)",
+      "ok": true,
+      "detail": "overflow=0"
+    },
+    {
+      "name": "the users tab lists real accounts",
+      "ok": true,
+      "detail": "rows=21"
+    },
+    {
+      "name": "the search filter narrows the list server-side",
+      "ok": true,
+      "detail": "rows=1"
+    },
+    {
+      "name": "a row opens the user-360 detail",
+      "ok": true
+    },
+    {
+      "name": "the 360 view shows live sessions",
+      "ok": true
+    },
+    {
+      "name": "devices/trades report an honest empty state, not a fake zero",
+      "ok": true
+    },
+    {
+      "name": "suspending a user renders the Legacy toast",
+      "ok": true,
+      "detail": "کاربر مسدود شد"
+    },
+    {
+      "name": "the suspended state is visible on the record",
+      "ok": true,
+      "detail": "کاربر | مسدود | لغو شده"
+    },
+    {
+      "name": "re-activating a user renders the Legacy toast",
+      "ok": true,
+      "detail": "کاربر فعال شد"
+    },
+    {
+      "name": "verify-email is idempotent and says so",
+      "ok": true,
+      "detail": "ایمیل تأیید شد."
+    },
+    {
+      "name": "revoking sessions reports the action",
+      "ok": true,
+      "detail": "نشست‌ها لغو شدند"
+    },
+    {
+      "name": "revoked sessions leave the live list",
+      "ok": true
+    },
+    {
+      "name": "self-suspension is refused with localized copy, not a stack trace",
+      "ok": true,
+      "detail": "مجوز این اقدام را ندارید."
+    },
+    {
+      "name": "the queue shows the seeded ticket",
+      "ok": true
+    },
+    {
+      "name": "the thread opens with the user's own words",
+      "ok": true
+    },
+    {
+      "name": "an operator reply is accepted",
+      "ok": true,
+      "detail": "پاسخ ارسال شد."
+    },
+    {
+      "name": "closing a ticket is reported",
+      "ok": true,
+      "detail": "تیکت بسته شد."
+    },
+    {
+      "name": "a closed ticket offers archive + reopen and no longer offers close",
+      "ok": true
+    },
+    {
+      "name": "the closed badge is a catalog word, not the raw enum",
+      "ok": true
+    },
+    {
+      "name": "an archived ticket hides the reply box the service would refuse",
+      "ok": true
+    },
+    {
+      "name": "the audit trail lists the actions this run performed",
+      "ok": true,
+      "detail": "rows=12"
+    },
+    {
+      "name": "the trail names the status changes and the session revocation",
+      "ok": true,
+      "detail": "USER_SESSIONS_REVOKED,USER_STATUS_CHANGED"
+    },
+    {
+      "name": "a no-op verify-email wrote no audit row (nothing changed)",
+      "ok": true
+    },
+    {
+      "name": "audit rows carry before/after state (the phase-6 store fix)",
+      "ok": true
+    },
+    {
+      "name": "the action filter narrows the trail",
+      "ok": true,
+      "detail": "8/12"
+    },
+    {
+      "name": "a super_admin is told it holds the sensitive permission",
+      "ok": true
+    },
+    {
+      "name": "the security feed shows real signup/login events",
+      "ok": true,
+      "detail": "rows=45"
+    },
+    {
+      "name": "an admin without audit.view_sensitive is told the fields are hidden",
+      "ok": true
+    },
+    {
+      "name": "no IP address is rendered to a caller who may not see it",
+      "ok": true
+    },
+    {
+      "name": "an admin still sees the seven panels it is entitled to",
+      "ok": true,
+      "detail": "نمای کل | کاربر 360 درجه | صف پشتیبانی | ممیزی | امنیت و دسترسی | سیستم و سلامت | تحلیل و درآمد"
+    },
+    {
+      "name": "the health panel attests nine components",
+      "ok": true,
+      "detail": "rows=9"
+    },
+    {
+      "name": "unbuilt subsystems say «کاربرد ندارد», never a green check",
+      "ok": true
+    },
+    {
+      "name": "the migration head is the one this phase shipped",
+      "ok": true,
+      "detail": "0027"
+    },
+    {
+      "name": "an overall verdict is rendered",
+      "ok": true
+    },
+    {
+      "name": "all five range presets render",
+      "ok": true
+    },
+    {
+      "name": "a range switch re-renders the trends",
+      "ok": true
+    },
+    {
+      "name": "the selected preset is marked as selected",
+      "ok": true
+    },
+    {
+      "name": "en/admin renders with dir=ltr",
+      "ok": true
+    },
+    {
+      "name": "en tabs are English",
+      "ok": true,
+      "detail": "Overview | User 360 | Support queue | Audit | Security & Access | System & Health | Analytics & Revenue"
+    },
+    {
+      "name": "en/admin chrome carries no Persian",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "en/admin has no horizontal overflow (1440)",
+      "ok": true,
+      "detail": "overflow=0"
+    },
+    {
+      "name": "a non-admin is redirected away from /admin",
+      "ok": true,
+      "detail": "http://127.0.0.1:3000/dashboard"
+    },
+    {
+      "name": "a non-admin sees no console chrome",
+      "ok": true
+    },
+    {
+      "name": "a non-admin sees no user data",
+      "ok": true
+    },
+    {
+      "name": "a role with no console permission gets the localized refusal",
+      "ok": true,
+      "detail": "VELORA\nداشبورد\nحساب‌ها\nژورنال معاملات\nعملکرد\nبازارها\nاخبار\nپشتیبانی\nهوشمندی معاملات\nکیف پول\nتنظیمات\n"
+    },
+    {
+      "name": "that refusal renders no tabs and no data",
+      "ok": true
+    },
+    {
+      "name": "16-admin-fa-mobile-390 has no horizontal overflow",
+      "ok": true,
+      "detail": "overflow=0 @390px"
+    },
+    {
+      "name": "16-admin-fa-mobile-390 keeps every tab reachable",
+      "ok": true,
+      "detail": "tabs=7"
+    },
+    {
+      "name": "17-admin-fa-narrow-320 has no horizontal overflow",
+      "ok": true,
+      "detail": "overflow=0 @320px"
+    },
+    {
+      "name": "17-admin-fa-narrow-320 keeps every tab reachable",
+      "ok": true,
+      "detail": "tabs=7"
+    },
+    {
+      "name": "18-admin-en-mobile-390 has no horizontal overflow",
+      "ok": true,
+      "detail": "overflow=0 @390px"
+    },
+    {
+      "name": "18-admin-en-mobile-390 keeps every tab reachable",
+      "ok": true,
+      "detail": "tabs=7"
+    },
+    {
+      "name": "every console tab shows a focus indicator",
+      "ok": true,
+      "detail": "6/6"
+    },
+    {
+      "name": "Enter activates the focused tab",
+      "ok": true
+    },
+    {
+      "name": "a backend outage renders the localized load-failed state",
+      "ok": true,
+      "detail": "VELORA\nداشبورد\nحساب‌ها\nژورنال معاملات\nعملکرد\nبازارها\nاخبار\nپشتیبانی\nهوشمندی معاملات\nکیف پول\nتنظیمات\nمدیریت\nم\nمدیر ارشد آزمون\nadm-qa-owner-17"
+    },
+    {
+      "name": "an outage never renders fabricated numbers",
+      "ok": true
+    },
+    {
+      "name": "no unexpected console/page errors",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "shots": [
+    "01-admin-fa-overview.png",
+    "02-admin-fa-users-filtered.png",
+    "03-admin-fa-user360.png",
+    "04-admin-fa-user-suspended.png",
+    "05-admin-fa-user-actions.png",
+    "06-admin-fa-self-denied.png",
+    "07-admin-fa-support-thread.png",
+    "08-admin-fa-support-closed.png",
+    "09-admin-fa-audit.png",
+    "10-admin-fa-security.png",
+    "11-admin-fa-security-limited.png",
+    "12-admin-fa-system.png",
+    "13-admin-fa-analytics.png",
+    "14-admin-en-overview.png",
+    "15-admin-fa-forbidden.png",
+    "15-admin-fa-forbidden.png",
+    "16-admin-fa-mobile-390.png",
+    "17-admin-fa-narrow-320.png",
+    "18-admin-en-mobile-390.png",
+    "19-admin-fa-focus.png",
+    "20-admin-fa-api-down.png"
+  ],
+  "consoleErrors": [
+    "fa 1440px: Failed to load resource: the server responded with a status of 403 (Forbidden)",
+    "fa 1440px: Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "fa 1440px: Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+  ]
+}

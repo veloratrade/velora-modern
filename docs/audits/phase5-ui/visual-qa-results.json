@@ -1,0 +1,170 @@
+{
+  "findings": [
+    {
+      "name": "fa/support renders with dir=rtl",
+      "ok": true,
+      "detail": "dir=rtl"
+    },
+    {
+      "name": "fa/support title is Persian",
+      "ok": true,
+      "detail": "مرکز پشتیبانی"
+    },
+    {
+      "name": "fa/support KPIs render server numbers",
+      "ok": true,
+      "detail": "[\"1\",\"2\",\"1\"]"
+    },
+    {
+      "name": "fa/support has no horizontal overflow (1366)",
+      "ok": true,
+      "detail": "overflow=0"
+    },
+    {
+      "name": "en/support renders with dir=ltr",
+      "ok": true,
+      "detail": "dir=ltr"
+    },
+    {
+      "name": "en/support title is English",
+      "ok": true,
+      "detail": "Support Center"
+    },
+    {
+      "name": "en/support chrome is fully translated",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "UI create shows the Legacy success toast",
+      "ok": true
+    },
+    {
+      "name": "UI create clears the form",
+      "ok": true
+    },
+    {
+      "name": "UI list shows the created ticket",
+      "ok": true,
+      "detail": "rows=3"
+    },
+    {
+      "name": "UI shows the localized required-fields error",
+      "ok": true,
+      "detail": "موضوع و پیام الزامی است."
+    },
+    {
+      "name": "thread deep link opens the ticket",
+      "ok": true
+    },
+    {
+      "name": "thread shows the support side",
+      "ok": true
+    },
+    {
+      "name": "thread shows the user side",
+      "ok": true
+    },
+    {
+      "name": "thread shows the user's-turn badge",
+      "ok": true
+    },
+    {
+      "name": "thread has no horizontal overflow",
+      "ok": true,
+      "detail": "overflow=0"
+    },
+    {
+      "name": "UI reply is accepted and re-rendered",
+      "ok": true
+    },
+    {
+      "name": "closed thread hides the reply box",
+      "ok": true,
+      "detail": "reply inputs=0"
+    },
+    {
+      "name": "closed thread offers reopen",
+      "ok": true
+    },
+    {
+      "name": "closed thread shows the closed badge",
+      "ok": true
+    },
+    {
+      "name": "reopen returns the ticket to support",
+      "ok": true
+    },
+    {
+      "name": "reopened thread shows the reply box again",
+      "ok": true
+    },
+    {
+      "name": "09-support-fa-mobile has no horizontal overflow",
+      "ok": true,
+      "detail": "overflow=0 @390px"
+    },
+    {
+      "name": "10-support-fa-narrow-320 has no horizontal overflow",
+      "ok": true,
+      "detail": "overflow=0 @320px"
+    },
+    {
+      "name": "11-support-en-mobile has no horizontal overflow",
+      "ok": true,
+      "detail": "overflow=0 @390px"
+    },
+    {
+      "name": "every tabbable support control shows a focus indicator",
+      "ok": true,
+      "detail": "14/14"
+    },
+    {
+      "name": "backend outage renders the localized load-failed state",
+      "ok": true
+    },
+    {
+      "name": "a 429 renders the localized rate-limit message",
+      "ok": true,
+      "detail": "درخواست‌ها بیش از حد مجاز است. کمی بعد تلاش کنید."
+    },
+    {
+      "name": "no unexpected console/page errors",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "shots": [
+    "01-support-fa-desktop.png",
+    "02-support-en-desktop.png",
+    "03-support-fa-after-create.png",
+    "04-support-fa-validation.png",
+    "05-support-fa-thread.png",
+    "06-support-fa-after-reply.png",
+    "07-support-fa-closed.png",
+    "08-support-fa-after-reopen.png",
+    "09-support-fa-mobile.png",
+    "10-support-fa-narrow-320.png",
+    "11-support-en-mobile.png",
+    "12-support-fa-focus.png",
+    "13-support-fa-api-down.png",
+    "14-support-fa-rate-limited.png"
+  ],
+  "consoleErrors": [
+    "fa 1366px: Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "en 1366px: Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "fa 1366px: Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "fa 1366px: Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "fa 1366px: Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "fa 1366px: Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "fa 1366px: Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "fa 390px: Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "fa 320px: Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "en 390px: Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "fa 1366px: Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "fa 1366px: Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "fa 1366px: Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "fa 1366px: Failed to load resource: the server responded with a status of 429 (Too Many Requests)",
+    "fa 1366px: Failed to load resource: the server responded with a status of 429 (Too Many Requests)"
+  ]
+}

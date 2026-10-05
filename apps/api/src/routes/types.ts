@@ -19,7 +19,7 @@ import type { AppRole } from "@velora/contracts";
 import type { ApiConfig } from "../kernel/server.js";
 
 /** Identical shape to the kernel's own `RouteResult`. */
-export type RouteResult = { status: number; body: unknown; headers?: Record<string, string> };
+export type RouteResult = { status: number; body: unknown; headers?: Record<string, string | string[]> };
 
 /** Verified bearer claims (signature-checked; never client-supplied). */
 export interface RouteClaims {

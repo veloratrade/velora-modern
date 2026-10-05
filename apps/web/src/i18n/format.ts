@@ -58,6 +58,47 @@ export function fmtPercent(locale: Locale, value: unknown, options: Intl.NumberF
   return n === null ? "—" : toLatin(numberFormatter(locale, { style: "percent", maximumFractionDigits: 1, ...options }).format(n));
 }
 
+/**
+ * A decimal string rendered for display: `Intl` grouping, LATIN digits, a fixed
+ * number of fraction digits, and "—" when there is no value.
+ *
+ * Money and ratios arrive from the API as exact decimal STRINGS (scale is part
+ * of the contract: money 2 dp, ratios 4 dp, R 8 dp). Rounding them through
+ * `Number` for display is fine — the stored value is never the display value —
+ * but the digits are trimmed to what a human reads: an R of "1.64500000" is
+ * shown as "1.65", not as eight decimals.
+ */
+export function fmtDecimal(
+  locale: Locale,
+  value: unknown,
+  fractionDigits = 2,
+  options: Intl.NumberFormatOptions = {},
+): string {
+  const n = finite(value);
+  if (n === null) return "—";
+  return toLatin(
+    numberFormatter(locale, {
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
+      ...options,
+    }).format(n),
+  );
+}
+
+/**
+ * Money as Legacy displays it: 2 dp with an EXPLICIT sign (`+493.50`, `-252.50`).
+ *
+ * Legacy used `VeloraLocale.currency(v, 'USD', { minimumFractionDigits: 2,
+ * maximumFractionDigits: 2, signDisplay: 'always' })`. The one deliberate
+ * difference: no currency SYMBOL. Modern aggregates across accounts that may hold
+ * different currencies (`accounts.currency` is per account), and printing "USD"
+ * over a mixed total would be a claim the data does not support — Legacy's
+ * hard-coded default was a display shortcut, not information.
+ */
+export function fmtMoney(locale: Locale, value: unknown): string {
+  return fmtDecimal(locale, value, 2, { signDisplay: "always" });
+}
+
 /** Wall-clock "HH:mm" (no timezone semantics — Legacy `time()` with UTC fields). */
 export function fmtTime(locale: Locale, value: string, options: Intl.DateTimeFormatOptions = {}): string {
   const match = /^(\d{1,2}):(\d{2})$/.exec(value);
@@ -74,7 +115,44 @@ export function fmtTime(locale: Locale, value: string, options: Intl.DateTimeFor
   return toLatin(f.format(d));
 }
 
+/**
+ * Long CALENDAR date — Phase 1 account surface ("member since" on `/profile`).
+ *
+ * Distinct from `fmtTime`, which formats a wall-clock "HH:mm": this one formats an
+ * ISO instant as a date and is the ONE place the account pages get that from, so
+ * `/profile` and `/settings` cannot drift on locale, calendar or digits.
+ * `fa-IR` renders the Jalali calendar a Persian reader expects (Legacy showed the
+ * same), the Latin-digit product rule is applied by the same `toLatin` pass the
+ * other formatters use, and non-finite input answers "—" rather than echoing it.
+ */
+export function fmtDateLong(locale: Locale, value: string, options: Intl.DateTimeFormatOptions = {}): string {
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms)) return "—";
+  const intl = localeMeta(locale).intlLocale;
+  // `dateStyle`/`timeStyle` are MUTUALLY EXCLUSIVE with explicit components in
+  // Intl — mixing them throws `TypeError: Invalid option : option`, which in a
+  // React render takes the whole page down (the trade journal did exactly that
+  // the first time a component formatter asked for year/month/day/hour/minute).
+  // So the long-date default applies ONLY when the caller asked for no
+  // components of its own.
+  const COMPONENT_KEYS = ["weekday", "era", "year", "month", "day", "hour", "minute", "second", "timeZoneName", "dateStyle", "timeStyle"];
+  const explicit = COMPONENT_KEYS.some((k) => Object.prototype.hasOwnProperty.call(options, k));
+  const opts: Intl.DateTimeFormatOptions = {
+    ...(explicit ? {} : { dateStyle: "long" }),
+    ...options,
+    numberingSystem: "latn",
+  };
+  const k = cacheKey("d", intl, opts);
+  let f = cache.get(k) as Intl.DateTimeFormat | undefined;
+  if (!f) {
+    f = new Intl.DateTimeFormat(intl, opts);
+    cache.set(k, f);
+  }
+  return toLatin(f.format(new Date(ms)));
+}
+
 export type FormatKind = "number" | "currency" | "percent" | "time";
+
 
 /** Declarative formatting used by markup that Legacy tagged with data-format. */
 export function formatValue(

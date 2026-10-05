@@ -37,7 +37,7 @@ export type AuditTx = QueryFn;
  */
 export type AuditWrite = (tx: AuditTx | undefined) => Promise<void>;
 
-/** Actions recorded by this phase. Mirrors the 0009 CHECK constraint. */
+/** Actions recorded by this phase. Mirrors the 0009 CHECK, widened by 0011/0014/0023. */
 export type AuditAction =
   | "OWNERSHIP_CLAIMED"
   | "USER_ROLE_CHANGED"
@@ -58,7 +58,26 @@ export type AuditAction =
   | "CREDENTIAL_USED"
   // Bind AND unbind. Direction is carried by beforeState/afterState rather
   // than by two action names — the same shape USER_ROLE_CHANGED already uses.
-  | "ACCOUNT_BINDING_CHANGED";
+  | "ACCOUNT_BINDING_CHANGED"
+  // Telegram journal client (migration 0023). Linking is an account-affecting
+  // privilege change and belongs in this SAME trail; the widening rationale
+  // (six actions, and why a nonexistent token has no row here at all) is in
+  // 0023 §7.
+  | "TELEGRAM_LINK_STARTED"
+  | "TELEGRAM_LINK_COMPLETED"
+  | "TELEGRAM_LINK_FAILED"
+  | "TELEGRAM_UNLINKED"
+  | "TELEGRAM_CHANNEL_BOUND"
+  | "TELEGRAM_CHANNEL_UNBOUND"
+  // Phase 6 (migration 0027). Both act on ANOTHER user's account without
+  // changing their role or status, which is precisely the class of operation
+  // that would otherwise leave no trace at all: a revoked session looks to the
+  // user like an unexplained logout, and an admin-granted verification is an
+  // authorization grant. `beforeState`/`afterState` carry the direction (how
+  // many sessions were live) and the prior verification state, so neither needs
+  // a second action name.
+  | "USER_SESSIONS_REVOKED"
+  | "USER_EMAIL_VERIFIED";
 
 /**
  * Result of the audited attempt. Mirrors the 0011 outcome CHECK.
@@ -70,8 +89,14 @@ export type AuditAction =
  */
 export type AuditOutcome = "success" | "denied";
 
-/** Providers that may appear on a credential audit record. Mirrors 0010/0011. */
-export type AuditProvider = "METAAPI";
+/**
+ * Providers that may appear on an audit record. Mirrors 0010/0011, widened by
+ * 0023 to the second provider this platform actually talks to.
+ *
+ * Still a VOCABULARY, never a secret: what goes in the column is the provider's
+ * name, not its credential.
+ */
+export type AuditProvider = "METAAPI" | "TELEGRAM";
 
 /** A single append-only audit record as written by the application. */
 export interface AuditEntry {

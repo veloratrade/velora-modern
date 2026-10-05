@@ -150,10 +150,17 @@ test("FULL HTTP JOURNEY: register → verify-email → login → me → refresh 
     assert.equal(tokensBody.user.plan, "free");
     assert.ok(!JSON.stringify(loginBody).includes("refreshToken"));
     const setCookie = login.headers.get("set-cookie") ?? "";
-    assert.ok(setCookie.startsWith("refresh_token="), "cookie name");
-    assert.ok(setCookie.includes("Path=/; HttpOnly; Secure; SameSite=Lax"), "cookie attrs");
+    // SEC-04: the cookie is Legacy's `__Host-velora_refresh`. The `__Host-`
+    // prefix is a BROWSER-enforced invariant (Secure + Path=/ + no Domain), so
+    // the attribute assertions below are the ones the browser will re-check.
+    assert.ok(setCookie.startsWith("__Host-velora_refresh="), "cookie name (Legacy __Host- prefix)");
+    assert.ok(setCookie.includes("Path=/; HttpOnly; Secure; SameSite=Strict"), "cookie attrs");
+    assert.equal(/;\s*Domain=/i.test(setCookie), false, "__Host- forbids a Domain attribute");
+    // The pre-SEC-04 name is expired in the same response: the rename must not
+    // leave a stale credential behind in any browser.
+    assert.ok(setCookie.includes("refresh_token=;"), "the legacy cookie name is cleared on the same response");
     assert.ok(setCookie.includes("Max-Age=2592000"), "cookie max-age (30 days)");
-    const refreshToken = /refresh_token=([^;]+)/.exec(setCookie)?.[1] ?? "";
+    const refreshToken = /__Host-velora_refresh=([^;]+)/.exec(setCookie)?.[1] ?? "";
 
     // 5. /me with Bearer token
     const me = await fetch(`${base}/api/v1/auth/me`, { headers: { Authorization: `Bearer ${tokensBody.accessToken}` } });
@@ -165,19 +172,19 @@ test("FULL HTTP JOURNEY: register → verify-email → login → me → refresh 
     // 6. refresh via cookie → rotated cookie + new tokens
     const refresh = await fetch(`${base}/api/v1/auth/refresh`, {
       method: "POST",
-      headers: { Cookie: `refresh_token=${refreshToken}` },
+      headers: { Cookie: `__Host-velora_refresh=${refreshToken}` },
     });
     assert.equal(refresh.status, 200);
     const refreshBody = (await refresh.json()) as Envelope<{ tokens: { accessToken: string } }>;
     assert.notEqual(refreshBody.data.tokens.accessToken, tokensBody.accessToken);
     const rotatedCookie = refresh.headers.get("set-cookie") ?? "";
-    const rotatedToken = /refresh_token=([^;]+)/.exec(rotatedCookie)?.[1] ?? "";
+    const rotatedToken = /__Host-velora_refresh=([^;]+)/.exec(rotatedCookie)?.[1] ?? "";
     assert.notEqual(rotatedToken, refreshToken);
 
     // 7. old refresh token no longer works (rotation) → 401 + cookie cleared
     const oldRefresh = await fetch(`${base}/api/v1/auth/refresh`, {
       method: "POST",
-      headers: { Cookie: `refresh_token=${refreshToken}` },
+      headers: { Cookie: `__Host-velora_refresh=${refreshToken}` },
     });
     assert.equal(oldRefresh.status, 401);
     assert.equal(((await oldRefresh.json()) as Envelope<null>).error?.code, "INVALID_TOKEN");
@@ -186,7 +193,7 @@ test("FULL HTTP JOURNEY: register → verify-email → login → me → refresh 
     // 8. logout with the rotated cookie → revoked + cookie cleared
     const logout = await fetch(`${base}/api/v1/auth/logout`, {
       method: "POST",
-      headers: { Cookie: `refresh_token=${rotatedToken}`, Origin: "https://veloratrade.ir" },
+      headers: { Cookie: `__Host-velora_refresh=${rotatedToken}`, Origin: "https://veloratrade.ir" },
     });
     assert.equal(logout.status, 200);
     assert.deepEqual(((await logout.json()) as Envelope<{ loggedOut: boolean }>).data, { loggedOut: true });
@@ -195,7 +202,7 @@ test("FULL HTTP JOURNEY: register → verify-email → login → me → refresh 
     // 9. post-logout refresh → INVALID_TOKEN
     const after = await fetch(`${base}/api/v1/auth/refresh`, {
       method: "POST",
-      headers: { Cookie: `refresh_token=${rotatedToken}` },
+      headers: { Cookie: `__Host-velora_refresh=${rotatedToken}` },
     });
     assert.equal(after.status, 401);
     assert.equal(((await after.json()) as Envelope<null>).error?.code, "INVALID_TOKEN");
@@ -219,7 +226,8 @@ test("refresh: missing cookie/body → 401 REFRESH_COOKIE_MISSING + clearing coo
     const body = (await res.json()) as Envelope<null>;
     assert.equal(body.error?.code, "REFRESH_COOKIE_MISSING");
     const setCookie = res.headers.get("set-cookie") ?? "";
-    assert.ok(setCookie.includes("refresh_token=;"));
+    assert.ok(setCookie.includes("__Host-velora_refresh=;"));
+    assert.ok(setCookie.includes("refresh_token=;"), "the legacy cookie name is cleared too");
     assert.ok(setCookie.includes("Max-Age=0"));
   });
 });
@@ -269,7 +277,7 @@ test("IDENTITY COMPLETION: change-password journey (wrong current → change →
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: "chg@velora.example", password: "first-strong-password-1" }),
     });
-    const refreshToken = /refresh_token=([^;]+)/.exec(login1.headers.get("set-cookie") ?? "")?.[1] ?? "";
+    const refreshToken = /__Host-velora_refresh=([^;]+)/.exec(login1.headers.get("set-cookie") ?? "")?.[1] ?? "";
     const accessToken = ((await login1.json()) as Envelope<{ tokens: { accessToken: string } }>).data.tokens.accessToken;
 
     // wrong current password → 400 VALIDATION_FAILED + details.currentPassword
@@ -316,7 +324,7 @@ test("IDENTITY COMPLETION: change-password journey (wrong current → change →
     // the pre-change refresh session is revoked
     const deadRefresh = await fetch(`${base}/api/v1/auth/refresh`, {
       method: "POST",
-      headers: { Cookie: `refresh_token=${refreshToken}` },
+      headers: { Cookie: `__Host-velora_refresh=${refreshToken}` },
     });
     assert.equal(deadRefresh.status, 401);
 

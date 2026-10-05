@@ -20,6 +20,7 @@ import { LogMailProvider } from "../mail/logMailProvider.js";
 import { MemoryWebhookEventStore } from "../webhooks/memoryWebhookStore.js";
 import { MetaApiWebhookService } from "../webhooks/metaApiWebhookService.js";
 import { MemorySyncStatusStore, type SyncStatusView } from "../accounts/syncStatusService.js";
+import { ManualSyncService, MemoryManualSyncStore } from "../accounts/manualSyncService.js";
 import { MemoryAnalyticsStore, type AnalyticsTradeRow } from "../analytics/analyticsStore.js";
 import { MemoryTagStore } from "../tags/tagService.js";
 import {
@@ -46,7 +47,7 @@ function tokenFor(sub: string, role = "user"): string {
 interface Envelope<T = Record<string, unknown>> {
   status: string;
   data: T;
-  error: { code: string; message: string } | null;
+  error: { code: string; message: string; details?: Record<string, string> } | null;
   timestamp: string;
 }
 
@@ -113,6 +114,15 @@ test("the Phase C surface keeps precedence and unknown routes still 404", async 
 
 test("a migrated capability that is NOT wired fails closed with 503", async () => {
   await withServer(async ({ base }) => {
+    // The write capability (TRD-06) is checked with its own method: a GET of the
+    // same path would prove nothing about the route that exists.
+    const sync = await fetch(`${base}/api/v1/accounts/7/sync`, {
+      method: "POST",
+      headers: AUTH(tokenFor("1")),
+    });
+    assert.equal(sync.status, 503);
+    assert.equal((await json(sync)).error?.code, "SERVICE_UNAVAILABLE");
+
     for (const path of [
       "/api/v1/analytics/summary",
       "/api/v1/tags",
@@ -229,6 +239,102 @@ test("GET /accounts/{id}/sync-status is ownership scoped and non-disclosing", as
       assert.equal(anonymous.status, 401);
     },
     { syncStatus: store },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// TRD-06 — user-triggered MetaAPI sync (Legacy AccountController::sync)
+// ---------------------------------------------------------------------------
+
+test("POST /accounts/{id}/sync requires the provider link, is ownership scoped and reports the queue", async () => {
+  const store = new MemoryManualSyncStore();
+  store.set("1", { accountId: "7", metaapiAccountId: "acct-1", syncCursor: "2026-10-01T00:00:00.000Z" });
+  const dispatches: string[] = [];
+  const service = new ManualSyncService({
+    store,
+    markSyncPending: async () => undefined,
+    trigger: {
+      requestSync: async (r) => {
+        dispatches.push(r.from);
+        return true;
+      },
+    },
+    now: () => new Date("2026-10-04T12:00:00.000Z"),
+  });
+
+  await withServer(
+    async ({ base }) => {
+      const mine = await fetch(`${base}/api/v1/accounts/7/sync`, {
+        method: "POST",
+        headers: AUTH(tokenFor("1")),
+      });
+      assert.equal(mine.status, 202, "the request starts work; it does not perform it");
+      const body = await json(mine);
+      assert.equal(body.data["status"], "queued");
+      assert.equal(body.data["dispatched"], true);
+      assert.equal(body.data["deduplicated"], false);
+      const window = body.data["window"] as { from: string; to: string };
+      assert.equal(window.from, "2026-10-01T00:00:00.000Z", "the window starts at the durable cursor");
+      assert.equal(window.to, "2026-10-04T12:00:00.000Z");
+      assert.deepEqual(dispatches, ["2026-10-01T00:00:00.000Z"]);
+
+      // Not an existence oracle: another user's account and a nonexistent one
+      // answer the SAME 404, and an anonymous caller never reaches the service.
+      const foreign = await fetch(`${base}/api/v1/accounts/7/sync`, {
+        method: "POST",
+        headers: AUTH(tokenFor("2")),
+      });
+      const missing = await fetch(`${base}/api/v1/accounts/999/sync`, {
+        method: "POST",
+        headers: AUTH(tokenFor("1")),
+      });
+      assert.equal(foreign.status, 404);
+      assert.equal(missing.status, 404);
+      const anonymous = await fetch(`${base}/api/v1/accounts/7/sync`, { method: "POST" });
+      assert.equal(anonymous.status, 401);
+      assert.equal(dispatches.length, 1, "no rejected request may reach the queue");
+    },
+    { manualSync: service },
+  );
+});
+
+test("POST /accounts/{id}/sync rejects an account that is not MetaAPI-linked, and is quiet when up to date", async () => {
+  const store = new MemoryManualSyncStore();
+  store.set("1", { accountId: "8", metaapiAccountId: null, syncCursor: null });
+  store.set("1", { accountId: "9", metaapiAccountId: "acct-9", syncCursor: "2026-10-04T12:00:00.000Z" });
+  let dispatches = 0;
+  const service = new ManualSyncService({
+    store,
+    markSyncPending: async () => undefined,
+    trigger: {
+      requestSync: async () => {
+        dispatches++;
+        return true;
+      },
+    },
+    now: () => new Date("2026-10-04T12:00:00.000Z"),
+  });
+
+  await withServer(
+    async ({ base }) => {
+      const manual = await fetch(`${base}/api/v1/accounts/8/sync`, {
+        method: "POST",
+        headers: AUTH(tokenFor("1")),
+      });
+      assert.equal(manual.status, 422);
+      const manualBody = await json(manual);
+      assert.equal(manualBody.error?.code, "VALIDATION_ERROR");
+      assert.equal(manualBody.error?.details?.["account"], "METAAPI_REQUIRED");
+
+      const current = await fetch(`${base}/api/v1/accounts/9/sync`, {
+        method: "POST",
+        headers: AUTH(tokenFor("1")),
+      });
+      assert.equal(current.status, 200, "nothing to sync is a success, not an error");
+      assert.equal((await json(current)).data["status"], "up-to-date");
+      assert.equal(dispatches, 0, "no job may be manufactured for an empty window");
+    },
+    { manualSync: service },
   );
 });
 

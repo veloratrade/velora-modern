@@ -7,7 +7,7 @@
 // (503 → 429 transition after the limit is exhausted).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createApp, listen, THROTTLED_AUTH_ROUTES } from "./server.js";
+import { createApp, listen, throttleKeyFor, THROTTLED_ROUTES, THROTTLED_PATTERN_ROUTES } from "./server.js";
 import { RATE_LIMIT_DEFAULTS } from "@velora/contracts";
 import type { RateLimiter } from "../ratelimits/rateLimiter.js";
 
@@ -50,8 +50,22 @@ async function post(
   return { status: res.status, body: await res.json(), retryAfter: res.headers.get("retry-after") };
 }
 
-test("THROTTLED_AUTH_ROUTES maps exactly the implemented auth routes to the C-14 keys", () => {
-  assert.deepEqual(Object.keys(THROTTLED_AUTH_ROUTES), [
+async function patch(
+  base: string,
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Promise<{ status: number; body: unknown; retryAfter: string | null }> {
+  const res = await fetch(`${base}${path}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, body: await res.json(), retryAfter: res.headers.get("retry-after") };
+}
+
+test("THROTTLED_ROUTES maps exactly the implemented routes to the C-14 keys", () => {
+  assert.deepEqual(Object.keys(THROTTLED_ROUTES), [
     "POST /api/v1/auth/register",
     "POST /api/v1/auth/login",
     "POST /api/v1/auth/refresh",
@@ -62,19 +76,40 @@ test("THROTTLED_AUTH_ROUTES maps exactly the implemented auth routes to the C-14
     "POST /api/v1/auth/resend-verification",
     "POST /api/v1/auth/forgot-password",
     "POST /api/v1/auth/reset-password",
+    // SEC-02 — the provider/ingress routes (values pinned by the tests below).
+    "POST /api/v1/accounts/detect-server",
+    "POST /api/v1/webhooks/metaapi",
+    // Phase 5 — opening a support ticket. The id-bearing support writes
+    // (messages / reopen / admin status) live in the pattern list below.
+    "POST /api/v1/support/tickets",
+    // Phase 7 — the three AI operations whose work leaves the process and costs
+    // money. Legacy's own per-user numbers (AIController): 10/3600, 5/3600,
+    // 20/3600. They join this exact-match guard the moment the routes exist,
+    // which is the guard's whole purpose: a throttled route cannot be added or
+    // removed without a test noticing.
+    "POST /api/v1/ai/analyze-trades",
+    "POST /api/v1/ai/weekly-report",
+    "POST /api/v1/ai/feedback",
   ]);
-  for (const routeKey of Object.values(THROTTLED_AUTH_ROUTES)) {
+  for (const routeKey of Object.values(THROTTLED_ROUTES)) {
     assert.ok(routeKey in RATE_LIMIT_DEFAULTS);
   }
   // PHP dispatch list: logout, me, preferences, accounts, trades are NOT limited
-  assert.equal("POST /api/v1/auth/logout" in THROTTLED_AUTH_ROUTES, false);
-  assert.equal("POST /api/v1/accounts" in THROTTLED_AUTH_ROUTES, false);
+  assert.equal("POST /api/v1/auth/logout" in THROTTLED_ROUTES, false);
+  assert.equal("POST /api/v1/accounts" in THROTTLED_ROUTES, false);
+  // SEC-02: the two provider/ingress routes now sit in the exact map. The
+  // dynamic connect path lives in the pattern list below (it carries an id).
+  assert.equal(THROTTLED_ROUTES["POST /api/v1/accounts/detect-server"], "accounts:detect-server");
+  assert.equal(THROTTLED_ROUTES["POST /api/v1/webhooks/metaapi"], "webhooks:metaapi");
+  // Phase 5: support writes share ONE per-user bucket ("support:write") and
+  // opening a ticket is the route that must carry it.
+  assert.equal(THROTTLED_ROUTES["POST /api/v1/support/tickets"], "support:write");
 
   // OD-14: exactly ONE canonical resend endpoint — the Legacy
   // `/auth/resend-verification-email` alias is deliberately not reproduced.
-  assert.equal("POST /api/v1/auth/resend-verification-email" in THROTTLED_AUTH_ROUTES, false);
+  assert.equal("POST /api/v1/auth/resend-verification-email" in THROTTLED_ROUTES, false);
   // OD-14 approved limit: 4 per hour.
-  assert.deepEqual(RATE_LIMIT_DEFAULTS[THROTTLED_AUTH_ROUTES["POST /api/v1/auth/resend-verification"]!], {
+  assert.deepEqual(RATE_LIMIT_DEFAULTS[THROTTLED_ROUTES["POST /api/v1/auth/resend-verification"]!], {
     limit: 4,
     windowSec: 3600,
   });
@@ -217,4 +252,185 @@ test("limiter store failure → fail-closed 503 SERVICE_UNAVAILABLE (never a sil
     assert.equal(env.error?.code, "SERVICE_UNAVAILABLE");
     assert.notEqual(env.error?.code, "TOO_MANY_REQUESTS");
   }, { rateLimiter: exploding });
+});
+
+
+// --------------------------------------------------------------------------
+// SEC-02 — provider-touching and ingress routes.
+//
+// These three carry Legacy's dispatch-level limits (metaapi-connect 5/900,
+// metaapi-detect 20/900, metaapi-webhook 120/60). They are the routes whose work
+// leaves the process: a broker login verified against MetaAPI, and an ingress a
+// third party drives. The bucket keys keep Legacy's operation names so the
+// lineage is searchable, and the VALUES are pinned here rather than described.
+// --------------------------------------------------------------------------
+
+test("SEC-02: the provider/ingress buckets carry Legacy's exact numbers", () => {
+  assert.deepEqual(RATE_LIMIT_DEFAULTS["accounts:metaapi-connect"], { limit: 5, windowSec: 900 });
+  assert.deepEqual(RATE_LIMIT_DEFAULTS["accounts:detect-server"], { limit: 20, windowSec: 900 });
+  assert.deepEqual(RATE_LIMIT_DEFAULTS["webhooks:metaapi"], { limit: 120, windowSec: 60 });
+});
+
+test("SEC-02: throttle lookup covers the dynamic provisioning path, and only the write", () => {
+  // Every dynamic rule is method-scoped, and the table is exactly the six
+  // resource-id routes throttled here: Phase 5's two support writes (user reply /
+  // reopen and the admin reply / status pair), the user-triggered sync (TRD-06),
+  // the provisioning call, and Legacy's two admin user mutations. A new rule
+  // cannot appear unnoticed.
+  assert.deepEqual(
+    THROTTLED_PATTERN_ROUTES.map((r) => `${r.method} ${r.key}`),
+    [
+      "POST support:write",
+      "POST support:write",
+      "POST accounts:sync",
+      "POST accounts:metaapi-connect",
+      "PATCH admin:user-action",
+      "PATCH admin:user-action",
+    ],
+  );
+  // Phase 5 near-misses: the support bucket covers the WRITES only.
+  assert.equal(throttleKeyFor("POST", "/api/v1/support/tickets/7/messages"), "support:write");
+  assert.equal(throttleKeyFor("POST", "/api/v1/support/tickets/7/reopen"), "support:write");
+  assert.equal(throttleKeyFor("POST", "/api/v1/admin/communications/tickets/7/messages"), "support:write");
+  assert.equal(throttleKeyFor("POST", "/api/v1/admin/communications/tickets/7/status"), "support:write");
+  // …a read of the same thread is not, and neither is the read MARKER: it is a
+  // cheap, ownership-scoped UPDATE that a user may legitimately repeat.
+  assert.equal(throttleKeyFor("GET", "/api/v1/support/tickets/7/messages"), undefined);
+  assert.equal(throttleKeyFor("POST", "/api/v1/support/tickets/7/read"), undefined);
+  assert.equal(throttleKeyFor("GET", "/api/v1/admin/communications/tickets/7/status"), undefined, "the admin queue is a read");
+  // The collection resolves through the EXACT map (no id in the path) — same key,
+  // so a burst spread across create + reply still shares one budget per user.
+  assert.equal(throttleKeyFor("POST", "/api/v1/support/tickets"), "support:write");
+  assert.equal(throttleKeyFor("POST", "/api/v1/support/tickets/7/messages/extra"), undefined);
+  assert.equal(throttleKeyFor("POST", "/api/v1/accounts/acc-123/metaapi/connect"), "accounts:metaapi-connect");
+  assert.equal(throttleKeyFor("POST", "/api/v1/accounts/42/metaapi/connect"), "accounts:metaapi-connect");
+  // A read of the same resource must never be throttled by this rule.
+  assert.equal(throttleKeyFor("GET", "/api/v1/accounts/acc-123/metaapi/connect"), undefined);
+  // Near-misses: a different suffix, a missing segment, an extra segment.
+  assert.equal(throttleKeyFor("POST", "/api/v1/accounts/acc-123/metaapi/disconnect"), undefined);
+  assert.equal(throttleKeyFor("POST", "/api/v1/accounts/metaapi/connect"), undefined);
+  assert.equal(throttleKeyFor("POST", "/api/v1/accounts/acc-123/metaapi/connect/extra"), undefined);
+  // Exact matches still win and unrelated routes stay unthrottled.
+  // TRD-06: the user-triggered sync — POST only, and only for a resource id.
+  assert.equal(throttleKeyFor("POST", "/api/v1/accounts/7/sync"), "accounts:sync");
+  assert.equal(throttleKeyFor("POST", "/api/v1/accounts/acc-123/sync"), "accounts:sync");
+  assert.equal(throttleKeyFor("GET", "/api/v1/accounts/7/sync"), undefined, "sync-status is a read and stays unthrottled by this rule");
+  assert.equal(throttleKeyFor("POST", "/api/v1/accounts/7/sync-status"), undefined);
+  assert.equal(throttleKeyFor("POST", "/api/v1/accounts/sync"), undefined);
+  assert.equal(throttleKeyFor("POST", "/api/v1/accounts/7/sync/extra"), undefined);
+  assert.equal(throttleKeyFor("POST", "/api/v1/accounts/detect-server"), "accounts:detect-server");
+  assert.equal(throttleKeyFor("POST", "/api/v1/webhooks/metaapi"), "webhooks:metaapi");
+  assert.equal(throttleKeyFor("POST", "/api/v1/accounts"), undefined);
+  assert.equal(throttleKeyFor("GET", "/api/v1/webhooks/metaapi"), undefined);
+});
+
+test("SEC-02: the provisioning path is throttled BEFORE auth, so a brute force cannot outrun it", async () => {
+  // The limiter runs at dispatch, before the route's own (absent) capability
+  // checks — the same ordering PHP used. With auth unconfigured the first five
+  // requests reach the fail-closed 503 and the sixth is refused by the limiter.
+  await withServer(async (base) => {
+    for (let i = 0; i < 5; i++) {
+      const r = await post(base, "/api/v1/accounts/acc-1/metaapi/connect", {});
+      assert.equal(r.status, 503, `attempt ${i + 1} should reach the unconfigured-capability 503`);
+    }
+    const blocked = await post(base, "/api/v1/accounts/acc-1/metaapi/connect", {});
+    assert.equal(blocked.status, 429);
+    assert.equal((blocked.body as Envelope).error?.code, "TOO_MANY_REQUESTS");
+    assert.ok(blocked.retryAfter !== null, "429 must advertise Retry-After");
+  });
+});
+
+test("SEC-02: detect-server and the webhook ingress are throttled at their Legacy limits", async () => {
+  await withServer(async (base) => {
+    for (let i = 0; i < 20; i++) {
+      const r = await post(base, "/api/v1/accounts/detect-server", {});
+      assert.equal(r.status, 503);
+    }
+    assert.equal((await post(base, "/api/v1/accounts/detect-server", {})).status, 429);
+  });
+  await withServer(async (base) => {
+    for (let i = 0; i < 120; i++) {
+      const r = await post(base, "/api/v1/webhooks/metaapi", {});
+      assert.equal(r.status, 503);
+    }
+    assert.equal((await post(base, "/api/v1/webhooks/metaapi", {})).status, 429);
+  });
+});
+
+test("TRD-06: the user-triggered sync carries Legacy's metaapi-sync limit (20/300)", () => {
+  // Legacy: RateLimiter::hit('metaapi-sync', 20, 300) at dispatch for
+  // POST /accounts/{id}/sync. The route now exists in Modern, so the number has
+  // an owner again instead of being a documented gap.
+  assert.deepEqual(RATE_LIMIT_DEFAULTS["accounts:sync"], { limit: 20, windowSec: 300 });
+
+  // Behaviour, not just the table: with the capability unwired the first 20
+  // attempts reach the fail-closed 503 (limiter runs BEFORE capability checks)
+  // and the 21st is refused with a Retry-After.
+  return withServer(async (base) => {
+    for (let i = 0; i < 20; i++) {
+      const r = await post(base, "/api/v1/accounts/7/sync", {});
+      assert.equal(r.status, 503, `attempt ${i + 1} should reach the unconfigured-capability 503`);
+    }
+    const blocked = await post(base, "/api/v1/accounts/7/sync", {});
+    assert.equal(blocked.status, 429);
+    assert.equal((blocked.body as Envelope).error?.code, "TOO_MANY_REQUESTS");
+    assert.ok(blocked.retryAfter !== null, "429 must advertise Retry-After");
+  });
+});
+
+test("SEC-02: the admin user mutations carry Legacy's admin-user-action limit", () => {
+  // Legacy: RateLimiter::hit('admin-user-action', 30, 300) inside
+  // UserManagementController::setStatus and ::setRole — the same two operations
+  // Modern exposes as PATCH .../role and .../status.
+  assert.equal(throttleKeyFor("PATCH", "/api/v1/admin/users/abc-123/role"), "admin:user-action");
+  assert.equal(throttleKeyFor("PATCH", "/api/v1/admin/users/abc-123/status"), "admin:user-action");
+  assert.equal(RATE_LIMIT_DEFAULTS["admin:user-action"].limit, 30);
+  assert.equal(RATE_LIMIT_DEFAULTS["admin:user-action"].windowSec, 300);
+
+  // Reads of the same resource are NOT throttled by that bucket: Legacy only
+  // limited the mutations, and a limit that silently covers reads would be a
+  // behaviour Modern never had.
+  assert.equal(throttleKeyFor("GET", "/api/v1/admin/users/abc-123"), undefined);
+  assert.equal(throttleKeyFor("GET", "/api/v1/admin/users/abc-123/login-history"), undefined);
+  assert.equal(throttleKeyFor("GET", "/api/v1/admin/users"), undefined);
+
+  // Near misses stay unthrottled rather than matching by accident.
+  assert.equal(throttleKeyFor("PATCH", "/api/v1/admin/users/abc-123/role/extra"), undefined);
+  assert.equal(throttleKeyFor("PATCH", "/api/v1/admin/users//role"), undefined);
+  assert.equal(throttleKeyFor("POST", "/api/v1/admin/users/abc-123/role"), undefined);
+});
+
+test("SEC-02: the admin user mutations are throttled in behaviour, before auth", async () => {
+  // Legacy put the limiter INSIDE the two handlers, i.e. after authorization.
+  // Modern puts it at dispatch (the same place every other limit lives), which
+  // is strictly earlier — the ordering is the safe direction: an unauthenticated
+  // flood is refused without the server doing any auth work, and an authorized
+  // actor still gets exactly Legacy's 30 mutations per 5 minutes.
+  await withServer(async (base) => {
+    for (let i = 0; i < 30; i++) {
+      const r = await patch(base, "/api/v1/admin/users/u-1/status", { status: "active" });
+      // 503 = the fail-closed "auth is not configured" answer, i.e. the request
+      // reached the route and NOT the limiter, which is the ordering under test.
+      assert.equal(r.status, 503, `attempt ${i + 1} is refused by the unconfigured server, not by the limiter`);
+    }
+    const blocked = await patch(base, "/api/v1/admin/users/u-1/status", { status: "active" });
+    assert.equal(blocked.status, 429);
+    assert.equal((blocked.body as Envelope).error?.code, "TOO_MANY_REQUESTS");
+    assert.equal(blocked.retryAfter, "300");
+  });
+});
+
+test("SEC-02: the two mutations share ONE bucket, so they cannot be alternated for double the quota", async () => {
+  await withServer(async (base) => {
+    for (let i = 0; i < 15; i++) {
+      assert.equal((await patch(base, "/api/v1/admin/users/u-1/status", {})).status, 503);
+    }
+    for (let i = 0; i < 15; i++) {
+      assert.equal((await patch(base, "/api/v1/admin/users/u-1/role", {})).status, 503);
+    }
+    assert.equal((await patch(base, "/api/v1/admin/users/u-1/role", {})).status, 429);
+    // The bucket is keyed by the caller + key, NOT by the target: changing the
+    // target id must not hand out a fresh quota.
+    assert.equal((await patch(base, "/api/v1/admin/users/u-2/status", {})).status, 429);
+  });
 });

@@ -18,6 +18,7 @@ import type {
   UserRecord,
   AppRoleName,
   SessionRecord,
+  DeviceRecord,
   VerificationRecord,
   EmailPreferences,
   PasswordResetRecord,
@@ -32,6 +33,8 @@ interface UserRow {
   full_name: string;
   timezone: string;
   locale: string;
+  locale_source: string;
+  locale_updated_at: Date | string | null;
   role: string;
   plan: string;
   status: string;
@@ -49,6 +52,10 @@ function mapUser(r: UserRow): UserRecord {
     fullName: r.full_name,
     timezone: r.timezone,
     locale: r.locale === "en" ? "en" : "fa",
+    // Legacy `locale_source` / `locale_updated_at` (add_user_locale_preference):
+    // the stored provenance of the language choice, not a public field.
+    localeSource: r.locale_source,
+    localeUpdatedAt: isoOrNull(r.locale_updated_at),
     // Phase 3B-3: normalizeRole maps any value outside the frozen OD-9 set to
     // the LEAST privileged role. The previous ternary silently collapsed
     // 'super_admin' to 'user' (a privilege DOWNGRADE that would have become
@@ -271,13 +278,30 @@ export class PgUserStore implements UserStore {
       userAgent: string | null;
       expiresAt: Date;
     },
-  ): Promise<void> {
-    await this.q(
+    expectedRefreshTokenHash: string,
+  ): Promise<boolean> {
+    // SEC-04 compare-and-swap: the WHERE clause carries the token the caller
+    // read, so concurrent rotations of the same token cannot both commit. This
+    // is a single statement, so the compare and the write are never interleaved
+    // with another transaction's rotation.
+    // RETURNING (not rowCount) because the house QueryFn exposes rows only: an
+    // UPDATE that matched nothing returns zero rows, which IS the CAS verdict.
+    const rows = await this.q(
       `UPDATE user_sessions
        SET refresh_token_hash = $1, access_token_hash = $2, ip_address = $3, user_agent = $4, expires_at = $5
-       WHERE id = $6`,
-      [input.refreshTokenHash, input.accessTokenHash, input.ipAddress, input.userAgent, input.expiresAt, id],
+       WHERE id = $6 AND refresh_token_hash = $7
+       RETURNING id`,
+      [
+        input.refreshTokenHash,
+        input.accessTokenHash,
+        input.ipAddress,
+        input.userAgent,
+        input.expiresAt,
+        id,
+        expectedRefreshTokenHash,
+      ],
     );
+    return rows.length === 1;
   }
 
   async revokeSession(id: string, revokedAt: Date): Promise<void> {
@@ -301,6 +325,11 @@ export class PgUserStore implements UserStore {
     const rows = await this.q(
       `UPDATE users SET
          locale = COALESCE($1, locale),
+         -- Legacy parity (UserRepository::updateLocalePreference): an explicit
+         -- choice records WHERE the locale came from and WHEN. An ai_consent-only
+         -- update must not touch either column.
+         locale_source = CASE WHEN $1::text IS NOT NULL THEN 'user' ELSE locale_source END,
+         locale_updated_at = CASE WHEN $1::text IS NOT NULL THEN $4 ELSE locale_updated_at END,
          ai_consent_at = CASE WHEN $2::timestamptz IS NOT NULL THEN $2::timestamptz
                               WHEN $3 THEN NULL ELSE ai_consent_at END,
          updated_at = $4
@@ -411,6 +440,117 @@ export class PgUserStore implements UserStore {
       [role, excludeUserId ?? null],
     );
     return Number(rows[0]?.n ?? 0);
+  }
+
+  // --- Phase 6: the admin console's account operations -----------------------
+
+  async listSessions(
+    userId: string,
+    limit: number,
+    offset: number,
+  ): Promise<{ items: readonly SessionRecord[]; total: number }> {
+    // Newest-first by (created_at, id): created_at alone is not a total order
+    // when a login and its rotation land in the same microsecond, and an
+    // unstable page would silently repeat or skip rows.
+    const rows = await this.q(
+      `SELECT * FROM user_sessions
+        WHERE user_id = $1
+        ORDER BY created_at DESC, id DESC
+        LIMIT $2 OFFSET $3`,
+      [userId, limit, offset],
+    );
+    const counted = await this.q(
+      "SELECT COUNT(*)::int AS n FROM user_sessions WHERE user_id = $1",
+      [userId],
+    );
+    return {
+      items: rows.map(mapSession),
+      total: Number(counted[0]?.n ?? 0),
+    };
+  }
+
+  async revokeUserSession(
+    userId: string,
+    sessionId: string,
+    revokedAt: Date,
+    audit?: AuditWrite,
+  ): Promise<boolean> {
+    // `user_id = $2 AND revoked_at IS NULL` is the whole authorization of the
+    // write: a session id belonging to somebody else matches nothing, and an
+    // already-revoked session is not re-revoked (which would move revoked_at
+    // and rewrite history). A non-numeric id can never match a BIGINT column —
+    // PostgreSQL would raise on the cast, so the predicate is written to make
+    // an unparseable id a clean `false` instead of a 500.
+    if (!/^\d+$/.test(sessionId)) return false;
+    const sql = `UPDATE user_sessions SET revoked_at = $1
+                  WHERE id = $2::bigint AND user_id = $3 AND revoked_at IS NULL
+                  RETURNING id`;
+    if (audit === undefined) {
+      const rows = await this.q(sql, [revokedAt, sessionId, userId]);
+      return rows.length > 0;
+    }
+    return withTransaction(this.pool, async (q) => {
+      const rows = await q(sql, [revokedAt, sessionId, userId]);
+      if (rows.length === 0) return false;
+      await audit(q);
+      return true;
+    });
+  }
+
+  async revokeAllUserSessions(
+    userId: string,
+    revokedAt: Date,
+    audit?: AuditWrite,
+  ): Promise<number> {
+    // RETURNING * so the caller learns HOW MANY sessions were live. Reporting
+    // the count is what makes the console's answer honest: "revoked" on an
+    // account with no sessions is a different fact from "revoked 3".
+    const sql = `UPDATE user_sessions SET revoked_at = $1
+                  WHERE user_id = $2 AND revoked_at IS NULL
+                  RETURNING id`;
+    if (audit === undefined) {
+      const rows = await this.q(sql, [revokedAt, userId]);
+      return rows.length;
+    }
+    return withTransaction(this.pool, async (q) => {
+      const rows = await q(sql, [revokedAt, userId]);
+      // The audit row is written even when nothing was live: "an administrator
+      // pressed revoke-all on this account at this time" is itself the fact an
+      // investigation needs, and it is recorded in after_state.
+      await audit(q);
+      return rows.length;
+    });
+  }
+
+  async verifyEmailOnce(
+    userId: string,
+    verifiedAt: Date,
+    audit?: AuditWrite,
+  ): Promise<UserRecord | null> {
+    return this.mutateUser(
+      `UPDATE users SET email_verified_at = $1, updated_at = $1
+        WHERE id = $2 AND email_verified_at IS NULL
+        RETURNING *`,
+      [verifiedAt, userId],
+      audit,
+    );
+  }
+
+  async listDevices(userId: string): Promise<readonly DeviceRecord[]> {
+    const rows = await this.q(
+      `SELECT id::text, user_id::text, fingerprint, first_seen, last_seen
+         FROM user_devices
+        WHERE user_id = $1
+        ORDER BY last_seen DESC, id DESC`,
+      [userId],
+    );
+    return rows.map((r: Record<string, unknown>) => ({
+      id: String(r["id"]),
+      userId: String(r["user_id"]),
+      fingerprint: String(r["fingerprint"]),
+      firstSeen: iso(r["first_seen"] as Date | string),
+      lastSeen: iso(r["last_seen"] as Date | string),
+    }));
   }
 
   async getEmailPreferences(userId: string): Promise<EmailPreferences> {
