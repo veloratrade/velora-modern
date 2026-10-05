@@ -451,10 +451,10 @@
     {
       "id": "MG-AI-OCR",
       "section": "B",
-      "title": "AI layer is a provider boundary only (no live provider, OCR, extraction, quota, retention, audit)",
-      "status": "OPEN",
+      "title": "AI layer: chains, quotas, flags, the n8n relay and local OCR migrated; live provider round trip, the web surfaces and image redaction still open",
+      "status": "PARTIAL",
       "priority": "P1",
-      "verification_state": "STATIC",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§12.5",
         "§4.2",
@@ -462,11 +462,18 @@
       ],
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
-        "apps/api/src/aicoach"
+        "apps/api/src/aicoach",
+        "docs/audits/2026-10-05-PHASE7-AI-CAPABILITY-MAP.md",
+        "docs/audits/2026-10-05-PHASE7-STATUS.md",
+        "db/migrations/0028_ai_capability.sql",
+        "apps/api/src/ai/",
+        "db/tests/aiCapability.pg.test.ts"
       ],
       "decisions": [],
       "closure_criteria": "AI/OCR capability implemented or owner-scoped",
-      "note": "2026-10-04 (TRD-03 recon): Legacy's extraction endpoint was read end to end; its core deliverable is the deterministic OCR output (`texts`/`times`) plus AI-or-fallback extraction, with a sha256 dedup cache, consent gate, feature flag, audit rows and a 501 when no engine exists. Modern has none of it, and this host has no OCR engine (no tesseract binary), so the endpoint's deterministic half is a fail-closed dependency, not something to stub. Phase 7 owns the AI half; the OCR contract is designed in phase 3."
+      "note": "2026-10-04 (TRD-03 recon): Legacy's extraction endpoint was read end to end; its core deliverable is the deterministic OCR output (`texts`/`times`) plus AI-or-fallback extraction, with a sha256 dedup cache, consent gate, feature flag, audit rows and a 501 when no engine exists. Modern has none of it, and this host has no OCR engine (no tesseract binary), so the endpoint's deterministic half is a fail-closed dependency, not something to stub. Phase 7 owns the AI half; the OCR contract is designed in phase 3.",
+      "closure_note": "PARTIAL 2026-10-05 (Phase 7, API slice — commit d5710fe). Migrated and tested: migration 0028 (chains, flags with deterministic rollout, per-provider daily budgets with ONE atomic reservation, credential metadata with an HMAC fingerprint and no secret column, admin-managed secrets encrypted with the EXISTING credentialCrypto envelope, settings, feedback); the chain walker (flag → chain → deadline → consent → quota → fail-closed anonymization → call → validate → record, every attempt in the ONE ledger 0017/0023 created and 0028 extended with route, fallback_index, latency_ms, input_hash); the n8n Gemini relay on Legacy's exact contract (https-only, token in the header only, normalized error mapping); the LOCAL Tesseract OCR fallback proved against the real binary 5.5.0 reading a real screenshot (XAUUSD / BUY / 2000.50 / SL 1995.00 / TP 2020.00); the three user routes with Legacy's prompts, whitelists, locale rule and rate limits; 21 admin routes (aiManage / aiRouteManage); and the three support assists phase 5 deferred. Gates: typecheck clean, npm test 1148 + 63 (0 fail / 0 skip), real-PG batteries 31 files × 2 orders = 62 runs / 0 failures, secret-scan 0 findings, aiCapability 23/23 + aiRoutes 19/19 + aiCapability.pg 12/12. STILL OPEN, each named: the web surfaces (/intelligence is still a shell, the console has no AI tab) → the next slice; a LIVE provider round trip → NOT_VERIFIED, no Gemini/OpenAI key and no relay URL+token in scope; image redaction → no image library in this repository, so the anonymizer reports 'cannot guarantee' and images stay local (Legacy's own rule when GD is missing) — recorded as MG-AI-ANONYMIZE; Claude → not migrated (no transport, and declaring it would put a fabricated option in an operator's dropdown); ai_jobs → phase 8 with the worker.",
+      "last_updated": "2026-10-05"
     },
     {
       "id": "MG-BACKUP-RESTORE",
@@ -1011,15 +1018,18 @@
       "id": "MG-TG-2",
       "section": "E",
       "title": "n8n relay transport for media/AI is deliberately NOT implemented: the Remote/PHP era's `n8n_relay` variant has no relay URL, contract or deployment in Modern, so building one would invent an integration rather than reuse one. The `MediaInterpreter` seam is the single place it would be added",
-      "status": "OPEN",
+      "status": "PARTIAL",
       "priority": "P3",
       "verification_state": "STATIC",
       "audit_refs": [],
       "evidence": [
-        "docs/adr/ADR-018-telegram-journal-client.md"
+        "docs/adr/ADR-018-telegram-journal-client.md",
+        "apps/api/src/ai/n8nRelayTransport.ts"
       ],
       "decisions": [],
-      "closure_criteria": "Owner decision: implement a relay transport behind `MediaInterpreter` (with an owner-provided relay contract) or record the drop permanently"
+      "closure_criteria": "Owner decision: implement a relay transport behind `MediaInterpreter` (with an owner-provided relay contract) or record the drop permanently",
+      "closure_note": "PARTIAL 2026-10-05 (Phase 7). The relay is no longer 'deliberately not implemented': apps/api/src/ai/n8nRelayTransport.ts speaks Legacy's contract exactly (POST {url} with X-Velora-Relay-Token, body {request_id, prompt, image_base64?, mime_type?}, 200 {success, model, extraction, meta}, failure {success:false, error:{code, http_status}} mapped onto typed errors), is https-only, keeps the token out of every URL, log, error and response, and is admin-configurable at /api/v1/admin/ai/relay with the value stored encrypted and never returned (only host + configured + tokenPresent). The route precedence is Legacy's (admin setting → env → direct). Contract-tested with an injected fetch: a LIVE relay round trip remains NOT_VERIFIED because no relay URL/token is in scope.",
+      "last_updated": "2026-10-05"
     },
     {
       "id": "MG-TG-3",
@@ -1034,6 +1044,26 @@
       ],
       "decisions": [],
       "closure_criteria": "Worker deployed (MG-WORKER-DEPLOY) and the deferred task moved onto the existing queue with the claim row already in place"
+    },
+    {
+      "id": "MG-AI-ANONYMIZE",
+      "section": "C",
+      "title": "Image redaction before external AI egress has no implementation — the gate fails closed instead",
+      "status": "OPEN",
+      "priority": "P2",
+      "verification_state": "STATIC",
+      "audit_refs": [
+        "§3.4"
+      ],
+      "evidence": [
+        "apps/api/src/ai/imageAnonymizer.ts",
+        "apps/api/src/ai/aiManager.ts",
+        "docs/audits/2026-10-05-PHASE7-STATUS.md"
+      ],
+      "decisions": [],
+      "closure_criteria": "An anonymizer that can actually redact is wired, or the owner accepts that external vision stays disabled",
+      "closure_note": "Legacy blurs the top 15% of an image with GD before any external provider sees it, and returns null when GD is missing — callers MUST then refuse to send the original. Modern has no image library, so UnavailableImageAnonymizer reports 'cannot guarantee' and AiManager refuses external image egress, which routes screenshot extraction to the LOCAL Tesseract fallback. The security property holds (no unredacted screenshot leaves the machine); the capability lost is Gemini vision. Adding an image dependency is an owner decision, not a migration step, so it is recorded rather than silently taken.",
+      "last_updated": "2026-10-05"
     }
   ],
   "owner_decisions": [

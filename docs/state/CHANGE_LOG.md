@@ -531,3 +531,85 @@ checked at (UTC)       : 2026-10-05T03:22:35Z
 
 **Delivery states after this push:** phases 1–6 = **PUSHED**. Not merged, not deployed,
 not live-verified. `DEPLOYED` and `LIVE VERIFIED` remain `NOT_CLAIMED`.
+
+## AC-18 — Phase 7 (API slice): the AI capability (2026-10-05)
+
+**Commit:** `d5710fe` on `feat/telegram-journal-client` (pushed; verified with an
+independent `git ls-remote` at 2026-10-05T05:26:28Z).
+
+**What this delivery establishes**
+
+1. **The AI layer is a configuration + governance system, not a wrapper.** Migration
+   `0028` adds the chains (`ai_feature_routes`), the flags with a deterministic
+   rollout (`ai_feature_flags`), per-provider daily budgets (`ai_provider_quotas`),
+   credential METADATA with an HMAC fingerprint and **no secret column at all**
+   (`ai_provider_credentials`), admin-managed secrets encrypted with the EXISTING
+   `credentialCrypto` envelope in 0010's column convention (`ai_platform_secrets`),
+   AI settings and feedback — and extends the ONE ledger (0017/0023) with `route`,
+   `fallback_index`, `latency_ms`, `input_hash`, the `tesseract` provider and six
+   features, instead of adding Legacy's four attempt tables.
+2. **The order of operations is the security property.** flag gate → chain →
+   deadline → consent (external providers only) → ONE atomic quota reservation →
+   image anonymization **fail closed** → call → validate → record. Success, refusal
+   and error all reach the ledger, so "the budget was gone", "the user never
+   consented" and "the relay rejected us" stay distinguishable afterwards.
+3. **The n8n Gemini relay is kept** (MG-TG-2 → PARTIAL): Legacy's exact contract,
+   https-only, the token in the request header and nowhere else, normalized error
+   mapping, admin-configurable with the value stored encrypted and never returned
+   (the response carries `host`, `configured`, `tokenPresent`).
+4. **The Tesseract fallback is proved, not mocked.** tesseract 5.5.0 is installed in
+   this environment, so the test reads a real screenshot with the real binary and
+   parses `XAUUSD / BUY / 2000.50 / SL 1995.00 / TP 2020.00` out of it. It is the one
+   AI path this repository can verify live without a credential.
+5. **The user capability**: `POST /ai/analyze-trades`, `/ai/weekly-report`,
+   `/ai/feedback`, `GET /ai/attempts`, `GET /ai/status` — ids resolved server-side
+   with ownership (a body carrying `trades` is refused outright), Legacy's prompt
+   templates verbatim including their untrusted-data fence, Legacy's output
+   whitelists, Legacy's locale rule and Legacy's rate limits (10/5/20 per hour).
+6. **The admin surface**: 21 routes, `aiManage` reads and `aiRouteManage`
+   (super-admin-only, as Legacy grants it) writes secrets/route/relay/probes/quotas.
+   Probes are REAL calls; an unprobed credential is reported `UNVERIFIED`, never
+   assumed healthy.
+7. **The support assists phase 5 deferred**: translate, copilot, copilot/draft —
+   gated by `support.tickets.manage`, degrading to `available:false` + a reason
+   instead of breaking the console, and a draft is **never sent**.
+8. **Two Legacy defects were found and are NOT reproduced**: the weekly report asks
+   for a capability (`reports`) that no Legacy provider declares, so its chain
+   resolves empty and the route can only fail — Modern derives the requirement from
+   the feature in one place; and Legacy wraps unparseable model prose into
+   `{summary: prose}`, which Modern refuses as `INVALID_PROVIDER_OUTPUT` because
+   storing unvalidated model text as a structured insight is how a hallucination
+   acquires a database row.
+
+**Gates (re-run from scratch after a sandbox restore wiped the toolchain: `npm ci`,
+package builds, PostgreSQL 17 reinstalled, all 28 migrations applied 0001→0028)**
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (5 projects) |
+| `npm test` | **1148 + 63**, 0 fail / 0 skip, `ALL TEST FILES PASSED`, EXIT=0 |
+| Real-PostgreSQL batteries | **31 files × 2 orders = 62 runs, 0 failures** — `REAL-PG EVIDENCE: PASS` |
+| Phase-7 tests | `aiCapability` 23/23 · `aiRoutes` 19/19 (through the real kernel) · `aiCapability.pg` 12/12 · `rbacCapabilityMap` 5/5 · `rateLimitRoutes` 18/18 |
+| Secret scan | PASS, 0 findings |
+
+One pre-existing battery was corrected, not weakened: `adminConsole.pg.test.ts`
+asserted the applied-migration count as a literal `27`. It now derives the expected
+count and head from the migrations directory, so the assertion means "every
+migration this repository ships is applied" and survives 0029 without editing — a
+migration that fails to apply still fails the test.
+
+**Delivery states (mission §23).** `AI-01`, `AI-02`, `AI-03` move MISSING →
+**BACKEND_ONLY** (the vocabulary's exact meaning: server capability, no user-facing
+surface). `MG-AI-OCR` OPEN → **PARTIAL**; `MG-TG-2` OPEN → **PARTIAL**;
+`MG-AI-ANONYMIZE` **opened** with its owner decision named. The slice is
+`IMPLEMENTED` + `TESTED` + `COMMITTED` + `PUSHED`. It is **not** `VERIFIED` as a
+capability: verification would need a live provider round trip, and no Gemini key,
+OpenAI key or relay URL+token is in scope. Nothing is `DEPLOYED` or `LIVE VERIFIED`.
+
+**Next (named, not hidden).** The phase-7 web slice: `/intelligence` becomes a real
+surface over analyze/report/attempts + consent — **without** Legacy's simulated
+answers (`pages.intelligence.simulatedAnswer`, "72٪ نرخ برد", "✦ بهترین استراتژی
+هفته" are demo content, and reproducing them would be fabrication); the console
+gains an AI tab; both get fa/en chunks built on Legacy's own 80 `admin.ai.*` keys;
+then a browser QA run. After that: phase 8 (integrations/worker/email), phase 9
+(secondary parity), then the §29 report. No existing user capability was removed.

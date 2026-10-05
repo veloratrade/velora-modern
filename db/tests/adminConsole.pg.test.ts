@@ -24,6 +24,8 @@
 // passed.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import { prepareDatabase } from "./support/pgTestDb.ts";
 import { PgAdminConsoleStore } from "../../apps/api/src/admin/adminConsoleStore.ts";
 import { PgUserStore } from "../../apps/api/src/auth/pgUserStore.ts";
@@ -31,6 +33,7 @@ import { PgAuditStore } from "../../apps/api/src/auth/pgAuditStore.ts";
 import type { QueryFn } from "../../apps/api/src/persistence/pg.ts";
 
 const PG_URL = process.env.DATABASE_URL;
+const MIGRATIONS_DIR = join(import.meta.dirname, "..", "migrations");
 const SKIP =
   PG_URL === undefined ? "DATABASE_URL not set — real-PG battery (postgres-evidence workflow only)" : false;
 
@@ -593,19 +596,27 @@ test("REVOKE — a failed audit write rolls the revocation back too", { skip: SK
 test("HEALTH FACTS — the numbers come from the live catalogue, and the head is the newest migration", { skip: SKIP }, async () => {
   const db = await prepareDatabase(PG_URL as string);
   try {
-    const store = new PgAdminConsoleStore(q(db.pool), 27, () => 42);
+    // Derived from the migrations DIRECTORY, not written down: the assertion is
+    // "every migration this repository ships is applied, and the head is the
+    // newest one", which stays true when a later phase adds 0029 without anyone
+    // having to remember to edit a number here. A migration that failed to apply
+    // still fails this test, which is the point of it.
+    const onDisk = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith(".sql")).sort();
+    const expected = onDisk.length;
+    const head = onDisk[onDisk.length - 1]!;
+    const store = new PgAdminConsoleStore(q(db.pool), expected, () => 42);
     const facts = await store.health();
     assert.ok(facts.databaseLatencyMs >= 0, "a measured round trip, not a placeholder");
-    assert.equal(facts.appliedMigrations, 27, "every migration is applied by the battery's own setup");
-    assert.equal(facts.migrationHead, "0027_admin_console.sql");
-    assert.equal(facts.expectedMigrations, 27);
+    assert.equal(facts.appliedMigrations, expected, "every migration is applied by the battery's own setup");
+    assert.equal(facts.migrationHead, head);
+    assert.equal(facts.expectedMigrations, expected);
     assert.ok(facts.tables > 30, "the catalogue is counted, not assumed");
     assert.equal(facts.processUptimeSeconds, 42, "uptime is injected so the report is deterministic");
 
     // The expectation is HELD BY THE CALLER, never read from the database: a
     // process compares the schema it was built for against the schema it found.
-    const behind = new PgAdminConsoleStore(q(db.pool), 30, () => 1);
-    assert.equal((await behind.health()).expectedMigrations, 30);
+    const behind = new PgAdminConsoleStore(q(db.pool), expected + 3, () => 1);
+    assert.equal((await behind.health()).expectedMigrations, expected + 3);
   } finally {
     await db.close();
   }

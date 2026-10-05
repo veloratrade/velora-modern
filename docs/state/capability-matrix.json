@@ -3,7 +3,7 @@
   "generated_at": "2026-10-05",
   "source_audit": "docs/audits/2026-10-04-CAPABILITY-AUDIT-legacy-to-modern.md",
   "git": {
-    "modern_head": "ec4e8e9 (phase 6 — admin console: caf16bf API/DB + contracts, ec4e8e9 web + i18n, and the evidence/state commit that follows)",
+    "modern_head": "d5710fe (phase 7 — the AI capability's API slice; the web surface is the next commit)",
     "modern_branch": "feat/telegram-journal-client",
     "legacy_ref": "edede31"
   },
@@ -21,11 +21,11 @@
     "VERIFIED": 13,
     "IMPLEMENTED": 8,
     "PARTIAL": 13,
-    "MISSING": 12,
+    "MISSING": 9,
     "UI_ONLY": 1,
     "LEGACY_ONLY": 2,
     "INTENTIONALLY_NOT_MIGRATED": 2,
-    "BACKEND_ONLY": 2
+    "BACKEND_ONLY": 5
   },
   "capabilities": [
     {
@@ -284,28 +284,28 @@
       "id": "AI-01",
       "area": "ai",
       "capability": "Analyze my trades",
-      "status": "MISSING",
+      "status": "BACKEND_ONLY",
       "legacy_evidence": "POST /ai/analyze-trades 10/3600; AI/Analysis; ai_analysis, ai_jobs, provider chain",
-      "modern_evidence": "ai-coach latest-insights only (different meaning)",
-      "next_action": "AI pipeline slice"
+      "modern_evidence": "ai-coach latest-insights only (different meaning) Phase 7 delivered the server side: POST /api/v1/ai/{analyze-trades,weekly-report,feedback} + GET /ai/{attempts,status} on the chain-walking AiManager (flag gate → chain → deadline → consent → ONE atomic quota reservation → fail-closed image anonymization → call → validate → record), Legacy's own prompt templates and output whitelists, ownership-resolved trade_ids, and Legacy's rate limits (10/5/20 per hour). Tested 23/23 unit + 19/19 through the real kernel + 12/12 on real PostgreSQL 17.11. No user-facing surface yet: `/intelligence` is still a shell and the console has no AI tab, so this is BACKEND_ONLY rather than IMPLEMENTED.",
+      "next_action": "The web surface (phase 7's next slice) turns this into IMPLEMENTED; a live provider round trip stays NOT_VERIFIED until a credential exists."
     },
     {
       "id": "AI-02",
       "area": "ai",
       "capability": "Weekly/monthly AI report",
-      "status": "MISSING",
+      "status": "BACKEND_ONLY",
       "legacy_evidence": "POST /ai/weekly-report 5/3600; ai_reports; e-mail delivery",
-      "modern_evidence": "—",
-      "next_action": "AI pipeline slice + e-mail types"
+      "modern_evidence": "— Phase 7 delivered the server side: POST /api/v1/ai/{analyze-trades,weekly-report,feedback} + GET /ai/{attempts,status} on the chain-walking AiManager (flag gate → chain → deadline → consent → ONE atomic quota reservation → fail-closed image anonymization → call → validate → record), Legacy's own prompt templates and output whitelists, ownership-resolved trade_ids, and Legacy's rate limits (10/5/20 per hour). Tested 23/23 unit + 19/19 through the real kernel + 12/12 on real PostgreSQL 17.11.",
+      "next_action": "The web surface (phase 7's next slice) turns this into IMPLEMENTED; a live provider round trip stays NOT_VERIFIED until a credential exists."
     },
     {
       "id": "AI-03",
       "area": "ai",
       "capability": "AI answer feedback",
-      "status": "MISSING",
+      "status": "BACKEND_ONLY",
       "legacy_evidence": "POST /ai/feedback 20/3600; ai_feedback",
-      "modern_evidence": "—",
-      "next_action": "AI pipeline slice"
+      "modern_evidence": "— Phase 7 delivered the server side: POST /api/v1/ai/{analyze-trades,weekly-report,feedback} + GET /ai/{attempts,status} on the chain-walking AiManager (flag gate → chain → deadline → consent → ONE atomic quota reservation → fail-closed image anonymization → call → validate → record), Legacy's own prompt templates and output whitelists, ownership-resolved trade_ids, and Legacy's rate limits (10/5/20 per hour). Tested 23/23 unit + 19/19 through the real kernel + 12/12 on real PostgreSQL 17.11. Feedback stores a DERIVED changed_fields (0028 refuses a correction that changes nothing).",
+      "next_action": "The web surface (phase 7's next slice) turns this into IMPLEMENTED; a live provider round trip stays NOT_VERIFIED until a credential exists."
     },
     {
       "id": "AI-04",
@@ -314,7 +314,7 @@
       "status": "MISSING",
       "legacy_evidence": "/intelligence with preset questions + free text",
       "modern_evidence": "/intelligence shell",
-      "next_action": "Build after AI pipeline exists (never UI-first)"
+      "next_action": "Legacy's `/intelligence` is a demo: 27 keys of which most are simulated content (`pages.intelligence.simulatedAnswer`, \"72٪ نرخ برد\", \"✦ بهترین استراتژی هفته\") and the `assistant` feature has NO Legacy route. Modern will build the real surface over analyze/report/attempts + consent and will NOT reproduce the fabricated answers (mission: never fabricate)."
     },
     {
       "id": "AI-05",
@@ -341,7 +341,7 @@
       "status": "VERIFIED",
       "legacy_evidence": "7 admin routes + translations + copilot draft",
       "modern_evidence": "GET /api/v1/admin/communications/tickets (+?status&waiting_for&unread&q&page), GET /{id}, POST /{id}/messages {message, internal}, POST /{id}/status {action}; RBAC-gated support.tickets.view/manage; queue counters; real-PG battery covers filters, ILIKE escaping and CAS conflicts. The two AI routes (/translate, /copilot) are NOT wired here — phase 7 owns them and they must never be a stub. Re-proved in this session in a real browser against the production build + live API on PostgreSQL: queue → thread → operator reply → close → archive, with the thread offering only the transitions the service allows (docs/audits/phase6-ui/ 07-08).",
-      "next_action": "Translations + copilot draft land with the AI phase (they call a provider; a stub would fabricate output)."
+      "next_action": "The AI assists (translate, copilot, copilot/draft) landed as API in phase 7 — gated by support.tickets.manage, degrading to available:false + a reason, and a draft is never sent. Their console buttons arrive with the phase-7 web slice."
     },
     {
       "id": "ADM-01",
@@ -367,7 +367,7 @@
       "capability": "Admin system surface",
       "status": "PARTIAL",
       "legacy_evidence": "75 /api/v1/admin/* route statements across 19 segments @edede31 (reproducible parse of api/index.php 109–251): users 17, integrations 12, ai 10, communications 7, analytics 6, settings 3, system 3, billing 2, feature-flags 2, logs 2, providers 2, security 2, ai-usage 1, config 1, me 1, overview 1, permissions 1, trades 1, trading-accounts 1",
-      "modern_evidence": "Migrated: audit logs (filters + before/after state), security feeds (signups/logins, sensitive-gated by audit.view_sensitive), system health (nine attested components; unbuilt = not_applicable + phase reason, never a green check), RBAC matrix (rbac.matrix.view, super_admin-only), metrics. NOT migrated with owners: AI (phase 7), integrations/worker/e-mail + A2 logs (phase 8), flags/settings/billing/log viewer (phase 9 or no reader yet), user create+invite (owner decision)",
+      "modern_evidence": "Migrated: audit logs (filters + before/after state), security feeds (signups/logins, sensitive-gated by audit.view_sensitive), system health (nine attested components; unbuilt = not_applicable + phase reason, never a green check), RBAC matrix (rbac.matrix.view, super_admin-only), metrics. NOT migrated with owners: AI (phase 7), integrations/worker/e-mail + A2 logs (phase 8), flags/settings/billing/log viewer (phase 9 or no reader yet), user create+invite (owner decision) Phase 7 added the AI part of this surface: 21 admin routes (overview, chain CRUD + reorder, flags with rollout, quotas, route show/save/clear, relay show/save/clear, credential replace/delete, verify + test-connection, usage drilldown) gated by aiManage (read) and aiRouteManage (super-admin-only writes), and the RBAC map moved rows 23-24 toward ENFORCED. Still not migrated: settings, feature flags outside AI, the log viewer, /admin/config/effective and /admin/analytics/ai.",
       "next_action": "Phase 7 (AI) → phase 8 (integrations/worker/e-mail) → phase 9 (flags/settings/billing). Each stays recorded as not-migrated with its dependency; never widened silently (AC-14 precedent)."
     },
     {

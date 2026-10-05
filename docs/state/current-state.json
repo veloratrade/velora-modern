@@ -71,7 +71,7 @@
     "missing_means": "legacy state NOT_VERIFIED this session (report, do not fail)"
   },
   "summary": {
-    "migration_closure": "NOT_CLOSED (phases 7-9 pending)",
+    "migration_closure": "NOT_CLOSED (phase 7 web slice, then phases 8-9)",
     "open_owner_decisions": [
       "R1 password policy at login",
       "R2 trustedProxyCidrs wiring",
@@ -89,26 +89,27 @@
       "MG-SEC-COOKIE",
       "MG-SEC-CSP",
       "MG-SEC-EDGE-AUTHZ",
-      "MG-AI-OCR",
+      "MG-AI-OCR (PARTIAL: API slice done, web surfaces + a live provider round trip open)",
+      "MG-AI-ANONYMIZE (owner decision: an image dependency, or external vision stays off)",
       "MG-BACKUP-RESTORE",
-      "MG-ADMIN (PARTIAL after phase 6: AI 14 routes → phase 7, integrations 12 + worker/e-mail → phase 8, settings/flags/logs/billing → phase 9, user creation + invitations → owner decision)"
+      "MG-ADMIN (PARTIAL after phase 6; the AI admin module landed in phase 7)"
     ],
     "closed_this_phase": [
-      "Admin console core implemented and VERIFIED in a real browser on live PostgreSQL (Phase 6, 62/62 QA); MG-ADMIN OPEN → PARTIAL; MG-FRONTEND-SURFACES annotated (/admin is no longer a shell); SEC-01 moved from 6 to 12 of 24 Legacy permissions ENFORCED; ADM-01 / ADM-04 / SUP-02 → VERIFIED"
+      "AI capability's server side implemented and tested (Phase 7 API slice, d5710fe): chains/quotas/flags, the n8n relay on Legacy's contract, the local Tesseract OCR proved against the real binary, the three user routes, 21 admin routes and the three support assists. MG-TG-2 OPEN → PARTIAL; MG-AI-OCR OPEN → PARTIAL; AI-01/02/03 MISSING → BACKEND_ONLY; MG-AI-ANONYMIZE opened with its owner decision named."
     ]
   },
   "branch_work": {
-    "entry": "AC-16 (Phase 6 — admin console) + AC-17 (its push verification)",
+    "entry": "AC-18 (Phase 7 — the AI capability, API slice)",
     "branch": "feat/telegram-journal-client",
     "base": "0e9c4d7e6e1f984287490ce02f5681c208e35c7a (main)",
-    "head": "83be9c4c2ee83c86165ab585e27da6cf57db8b15 — VERIFIED pushed 2026-10-05T03:22:35Z by an independent git ls-remote (AC-17). Phase 6 = caf16bf (API/DB + contracts) + ec4e8e9 (web + i18n) + 83be9c4 (evidence/docs/state); the AC-17 push-verification commit follows and its SHA is recorded in the next transcript",
-    "commits": "phase 6: migration 0027 (audit vocabulary CLOSED + indexes) + the admin console service/routes/store + the extended per-user admin API + contracts/rbac + the seven-tab web surface + messages/{fa,en}/admin.json + the i18n/design guard + the browser QA harness and its evidence",
-    "capability": "Admin console — the operator surface (ADM-01, ADM-04, SUP-02 → VERIFIED): overview, user 360, support queue, audit trail with before/after state, security feeds with sensitive fields omitted-and-labelled, system health over nine honestly attested components, analytics over five bounded range presets, RBAC matrix (super_admin-only)",
+    "head": "d5710fe05db209a0aba37a8827469e362f7d8a97 — VERIFIED pushed 2026-10-05T05:26:28Z by an independent git ls-remote",
+    "commits": "phase 7 (API slice): migration 0028 + the ai/ module (catalog, config store, secrets, route resolver, n8n relay transport, tesseract provider, feature router, rollout guard, fail-closed anonymizer, chain-walking manager, analysis service, user routes, admin service/routes, ledger reader) + the support AI assists + contracts (aiManage/aiRouteManage, three rate-limit buckets) + wiring + 54 new tests",
+    "capability": "AI — provider chains with quotas and flags, the n8n Gemini relay, the local Tesseract OCR fallback, analyze-trades / weekly-report / feedback, 21 admin AI routes, and the support translates/copilot assists. All fail closed: no credential means a typed refusal recorded in the ledger, never invented content",
     "pushed": true,
-    "pushed_at": "2026-10-05T03:22:35Z (read back with git ls-remote; transcript in CHANGE_LOG AC-17). main untouched at 0e9c4d7e — not merged, not deployed"
+    "pushed_at": "2026-10-05T05:26:28Z (git ls-remote; phases 1-6 verified earlier, AC-15/AC-17). main untouched at 0e9c4d7e — not merged, not deployed"
   },
   "last_battery": {
-    "result": "1169/1169 local (1106 general + 63 PGlite, 0 fail / 0 cancelled / 0 skipped, EXIT=0); tsc 0 errors (5 projects); secret-scan PASS (0 findings); next build exit 0 with /admin + /en/admin real (38 routes); REAL-PG batteries 30 files / 60 runs / 0 failures — REAL-PG EVIDENCE: PASS on PostgreSQL 17.11 at migration head 0027; phase-6 units adminConsoleRoutes 17/17, adminConsoleService 16/16, adminConsole.pg 14/14, i18n/adminSurface 8/8, i18n/supportSurface 7/7, extendedCapabilities.pg 15/15, rbacCapabilityMap 5/5; browser QA 62/62 in Chromium 153 against the production build + live API (docs/audits/phase6-ui/, 20 screenshots)."
+    "result": "1211/1211 local (1148 general + 63 PGlite, 0 fail / 0 cancelled / 0 skipped, EXIT=0); tsc 0 errors (5 projects); secret-scan PASS (0 findings); REAL-PG batteries 31 files / 62 runs / 0 failures on PostgreSQL 17.11 at migration head 0028; phase-7 units aiCapability 23/23, aiRoutes 19/19 through the real kernel, aiCapability.pg 12/12, rbacCapabilityMap 5/5, rateLimitRoutes 18/18; the whole chain 0001→0028 applied from scratch after a sandbox restore wiped the toolchain."
   },
   "distribution": {
     "branch": "governance/agent-context",
