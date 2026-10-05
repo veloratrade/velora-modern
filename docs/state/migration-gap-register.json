@@ -575,19 +575,24 @@
       "id": "MG-API-MISSING-ROUTES",
       "section": "B",
       "title": "76 of 103 legacy routes have no modern counterpart",
-      "status": "OPEN",
+      "status": "PARTIAL",
       "priority": "P2",
-      "verification_state": "STATIC",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§4.2"
       ],
       "evidence": [
-        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+        "apps/api/src/ai/aiAdminRoutes.ts",
+        "apps/api/src/admin/adminConsoleRoutes.ts",
+        "apps/api/src/support/supportAiRoutes.ts",
+        "apps/api/src/analytics/analyticsRoutes.ts",
+        "apps/api/src/kernel/server.ts"
       ],
       "decisions": [],
       "closure_criteria": "Routes ported or owner-dropped",
       "related": [],
-      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC."
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC.",
+      "notes": "RE-AUDITED 2026-10-05 (AC-30) on the integrated tree, per-entry. Of the audit's 76-entry missing set (78 entries at per-entry granularity): 49 now have modern counterparts (accounts 2/2; admin-AI 7/7, analytics 2/6, comms 7/7, integrations 1/6 (relay via /admin/ai/relay), logs 1/2 (audit-logs), identity 3/3 (rbac/self + rbac/matrix = me + permissions), providers 2/2, security 2/2, system 1/3, reads 2/2, users 9/13; user AI 3/3; support 5/5; dashboard 2/3 via /analytics/*), 2 are RECORDED intentional non-migrations (webhook test — webhookRoutes.ts:13; auth alias resend-verification-email — OD-14 single canonical endpoint, authService.ts + rateLimitRoutes.test.ts pin), 27 remain absent: 21 admin blocks already owned by the AC-16 phase-8/9 inventory (analytics overview/revenue/ai/operations, billing x2, config/effective, feature-flags x2, integrations x5, logs/system, settings x2, diagnostics x2, user activity), 4 owner-decision-gated (invitations, per-user subscription [SUBMAP], admin create-user, dashboard/strategies [R9]), 1 MG-AI-OCR (extract-screenshot — rate-limit bucket already declared in contracts), 1 MG-SCHEMA-MAPPING (content-translations/lookup — cache-only localization, needs content_translations storage). AC-30 ATTEMPTED the auth alias and REVERTED it when the OD-14 record was found in the existing test — a recorded owner decision is never overridden autonomously. The row is now an umbrella: every remaining absence is tracked by its owning row or owner decision."
     },
     {
       "id": "MG-API-CONTRACT-DIVERGENCE",
