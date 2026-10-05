@@ -158,7 +158,7 @@
       "title": "Background/cron work deployed and proven to run",
       "status": "OPEN",
       "priority": "P1",
-      "verification_state": "NOT_VERIFIED",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§19.1 gate 9",
         "§13.2"
@@ -166,12 +166,13 @@
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
         "railway.json",
-        "apps/worker/src/index.ts"
+        "apps/worker/src/index.ts",
+        "docs/evidence/WORKER-ONE-TICK-RUNTIME-PROOF-2026-10-03.md"
       ],
       "decisions": [
         "OD-AC-WORKER"
       ],
-      "closure_criteria": "MG-WORKER-DEPLOY closed with runtime evidence"
+      "closure_criteria": "MG-WORKER-DEPLOY closed with runtime evidence. Local progress 2026-10-03 (AC-10): analytics one-tick chain proven end-to-end on real PG 17.11 + real pg-boss timekeeper (cron fire -> due user -> recompute -> user_analytics_daily row); MG-OBS-7 crash fixed. Still OPEN: no deployment (OD-AC-WORKER); FX/MetaAPI/copy ticks not executed (external-call / token / transport gates)."
     },
     {
       "id": "MG-G10",
@@ -234,7 +235,7 @@
       "title": "Operational tooling, backup and restore proven",
       "status": "OPEN",
       "priority": "P1",
-      "verification_state": "NOT_VERIFIED",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§19.1 gate 13",
         "§17.2"
@@ -242,7 +243,8 @@
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
         "infra/backup/DR-RUNBOOK.md",
-        "ops/backup/backup_gate.py"
+        "ops/backup/backup_gate.py",
+        "docs/evidence/BACKUP-RESTORE-LOCAL-DRILL-2026-10-03.md"
       ],
       "decisions": [
         "OD-AC-RPORTO"
@@ -326,7 +328,7 @@
       "title": "Worker not deployed (no service definition; no scheduled job ever run)",
       "status": "OPEN",
       "priority": "P1",
-      "verification_state": "NOT_VERIFIED",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§13.2"
       ],
@@ -334,12 +336,13 @@
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
         "railway.json",
         "apps/worker/src/index.ts",
-        "infra/docker-compose.yml"
+        "infra/docker-compose.yml",
+        "docs/evidence/WORKER-ONE-TICK-RUNTIME-PROOF-2026-10-03.md"
       ],
       "decisions": [
         "OD-AC-WORKER"
       ],
-      "closure_criteria": "Worker service defined + one tick of each scheduler proven in a real environment"
+      "closure_criteria": "Worker service defined + one tick of each scheduler proven in a real environment. Local progress 2026-10-03 (AC-10): analytics tick proven on real PG 17.11 (see evidence record); MG-OBS-7 first-cron crash fixed + regression-tested. Remaining: service definition (OD-AC-WORKER) and deployed-runtime ticks; FX tick not fired (live ECB call, charter-excluded locally); MetaAPI tick token-gated; copy tick no transport."
     },
     {
       "id": "MG-SEC-COOKIE",
@@ -452,20 +455,21 @@
       "id": "MG-BACKUP-RESTORE",
       "section": "B",
       "title": "No real backup taken; no restore drill run",
-      "status": "OPEN",
+      "status": "PARTIAL",
       "priority": "P1",
-      "verification_state": "NOT_VERIFIED",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§17.2"
       ],
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
-        "infra/backup/DR-RUNBOOK.md"
+        "infra/backup/DR-RUNBOOK.md",
+        "docs/evidence/BACKUP-RESTORE-LOCAL-DRILL-2026-10-03.md"
       ],
       "decisions": [
         "OD-AC-RPORTO"
       ],
-      "closure_criteria": "One real backup + one restore drill, evidence captured"
+      "closure_criteria": "Real backup taken from the real staging/production database, stored in veloratrade/velora-backups (STORAGE_VERIFIED), and a restore drill run with application-level recovery verified. LOCAL PROGRESS 2026-10-03 (AC-11): first real backup + restore drill executed on a disposable local PG 17.11 - real producer (pg_dump custom+gzip, sha256, INTEGRITY_VERIFIED), gate correctly BLOCKED on un-stored evidence (exit 1, fail-closed proven against real output), pg_restore exit 0, per-table content hashes all MATCH (see evidence record). Remaining: staging/production backup, official storage + storage verification, API-level health check, RPO/RTO decision, ADR-012 A.6 deploy wiring."
     },
     {
       "id": "MG-API-MISSING-ROUTES",
@@ -643,33 +647,43 @@
       "id": "MG-RANGE-GUARD",
       "section": "B",
       "title": "No runtime PnL range guard (assertFits equivalent)",
-      "status": "OPEN",
+      "status": "CLOSED",
       "priority": "P3",
-      "verification_state": "STATIC",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§9.1"
       ],
       "evidence": [
-        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "packages/domain/src/pnl.ts",
+        "apps/api/src/trades/tradeService.ts",
+        "packages/domain/src/pnl.test.ts",
+        "apps/api/src/trades/tradeService.test.ts"
       ],
       "decisions": [],
-      "closure_criteria": "Guard implemented or owner-waived"
+      "closure_criteria": "Guard implemented or owner-waived. Implemented 2026-10-04 (AC-13): legacy PnlCalculator::assertFits port - computePnl returns an explicit out-of-range result kind (netPnl 16 integer/8 fraction digits, rMultiple 10/8 - the legacy limits, stricter than the modern NUMERIC(20,2)/(20,8) columns so schema fit is guaranteed); tradeService maps it to the legacy error vocabulary (422 VALIDATION_FAILED, code OUT_OF_RANGE, messageKey errors.validation.range, field profitLoss/rMultiple) at both call sites (create + exit recompute). Verified: domain 17/17 incl. 6 boundary tests (16-digit pass / 17-digit reject, negative, shadowing order, 10-digit r pass / 11-digit reject); service 28/28 incl. 3 integration tests; full battery ALL PASS; typecheck 0 errors; secret-scan 0 findings. Mechanism divergence (deliberate, documented): result kind instead of throw, per ADR-001 §5 house style - the audit itself notes modern 'makes the branch explicit'."
     },
     {
       "id": "MG-DOMAIN-LEGACY-ONLY",
       "section": "B",
       "title": "JalaliCalendar, TradingSessionEngine, achievements engine: no modern counterpart",
-      "status": "OPEN",
+      "status": "PARTIAL",
       "priority": "P3",
-      "verification_state": "STATIC",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§9.3"
       ],
       "evidence": [
-        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "packages/domain/src/jalali.ts",
+        "packages/domain/src/jalali.test.ts",
+        "packages/domain/src/tradingSession.ts",
+        "packages/domain/src/tradingSession.test.ts",
+        "packages/domain/src/achievements.ts",
+        "packages/domain/src/achievements.test.ts"
       ],
       "decisions": [],
-      "closure_criteria": "Ported or owner-dropped"
+      "closure_criteria": "Ported or owner-dropped. PROGRESS 2026-10-04 (AC-14): JalaliCalendar ported to packages/domain/src/jalali.ts (pure, IO-free; gregorianToJalali verbatim, jalaliToGregorian + isJalaliLeap from the legacy single-owner TradeTimeNormalizer, formatJalaliDate; 11/11 tests incl. legacy golden vectors J1-J8 and full-day sweeps). OBSERVATION (verified against the executed legacy PHP itself): the legacy header's round-trip claim '1925..2124 / jy 1304..1503' is INACCURATE - the measured clean windows are gregorian-first 2000..2100 (every day) and jalali-first jy 1379..1478 except Esfand-30 of the 9 in-window leap years; outside them the legacy pair drifts (e.g. 1925-01-01 -> 1303/10/11 -> 1924-12-31). The port preserves legacy behavior verbatim (parity over correction); out-of-window drift is pinned by tests so any future algorithm change is loud; correcting the algorithm is an owner decision. PROGRESS 2026-10-04 (AC-15): TradingSessionEngine + SessionWindow ported to packages/domain/src/tradingSession.ts (never invents windows; explicit IANA zones; DST via platform tz database; cross-midnight; half-open [start,end); legacy validation rules incl. EST/offset rejection). 19/19 tests (legacy vectors S1-S21) PLUS a direct cross-check: the ACTUAL legacy PHP classes and the modern port produce IDENTICAL output on all 14 classification vectors (summer/winter DST, boundaries, cross-midnight, weekday filter). PROGRESS 2026-10-04 (AC-16): achievements engine ported at the DOMAIN level - packages/domain/src/achievements.ts: the complete two-definition legacy catalog (FIRST_TRADE, EMAIL_VERIFIED with their i18n keys - nothing invented), key normalization, exact metadata_json/timestamp formats (gmdate shapes), the idempotent first-unlock decision and fail-silent error semantics (legacy catch(Throwable) parity), and listForUser - with storage modeled as the injected AchievementStore port (domain stays IO-free per house rules). 11/11 tests. ALL THREE §9.3 dimensions now have domain ports. REMAINING for full parity (product-integration layer, not domain): user_achievements storage (additive migration), unlock triggers at first-trade / email-verification call sites, and the achievements email (live-service boundary; the achievement_notifications email flag already survives)."
     },
     {
       "id": "MG-OPS-TOOLING",
@@ -897,7 +911,7 @@
       "id": "MG-OBS-6",
       "section": "E",
       "title": "tools/pg-smoke.ts S1b asserts stale D1-era migration list [0001..0005] vs tree 0001..0022 — D1 smoke cannot pass on current tree (migrations themselves apply cleanly; batteries unaffected)",
-      "status": "OPEN",
+      "status": "CLOSED",
       "priority": "P3",
       "verification_state": "STATIC",
       "audit_refs": [],
@@ -905,7 +919,27 @@
         "tools/pg-smoke.ts"
       ],
       "decisions": [],
-      "closure_criteria": "Test-side expectation update (owner-gated)"
+      "closure_criteria": "Test-side expectation update (owner-gated)",
+      "closure_note": "Fixed by AC-9 (2026-10-03, charter-authorized): S1b now derives its expectation from db/migrations (sorted .sql files, floor >= 22). Evidence: fixed smoke on fresh disposable PostgreSQL 17.11 - PASS S1a..S9 ALL CHECKS PASSED, 22 migrations applied, idempotency re-confirmed. Branch feat/mg-obs-6-pg-smoke-expectation. PG 17.11 caveat (not PG16)."
+    },
+    {
+      "id": "MG-OBS-7",
+      "section": "E",
+      "title": "Worker died on its first cron-fired tick: schedules were registered without job data, so fired ticks carried no JobDescriptor (handler lookup on undefined -> safeDlqReason(undefined) TypeError -> unhandled rejection -> process exit); any descriptor-less job in a polled queue killed the process the same way. Found by the charter Wave-1 Task 2 local one-tick proof, 2026-10-03.",
+      "status": "CLOSED",
+      "priority": "P2",
+      "verification_state": "RECORDED_RUNTIME",
+      "audit_refs": [],
+      "evidence": [
+        "docs/evidence/WORKER-ONE-TICK-RUNTIME-PROOF-2026-10-03.md",
+        "apps/worker/src/queue/pgBossAdapter.ts",
+        "apps/worker/src/runner.ts",
+        "apps/worker/src/observability/safeError.ts",
+        "db/tests/pgBossAdapter.pg.test.ts"
+      ],
+      "decisions": [],
+      "closure_criteria": "Schedule() carries a full descriptor; malformed jobs DLQ instead of crashing",
+      "closure_note": "Fixed by AC-10 (2026-10-03, charter Wave-1 Task 2): pgBossAdapter.schedule() now passes a complete maintenance-policy JobDescriptor as the schedule data (pg-boss timekeeper copies it verbatim into fired jobs); runner routes descriptor-less jobs to the no-handler/DLQ path with reason NO_HANDLER:unknown instead of crashing. Evidence: pre-fix crash reproduced (process exit 1); post-fix, a malformed job is DLQed with the process alive AND the real timekeeper fired the analytics tick end-to-end on disposable PG 17.11 (scheduler.analytics_tick count=1 -> job.done analytics.recompute-tick -> analytics.recomputed count=1 -> job.done analytics.recompute-daily; user_analytics_daily row materialized). Gates: unit battery ALL PASS; pgBossAdapter.pg.test.ts 16/16 on real PG (3 new subtests); typecheck 0 errors; secret-scan 0 findings. Branch feat/mg-obs-7-worker-tick-descriptor (unmerged; no PR merge authorization). PG 17.11 caveat: not PG16. Deployment itself remains MG-WORKER-DEPLOY (OPEN). DLQ precision (owner-directed, 2026-10-04): physical velora.dlq persistence is proven ONLY for send()-enqueued jobs (pre-existing exhaustion test); the malformed raw-inserted job is terminally failed IN PLACE (state=failed, output={dlq:true, reason:NO_HANDLER:unknown}, never redelivered - integration test, direct SQL). The live-cluster malformed job's final DB state was not inspected; only the no-handler log line and process survival are live evidence."
     }
   ],
   "owner_decisions": [

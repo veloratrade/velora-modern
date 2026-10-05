@@ -578,3 +578,58 @@ test("serialization: deterministic for identical input (ids/createdAt excluded)"
   };
   assert.deepEqual(strip(a), strip(b));
 });
+
+// MG-RANGE-GUARD (audit §9.1) — legacy PnlCalculator::assertFits parity at the
+// service boundary: a calculated value that cannot fit the supported range is
+// rejected with the legacy ApiException mapping — 422 VALIDATION_FAILED, code
+// OUT_OF_RANGE, messageKey errors.validation.range, field profitLoss/rMultiple.
+
+test("MG-RANGE-GUARD: create with out-of-range net PnL → 422 OUT_OF_RANGE (assertFits parity)", async () => {
+  const { svc } = makeService();
+  // All inputs pass their own 10,8 validation; only the PRODUCT overflows:
+  // (9999999999 − 1) × 9999999999 × 9999999999 ≈ 1e30 → 31 integer digits.
+  await expectTradeError(
+    svc.createTrade(OWNER, {
+      ...VECTOR_A,
+      entryPrice: "1", exitPrice: "9999999999",
+      volume: "9999999999", contractSize: "9999999999",
+      commission: "0", swap: "0", stopLoss: null,
+    }),
+    422, "VALIDATION_FAILED",
+    { field: "profitLoss", code: "OUT_OF_RANGE", messageKey: "errors.validation.range" },
+  );
+});
+
+test("MG-RANGE-GUARD: create with out-of-range r-multiple → 422 OUT_OF_RANGE", async () => {
+  const { svc } = makeService();
+  // risk = (1 − 0.99999999) × 1e6 = 0.01; net = 100 × 1e6 = 1e8;
+  // r = 1e10 → 11 integer digits (legacy rMultiple limit is 10).
+  await expectTradeError(
+    svc.createTrade(OWNER, {
+      ...VECTOR_A,
+      entryPrice: "1", exitPrice: "101",
+      volume: "1000000", contractSize: "1",
+      commission: "0", swap: "0", stopLoss: "0.99999999",
+    }),
+    422, "VALIDATION_FAILED",
+    { field: "rMultiple", code: "OUT_OF_RANGE", messageKey: "errors.validation.range" },
+  );
+});
+
+test("MG-RANGE-GUARD: exit recompute with out-of-range PnL → 422 OUT_OF_RANGE", async () => {
+  const { svc } = makeService();
+  // Create-time PnL is inside the range (1 × 1e6 × 1e5 = 1e11, 12 digits);
+  // the EXIT at 9999999999 overflows: (9999999999 − 1) × 1e6 × 1e5 ≈ 1e21.
+  const created = (await svc.createTrade(OWNER, {
+    ...VECTOR_A,
+    entryPrice: "1", exitPrice: "2",
+    volume: "1000000", contractSize: "100000",
+    commission: "0", swap: "0", stopLoss: null,
+  })) as Record<string, unknown>;
+  const id = String(created.id);
+  await expectTradeError(
+    svc.createExit(id, OWNER, { exitType: "tp", exitPrice: "9999999999", volume: "1000000", exitedAt: "2026-09-10 11:00:00" }),
+    422, "VALIDATION_FAILED",
+    { field: "profitLoss", code: "OUT_OF_RANGE", messageKey: "errors.validation.range" },
+  );
+});

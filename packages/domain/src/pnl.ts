@@ -46,10 +46,45 @@ export type PnlResult =
       grossPnl: string;
       netPnl: string;
       reason: "no-stop-loss" | "stop-loss-wrong-side" | "risk-is-zero";
+    }
+  | {
+      // MG-RANGE-GUARD (audit §9.1): the calculated value cannot be represented
+      // inside the supported range — the port of legacy PnlCalculator::assertFits
+      // (ValidationException OUT_OF_RANGE). A result kind instead of a throw,
+      // for the same reason undefined-risk is a kind: the type system forces
+      // every caller to handle the branch (ADR-001 §5 house style).
+      kind: "out-of-range";
+      /** Legacy called netPnl 'profitLoss'; the API layer maps it back. */
+      field: "netPnl" | "rMultiple";
     };
+
+// MG-RANGE-GUARD — runtime range guard, the port of legacy
+// PnlCalculator::assertFits (READ-ONLY legacy source-read 2026-10-04):
+// legacy validates every calculated financial value against
+// /\A-?\d{1,integerDigits}(?:\.\d{1,fractionDigits})?\z/D and throws
+// ValidationException OUT_OF_RANGE — profitLoss 16,8 / rMultiple 10,8 —
+// "to keep calculated values inside the production schema instead of relying
+// on driver-specific truncation or overflow behaviour". The same limits are
+// used here: they are STRICTER than the modern storage columns
+// (trades.net_pnl NUMERIC(20,2) = 18 integer digits, trades.r_multiple
+// NUMERIC(20,8) = 12 integer digits), so a value that passes the guard always
+// fits the schema and the legacy rejection envelope is preserved exactly.
+//
+// CHECK TIMING: the guard runs on the FINAL rescaled strings (what callers
+// store). In parity mode (truncation) this is equivalent to legacy's
+// pre-rescale check — truncation never changes the integer digit count; in
+// half-even mode a boundary value that rounds UP across a digit limit is
+// rejected, which is correct because the stored value is what must fit.
+const NET_RANGE = { integerDigits: 16, fractionDigits: 8 } as const; // legacy 'profitLoss'
+const R_MULTIPLE_RANGE = { integerDigits: 10, fractionDigits: 8 } as const;
 
 const S_CUR = SCALES.currency;
 const S_R = SCALES.rMultiple;
+
+/** Legacy assertFits regex semantics: optional '-', 1..N integer digits, optional '.' + 1..F fraction digits. */
+function fitsRange(value: string, limit: { integerDigits: number; fractionDigits: number }): boolean {
+  return new RegExp(`^-?\\d{1,${limit.integerDigits}}(?:\\.\\d{1,${limit.fractionDigits}})?$`).test(value);
+}
 
 function money(f: D.Fixed, mode: RoundingMode): D.Fixed {
   return D.rescale(f, S_CUR, mode);
@@ -70,6 +105,13 @@ export function computePnl(input: PnlInput, mode: RoundingMode): PnlResult {
   const gross = money(grossExact, mode);
   const net = money(D.sub(D.sub(gross, commission), swap), mode);
 
+  // MG-RANGE-GUARD: net is checked FIRST (legacy asserts profitLoss before
+  // rMultiple), so an out-of-range net shadows any undefined-risk branch —
+  // exactly the legacy throw order.
+  if (!fitsRange(D.toString(net), NET_RANGE)) {
+    return { kind: "out-of-range", field: "netPnl" };
+  }
+
   // Risk — PHP PnlCalculator::riskAmount port (inc 8):
   //   no SL or SL == 0 → null; DIRECTIONAL delta; delta <= 0 (wrong side) → null.
   const stopLoss = input.stopLoss;
@@ -89,6 +131,9 @@ export function computePnl(input: PnlInput, mode: RoundingMode): PnlResult {
   }
 
   const r = D.div(net, risk, S_R, mode);
+  if (!fitsRange(D.toString(r), R_MULTIPLE_RANGE)) {
+    return { kind: "out-of-range", field: "rMultiple" };
+  }
   return {
     kind: "ok",
     grossPnl: D.toString(gross),

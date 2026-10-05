@@ -299,6 +299,19 @@ export class TradeService {
       stopLoss: stopLoss === null ? null : scale8(stopLoss),
     }, "half-even");
 
+    if (pnl.kind === "out-of-range") {
+      // MG-RANGE-GUARD — legacy PnlCalculator::assertFits parity (audit §9.1):
+      // ValidationException maps to 422 VALIDATION_FAILED with code OUT_OF_RANGE
+      // and messageKey errors.validation.range (legacy ApiException mapping,
+      // source-read 2026-10-04). The domain says netPnl; the API vocabulary —
+      // like the legacy error and this service's own responses — says profitLoss.
+      throw new TradeError(422, "VALIDATION_FAILED", "Calculated financial value is outside the supported range.", {
+        field: pnl.field === "netPnl" ? "profitLoss" : "rMultiple",
+        messageKey: "errors.validation.range",
+        code: "OUT_OF_RANGE",
+      });
+    }
+
     const now = this.now();
     const record: NewTrade = {
       userId, accountId,
@@ -538,6 +551,16 @@ export class TradeService {
       volume: scale8(volume), contractSize: trade!.contractSize,
       commission: commissionAlloc, swap: swapAlloc, stopLoss: null,
     }, "half-even");
+
+    if (pnl.kind === "out-of-range") {
+      // MG-RANGE-GUARD — same assertFits parity as createTrade (audit §9.1);
+      // exits pass stopLoss: null so only the netPnl guard can trip here.
+      throw new TradeError(422, "VALIDATION_FAILED", "Calculated financial value is outside the supported range.", {
+        field: "profitLoss",
+        messageKey: "errors.validation.range",
+        code: "OUT_OF_RANGE",
+      });
+    }
     const exit: NewTradeExit = {
       exitType: exitType as TradeExitType, exitPrice: scale8(exitPrice), volume: scale8(volume),
       pnl: pnl.netPnl, exitedAt: exited.iso, notes,
