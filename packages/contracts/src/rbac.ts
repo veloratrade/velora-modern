@@ -99,6 +99,17 @@ export const PERMISSIONS = [
   "audit.view_sensitive",
   /** Admin-triggered e-mail verification for a user who cannot complete it. */
   "users.verify_email",
+
+  // --- Phase 7 (AI). Legacy names these two WITHOUT dots (`aiManage`,
+  // `aiRouteManage`) because `ai.*` is its i18n namespace; the identifiers are
+  // carried over verbatim so Role.php can be diffed by name. `admin` holds
+  // aiManage (Legacy grants P_AI_MANAGE to admin); only super_admin holds
+  // aiRouteManage, which is the privilege-adjacent half: choosing the route,
+  // holding the secrets and spending money on a probe.
+  /** Read the AI configuration, chains, flags, quotas and usage ledger. */
+  "aiManage",
+  /** Write the AI route/secrets/relay, and probe a provider. SUPER-ADMIN ONLY. */
+  "aiRouteManage",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -127,6 +138,9 @@ export const ROLE_PERMISSIONS: Readonly<Record<AppRole, readonly Permission[]>> 
     "system.health.view",
     "audit.view",
     "users.verify_email",
+    // Phase 7 — Legacy grants P_AI_MANAGE to `admin` (Role.php), and withholds
+    // P_AI_ROUTE_MANAGE for super_admin only.
+    "aiManage",
   ],
   super_admin: [
     "rbac.self.view",
@@ -146,6 +160,11 @@ export const ROLE_PERMISSIONS: Readonly<Record<AppRole, readonly Permission[]>> 
     // on audit/security reads.
     "audit.view_sensitive",
     "users.verify_email",
+    // Phase 7 — Legacy grants both AI permissions to super_admin, and
+    // aiRouteManage to super_admin ONLY (Role.php: P_AI_ROUTE_MANAGE is one of the
+    // six SA-exclusive permissions).
+    "aiManage",
+    "aiRouteManage",
   ],
 };
 

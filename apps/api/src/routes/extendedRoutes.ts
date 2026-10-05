@@ -27,6 +27,9 @@ import { handleBillingRoutes } from "../billing/billingRoutes.js";
 import { handleAiCoachRoutes } from "../aicoach/aiCoachRoutes.js";
 import { handleAdminRoutes } from "../admin/adminRoutes.js";
 import { handleAdminConsoleRoutes } from "../admin/adminConsoleRoutes.js";
+import { handleAiRoutes } from "../ai/aiRoutes.js";
+import { handleAiAdminRoutes } from "../ai/aiAdminRoutes.js";
+import { handleSupportAiRoutes } from "../support/supportAiRoutes.js";
 import { handlePortfolioRoutes } from "../portfolio/portfolioRoutes.js";
 import { handleEaRoutes } from "../ea/eaRoutes.js";
 import { handleTenancyRoutes } from "../tenancy/tenancyRoutes.js";
@@ -59,6 +62,9 @@ const ROUTE_HANDLERS: readonly ExtendedRouteHandler[] = [
   handleAiCoachRoutes,
   handleAdminRoutes,
   handleAdminConsoleRoutes,
+  handleAiRoutes,
+  handleAiAdminRoutes,
+  handleSupportAiRoutes,
   handlePortfolioRoutes,
   handleEaRoutes,
   handleTenancyRoutes,

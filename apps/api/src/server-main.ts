@@ -47,6 +47,7 @@ import { PgOwnershipStore } from "./auth/pgOwnershipStore.js";
 import { MemoryAuditStore } from "./auth/memoryAuditStore.js";
 import { PgAuditStore } from "./auth/pgAuditStore.js";
 import { resolveCredentialKey } from "./credentials/credentialConfig.js";
+import { canAct } from "@velora/contracts";
 import { resolveMetaApiConfig } from "./metaapi/metaApiConfig.js";
 import { MetaApiProvisioningService } from "./metaapi/provisioningService.js";
 import { PgProvisioningStore } from "./metaapi/pgProvisioningStore.js";
@@ -85,6 +86,21 @@ import { PgSubscriptionStore } from "./billing/subscriptionService.js";
 import { PgAiCoachStore } from "./aicoach/aiCoachRoutes.js";
 import { PgAdminStore } from "./admin/adminRoutes.js";
 import { PgAdminConsoleStore } from "./admin/adminConsoleStore.js";
+// Phase 7 — the AI capability: configuration substrate, routing, the n8n relay,
+// the local OCR fallback, the chain walker and the two HTTP surfaces.
+import { PgAiConfigStore } from "./ai/aiConfigStore.js";
+import { AiSecretService } from "./ai/aiSecrets.js";
+import { AiRouteResolver } from "./ai/aiRouteResolver.js";
+import { AiFeatureRouter } from "./ai/aiFeatureRouter.js";
+import { AiFeatureGuard } from "./ai/aiFeatureGuard.js";
+import { UnavailableImageAnonymizer } from "./ai/imageAnonymizer.js";
+import { GeminiExecutor, TesseractExecutor, type AiExecutor } from "./ai/aiExecutors.js";
+import { AiManager } from "./ai/aiManager.js";
+import { AiAnalysisService } from "./ai/aiAnalysisService.js";
+import { PgAiLedger } from "./ai/aiLedger.js";
+import { AiAdminService } from "./ai/aiAdminService.js";
+import { TesseractProvider, findTesseractBinary } from "./ai/tesseractProvider.js";
+import type { AiCatalogProvider } from "./ai/aiCatalog.js";
 import { AdminConsoleService } from "./admin/adminConsoleService.js";
 import { PgPortfolioStore } from "./portfolio/portfolioRoutes.js";
 import { PgEaStore } from "./ea/eaRoutes.js";
@@ -235,6 +251,12 @@ async function main(): Promise<void> {
     admin?: import("./admin/adminRoutes.js").AdminStore;
     /** Phase 6 — the admin console (overview, analytics, health, feeds, per-user). */
     adminConsole?: import("./admin/adminConsoleRoutes.js").AdminConsoleCapability;
+    /** Phase 7 — the user-facing AI capability. */
+    ai?: import("./ai/aiRoutes.js").AiCapability;
+    /** Phase 7 — the admin AI configuration surface. */
+    aiAdmin?: import("./ai/aiAdminRoutes.js").AiAdminCapability;
+    /** Phase 7 — the support console's AI assists. */
+    supportAi?: import("./support/supportAiRoutes.js").SupportAiCapability;
     portfolio?: import("./portfolio/portfolioRoutes.js").PortfolioStore;
     ea?: import("./ea/eaRoutes.js").EaStore;
     eaSync?: import("./ea/eaRoutes.js").SyncTriggerPort;
@@ -466,6 +488,148 @@ async function main(): Promise<void> {
         }),
         users: capabilities.adminUsers,
       };
+    }
+    // ---------------------------------------------------------------------
+    // Phase 7 — AI. ONE substrate, ONE ledger, ONE chain walker.
+    //
+    // The composition order matters: secrets resolve per call (so an
+    // admin-saved key or relay config takes effect without a redeploy), the
+    // router asks the secrets whether a provider is usable, and the manager
+    // records every attempt — success, refusal and error — in the ledger 0017
+    // created and 0028 extended. Nothing here fabricates: with no credential
+    // the answer is a typed refusal, and the local OCR fallback is the only
+    // provider that works with no network at all.
+    // ---------------------------------------------------------------------
+    {
+      const aiConfig = new PgAiConfigStore(pool);
+      const aiMasterKey = resolveCredentialKey(process.env).key;
+      const envOf = (key: string): string | undefined => process.env[key];
+      const aiSecrets = new AiSecretService({ store: aiConfig, masterKey: aiMasterKey, env: envOf });
+      const aiRouteResolver = new AiRouteResolver({ store: aiConfig, env: envOf });
+      const tesseract = new TesseractProvider();
+      const aiRouter = new AiFeatureRouter({
+        store: aiConfig,
+        secrets: aiSecrets,
+        routes: aiRouteResolver,
+        env: envOf,
+        localOcrAvailable: () => tesseract.isAvailable(),
+      });
+      const aiGuard = new AiFeatureGuard({ store: aiConfig });
+      const aiAttempts = new PgAiAttemptStore(q);
+      const aiLedger = new PgAiLedger(q);
+      // The consent reader is the coach's own store: ONE consent column
+      // (users.ai_consent_at), one reader, no second notion of consent.
+      const aiConsent = capabilities.aiCoach ?? new PgAiCoachStore(q);
+      const aiExecutors: Partial<Record<AiCatalogProvider, AiExecutor>> = {
+        gemini: new GeminiExecutor({
+          apiKey: async () => (await aiSecrets.resolve("GEMINI_API_KEY")).value,
+          relayConfig: async () => ({
+            url: (await aiSecrets.resolve("GEMINI_RELAY_URL")).value,
+            token: (await aiSecrets.resolve("GEMINI_RELAY_TOKEN")).value,
+          }),
+        }),
+        tesseract: new TesseractExecutor({ provider: tesseract }),
+        // `openai` is in the ledger vocabulary (0017) but Modern has no
+        // transport for it: it is deliberately absent here, so the router
+        // reports it unavailable instead of the executor pretending.
+      };
+      const aiManager = new AiManager({
+        router: aiRouter,
+        guard: aiGuard,
+        store: aiConfig,
+        consent: aiConsent,
+        attempts: aiAttempts,
+        // No image library in this repository, so the anonymizer reports
+        // "cannot guarantee" — and the manager's fail-closed rule then keeps
+        // every image on this machine (local OCR) instead of sending an
+        // unredacted screenshot to a third party. See imageAnonymizer.ts.
+        anonymizer: new UnavailableImageAnonymizer(),
+        executors: aiExecutors,
+      });
+      const aiTradeStore = new PgTradeStore(pool);
+      capabilities.ai = {
+        analysis: new AiAnalysisService({
+          manager: aiManager,
+          store: aiConfig,
+          trades: {
+            findActiveByIdForUser: async (id, userId) => {
+              const row = await aiTradeStore.findActiveByIdForUser(id, userId);
+              return row === null ? null : {
+                id: row.id, symbol: row.symbol, direction: row.direction, status: row.status,
+                entryPrice: row.entryPrice, exitPrice: row.exitPrice, volume: row.volume,
+                netPnl: row.netPnl, rMultiple: row.rMultiple, stopLoss: row.stopLoss,
+                takeProfit: row.takeProfit, strategy: row.strategy, emotion: row.emotion,
+                openAtUtc: row.openAtUtc, closeAtUtc: row.closeAtUtc,
+              };
+            },
+          },
+          userLocale: async (userId) => {
+            const rows = await q("SELECT locale FROM users WHERE id = $1 LIMIT 1", [userId]);
+            const value = rows[0]?.["locale"];
+            return value === null || value === undefined ? null : String(value);
+          },
+        }),
+        config: aiConfig,
+        ledger: aiLedger,
+        consent: aiConsent,
+        guard: aiGuard,
+        providerConfigured: async () => (await aiRouter.buildDefaultChain(null)).entries.length > 0,
+      };
+      // The support console's assists share the SAME manager (one chain walker,
+      // one ledger, one consent rule) and answer to the support module's own
+      // permission, because they act on a ticket.
+      capabilities.supportAi = {
+        manager: aiManager,
+        ticket: async (ticketId: string) => {
+          // markRead:false — an AI assist must not have the side effect of
+          // marking a ticket read; that belongs to the operator opening it.
+          let view: Awaited<ReturnType<SupportService["supportTicket"]>>;
+          try {
+            view = await capabilities.support!.supportTicket(ticketId, { markRead: false });
+          } catch {
+            return null;
+          }
+          return {
+            id: view.conversation.id,
+            subject: view.conversation.subject,
+            status: view.conversation.status,
+            messages: view.messages.map((m) => ({
+              id: m.id, senderType: m.senderType, body: m.body, createdAt: m.createdAt,
+            })),
+          };
+        },
+        mayManage: async (routeCtx: import("./routes/types.js").ExtendedRouteContext) => {
+          const supportClaims = routeCtx.authenticate(routeCtx.req);
+          if (supportClaims === null) return false;
+          return canAct(
+            { role: supportClaims.role, isSystemOwner: await routeCtx.isSystemOwner(supportClaims.sub) },
+            "support.tickets.manage",
+          );
+        },
+      };
+      capabilities.aiAdmin = {
+        admin: new AiAdminService({
+          store: aiConfig,
+          secrets: aiSecrets,
+          routes: aiRouteResolver,
+          router: aiRouter,
+          guard: aiGuard,
+          anonymizer: new UnavailableImageAnonymizer(),
+          ledger: aiLedger,
+          executors: aiExecutors,
+          localOcrAvailable: () => tesseract.isAvailable(),
+          env: envOf,
+        }),
+      };
+      // One line at boot, no values: an operator reading the log can see whether
+      // the local OCR fallback is really there, which is the only AI provider
+      // whose availability this process can prove without a credential.
+      console.log(JSON.stringify({
+        level: "info",
+        event: "ai.composed",
+        tesseract: findTesseractBinary() !== null,
+        masterKey: aiMasterKey !== null,
+      }));
     }
     capabilities.portfolio = new PgPortfolioStore(q);
     capabilities.ea = new PgEaStore(q);

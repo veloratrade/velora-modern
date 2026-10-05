@@ -20,8 +20,13 @@
 // real provider path is NOT_PROVEN; the battery exercises the boundary with a stub.
 import type { QueryFn } from "../persistence/pg.js";
 
-/** The providers 0017's CHECK admits. A boundary value, not an open string. */
-export const AI_PROVIDERS = ["openai", "gemini"] as const;
+/**
+ * The providers the ledger's CHECK admits. A boundary value, not an open string.
+ * 0017 established openai | gemini; 0028 added `tesseract`, the LOCAL OCR
+ * fallback — a provider that needs no credential and no network, which is why a
+ * chain can still answer when every external provider is unavailable.
+ */
+export const AI_PROVIDERS = ["openai", "gemini", "tesseract"] as const;
 export type AiProviderName = (typeof AI_PROVIDERS)[number];
 
 /**
@@ -132,7 +137,14 @@ export function validateInsight(insight: unknown): InsightValidation {
  * did it work" without a second AI table, and so the coach's read path can
  * exclude attempts that are not coaching.
  */
-export type AiAttemptFeature = "coach" | "journal_extract" | "transcribe" | "vision_extract";
+/**
+ * 0023 established the first four; 0028 added the phase-7 features so ONE ledger
+ * still answers "what did we spend, on what, and did it work" instead of growing a
+ * second table per capability.
+ */
+export type AiAttemptFeature =
+  | "coach" | "journal_extract" | "transcribe" | "vision_extract"
+  | "analysis" | "report" | "assistant" | "ocr" | "translate" | "copilot";
 
 /** A durable record's shape, matching 0017's ai_coaching_logs contract. */
 export interface AiAttemptRecord {
@@ -151,6 +163,23 @@ export interface AiAttemptRecord {
   readonly costMicroUsd: number | null;
   readonly outcome: "success" | "refused" | "error";
   readonly errorCode: string | null;
+  /**
+   * Phase 7 (0028) — the chain semantics, on the SAME ledger rather than in a
+   * second table:
+   *   route          how the provider was reached ('direct' | 'n8n_relay'), or
+   *                  null when the provider decided for itself;
+   *   fallbackIndex  the position in the chain that produced this attempt, so
+   *                  "the first provider was down and the second answered" is
+   *                  readable after the fact;
+   *   latencyMs      how long the attempt took;
+   *   inputHash      sha256 of the INPUT, never the input — Legacy's
+   *                  ai_audit_logs rule, so the ledger cannot become a copy of
+   *                  whatever a user uploaded.
+   */
+  readonly route?: "direct" | "n8n_relay" | null | undefined;
+  readonly fallbackIndex?: number | null | undefined;
+  readonly latencyMs?: number | null | undefined;
+  readonly inputHash?: string | null | undefined;
 }
 
 /** Persistence port for the attempt ledger. */
@@ -166,14 +195,16 @@ export class PgAiAttemptStore implements AiAttemptStore {
     const rows = await this.q(
       `INSERT INTO ai_coaching_logs
          (user_id, provider, model, prompt_version, window_from, window_to, trades_analyzed,
-          insight, tokens_in, tokens_out, cost_micro_usd, outcome, error_code, feature)
+          insight, tokens_in, tokens_out, cost_micro_usd, outcome, error_code, feature,
+          route, fallback_index, latency_ms, input_hash)
        VALUES ($1, $2, $3, $4, $5::timestamptz, $6::timestamptz, $7,
-               $8::jsonb, $9, $10, $11, $12, $13, $14)
+               $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
        RETURNING id::text AS id`,
       [
         entry.userId, entry.provider, entry.model, entry.promptVersion, entry.windowFrom, entry.windowTo,
         entry.tradesAnalyzed, JSON.stringify(entry.insight), entry.tokensIn, entry.tokensOut,
         entry.costMicroUsd, entry.outcome, entry.errorCode, entry.feature ?? "coach",
+        entry.route ?? null, entry.fallbackIndex ?? null, entry.latencyMs ?? null, entry.inputHash ?? null,
       ],
     );
     return { id: String(rows[0]?.["id"]) };

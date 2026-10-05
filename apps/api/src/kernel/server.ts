@@ -127,6 +127,12 @@ export interface ApiConfig {
    * neighbourhood with the admin user service and the ownership resolver.
    */
   readonly adminConsole?: import("../admin/adminConsoleRoutes.js").AdminConsoleCapability;
+  /** Phase 7 — the AI capability: analysis, report, feedback, status, ledger reads. */
+  readonly ai?: import("../ai/aiRoutes.js").AiCapability;
+  /** Phase 7 — the admin AI configuration surface (chains, secrets, route, relay, usage). */
+  readonly aiAdmin?: import("../ai/aiAdminRoutes.js").AiAdminCapability;
+  /** Phase 7 — the support console's AI assists (translate, copilot, draft). */
+  readonly supportAi?: import("../support/supportAiRoutes.js").SupportAiCapability;
   /** v1.5 portfolio / prop drawdown / FX reads. */
   readonly portfolio?: import("../portfolio/portfolioRoutes.js").PortfolioStore;
   /**
@@ -188,6 +194,12 @@ export const THROTTLED_ROUTES: Readonly<Record<string, RateLimitKey>> = {
   // replying are the two operations that can be used to flood the inbox, so they
   // share one bucket per user. Reads are unbounded but cheap and ownership-scoped.
   "POST /api/v1/support/tickets": "support:write",
+  // Phase 7: the three AI operations whose work leaves the process and costs
+  // money. Legacy's per-user limits, carried over verbatim (AIController):
+  // analyze 10/3600, weekly report 5/3600, feedback 20/3600.
+  "POST /api/v1/ai/analyze-trades": "ai:analyze",
+  "POST /api/v1/ai/weekly-report": "ai:report",
+  "POST /api/v1/ai/feedback": "ai:feedback",
 };
 
 /**

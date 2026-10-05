@@ -82,6 +82,14 @@ test("THROTTLED_ROUTES maps exactly the implemented routes to the C-14 keys", ()
     // Phase 5 — opening a support ticket. The id-bearing support writes
     // (messages / reopen / admin status) live in the pattern list below.
     "POST /api/v1/support/tickets",
+    // Phase 7 — the three AI operations whose work leaves the process and costs
+    // money. Legacy's own per-user numbers (AIController): 10/3600, 5/3600,
+    // 20/3600. They join this exact-match guard the moment the routes exist,
+    // which is the guard's whole purpose: a throttled route cannot be added or
+    // removed without a test noticing.
+    "POST /api/v1/ai/analyze-trades",
+    "POST /api/v1/ai/weekly-report",
+    "POST /api/v1/ai/feedback",
   ]);
   for (const routeKey of Object.values(THROTTLED_ROUTES)) {
     assert.ok(routeKey in RATE_LIMIT_DEFAULTS);

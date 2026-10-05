@@ -95,14 +95,21 @@ export const RATE_LIMIT_DEFAULTS = {
   // exactly those two operations (PATCH .../role and .../status), so the same
   // number covers the same surface; the limit is per caller, keyed like every
   // other bucket here (see throttleKeyFor's caller for the discriminator).
+  // --- Phase 7: AI -----------------------------------------------------------
+  // Legacy's own numbers, carried over verbatim from AIController: analyze-trades
+  // 10/hour, weekly-report 5/hour, feedback 20/hour, each keyed per USER
+  // (`ai-analyze-user-{id}`). They are per-user limits on operations whose work
+  // leaves the building and costs money, so the numbers are the product's, not
+  // an invention here.
+  "ai:analyze": { limit: 10, windowSec: 3600 },
+  "ai:report": { limit: 5, windowSec: 3600 },
+  "ai:feedback": { limit: 20, windowSec: 3600 },
   //
   // NOT covered, deliberately: Legacy's remaining buckets guard surfaces Modern
-  // does not have yet — `ai-analyze` / `ai-report` / `ai-feedback` (both the
-  // dispatcher IP limits and AIController's per-USER `ai-*-user-{id}` limits)
-  // belong to the AI phase, and the `admin-*` controller buckets (config,
-  // feature flags, integrations, settings, health refresh, user create/invite)
-  // guard admin surfaces owned by the admin phase. Each lands WITH its route, so
-  // no key here ever describes a route that does not exist.
+  // does not have yet — the `admin-*` controller buckets (config, feature flags,
+  // integrations, settings, health refresh, user create/invite) guard admin
+  // surfaces owned by a later phase. Each lands WITH its route, so no key here
+  // ever describes a route that does not exist.
   "admin:user-action": { limit: 30, windowSec: 300 },
   "trades:extract-screenshot": { limit: 8, windowSec: 300 },
   // --- Telegram client (ADR-018) --------------------------------------------
