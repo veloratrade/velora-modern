@@ -14,7 +14,9 @@
 // `trade_events`. It NEVER reads `user_credentials` (the worker holds
 // REVOKE ALL on it) and never handles a credential, ciphertext, or key.
 import type { Pool, PoolClient } from "pg";
+import { positionGroupKey } from "@velora/domain";
 import type { NormalizedFill, SyncErrorCode } from "@velora/contracts";
+import { reconcilePositions } from "./positionReconciler.js";
 
 export interface SyncAccount {
   readonly accountId: string;
@@ -116,24 +118,33 @@ export interface ImportOutcome {
   readonly tradesImported: number;
   readonly tradesDuplicate: number;
   readonly quarantined: number;
+  /** Positions assembled into trades by the in-transaction reconciliation. */
+  readonly positionsAssembled: number;
+  /** Positions terminally skipped (close_before_open / unknown_direction). */
+  readonly positionsSkippedTerminal: number;
 }
 
 /**
- * Persist one provider batch and fold it into the ledger — ALL IN ONE
- * TRANSACTION, so fills, trades, events and the cursor can never diverge.
+ * Persist one provider batch and reconcile positions — ALL IN ONE
+ * TRANSACTION, so fills, state, trades, events and the cursor can never
+ * diverge. This is Legacy `MetaApiService::runNextSyncJob` verbatim: record
+ * every fill into the durable ledger, then `reconcileAccount` in the same
+ * transaction (MG-METAAPI-ASSEMBLY; the per-OUT-fill trade creation that
+ * audit §9.2 ruled the largest behavioural divergence is gone).
  *
  * IDEMPOTENCY is delegated to the database at three levels, each proven by the
  * constraint rather than by a pre-read:
- *   1. `sync_fills` ON CONFLICT (account_id, external_deal_id) DO NOTHING
- *   2. `trades`     ON CONFLICT (account_id, external_deal_id) DO NOTHING
- *   3. `trade_events` UNIQUE (event_uid), with a DETERMINISTIC uid derived
- *      from the account + provider deal id, so a replay produces the SAME uid
- *      and converges instead of appending a duplicate event.
+ *   1. `sync_fills`     ON CONFLICT (account_id, external_deal_id) DO NOTHING
+ *   2. `trades`         ON CONFLICT (account_id, external_deal_id) DO NOTHING
+ *      (external_deal_id is `pos-<positionId>` — one trade per POSITION)
+ *   3. `trade_events`   UNIQUE (event_uid) with a DETERMINISTIC uid derived
+ *      from the account + position key, so a replay produces the SAME uid and
+ *      converges instead of appending a duplicate event.
  *
  * CURSOR SAFETY: the cursor is advanced INSIDE this transaction. If anything
- * throws, the whole transaction rolls back and the cursor does not move, so a
- * retry re-reads the same window. The cursor therefore can never run ahead of
- * committed work.
+ * throws — including inside the reconciliation — the whole transaction rolls
+ * back and the cursor does not move, so a retry re-reads the same window. The
+ * cursor therefore can never run ahead of committed work.
  */
 export async function importBatch(
   pool: Pool,
@@ -143,87 +154,28 @@ export async function importBatch(
   now: Date,
 ): Promise<ImportOutcome> {
   const client: PoolClient = await pool.connect();
-  let fillsInserted = 0, fillsDuplicate = 0, tradesImported = 0, tradesDuplicate = 0, quarantined = 0;
+  let fillsInserted = 0, fillsDuplicate = 0, quarantined = 0;
+  let tradesImported = 0, tradesDuplicate = 0;
+  let positionsAssembled = 0, positionsSkippedTerminal = 0;
   try {
     await client.query("BEGIN");
 
     for (const fill of fills) {
-      // --- 1. Decide the fill's FINAL state before writing anything --------
+      // --- 1. The fill's own INGESTION state, decided before writing -------
       // `sync_fills` is APPEND-ONLY: velora_worker holds INSERT/SELECT and is
-      // explicitly REVOKEd UPDATE/DELETE (db/roles.sql §4, B11/D-6). That is a
-      // deliberate integrity control — provider evidence must never be
-      // rewritten — so the row is written exactly ONCE, already carrying its
-      // terminal state. (An earlier draft inserted then UPDATEd and was
-      // refused by the grant at runtime with 42501.)
-      const importable =
-        fill.timeStatus === "resolved_utc" && fill.entryType === "out"
-        && fill.direction !== null && fill.symbol !== null
-        && fill.price !== null && fill.volume !== null;
-
-      // A fill we cannot place on the timeline is `skipped` with a fixed
-      // reason, NOT silently promoted to normal analytics data (J).
+      // explicitly REVOKEd UPDATE/DELETE (db/roles.sql §4, B11/D-6). Provider
+      // evidence must never be rewritten, so the row is written exactly ONCE.
+      //
+      // The fill row records only what the INGEST knows at arrival time: an
+      // unresolvable time is quarantined here (modern hardening, 0013); every
+      // trade fill is `received`. Whether the fill's POSITION has been
+      // aggregated is NOT a fill-row fact anymore — that state machine lives
+      // in `sync_position_state` (0029), the companion Legacy kept on the
+      // fill rows because it had no separate place.
       const skipReason = fill.timeStatus === "unresolved" ? "UNRESOLVED_TIME" : null;
-      const state = skipReason !== null ? "skipped" : importable ? "aggregated" : "received";
+      const state = skipReason !== null ? "skipped" : "received";
 
-      // The trade is created FIRST when importable, so its id can be stored on
-      // the fill row in the same single insert.
-      let tradeId: string | null = null;
-      if (importable) {
-        const tradeRows = await client.query<{ id: string }>(
-          `INSERT INTO trades
-             (user_id, account_id, external_deal_id, symbol, direction, status,
-              entry_price, exit_price, volume, contract_size, commission, swap,
-              net_pnl, occurred_at, occurred_open_at_utc, occurred_close_at_utc,
-              time_status, source_timezone, source_timezone_source, source_calendar,
-              raw_open_text, raw_close_text, source)
-           VALUES ($1,$2,$3,$4,$5,'CLOSED',$6,$6,$7,1,$8,$9,$10,$11,$11,$11,
-                   'resolved', NULL, 'metaapi_instant', 'gregorian', $12, $12, 'metaapi')
-           ON CONFLICT (account_id, external_deal_id) DO NOTHING
-           RETURNING id`,
-          [
-            account.userId, account.accountId, fill.externalDealId, fill.symbol, fill.direction,
-            fill.price, fill.volume, fill.commission ?? "0", fill.swap ?? "0",
-            // D-4: the PROVIDER's profit populates the canonical net_pnl.
-            // No local PnL computation participates in this value.
-            fill.profit, fill.occurredAtUtc, fill.rawTimeText,
-          ],
-        );
-        tradeId = tradeRows.rows[0]?.id ?? null;
-        if (tradeId === null) {
-          // The trade already exists: a replay. Converged, not duplicated.
-          tradesDuplicate++;
-        } else {
-          tradesImported++;
-          // --- TRADE_IMPORTED event, actor `sync` ---------------------------
-          // The actor is a SERVER-SIDE CONSTANT: never read from the job
-          // payload, the provider response, or any request, so it cannot be
-          // selected by a client (ADR-002 A-1 / D-3). The uid is deterministic,
-          // so a replay collides on UNIQUE(event_uid) and converges.
-          await client.query(
-            `INSERT INTO trade_events (event_uid, trade_id, type, actor, expected_version, payload, at)
-             VALUES ($1,$2,'TRADE_IMPORTED','sync',0,$3,$4)
-             ON CONFLICT (event_uid) DO NOTHING`,
-            [
-              `metaapi:${account.accountId}:${fill.externalDealId}`,
-              tradeId,
-              // Identifiers and provider-reported facts only — no token, no
-              // credential, no raw provider body.
-              JSON.stringify({
-                source: "metaapi",
-                externalDealId: fill.externalDealId,
-                positionId: fill.positionId,
-                netPnl: fill.profit,
-                occurredAtUtc: fill.occurredAtUtc,
-                rawTimeText: fill.rawTimeText,
-                brokerTimeText: fill.brokerTimeText,
-              }),
-              now.toISOString(),
-            ],
-          );
-        }
-      }
-
-      // --- 2. Write the fill ONCE, already in its terminal state -----------
+      // --- 2. Write the fill ONCE ------------------------------------------
       // Both timestamp columns are written independently: raw_time_text holds
       // the offset-explicit `time`, broker_time_text holds the naive
       // `brokerTime` (D-5). `occurred_at_utc` is null unless resolution
@@ -234,7 +186,7 @@ export async function importBatch(
             symbol, volume, price, profit, commission, swap,
             occurred_at_utc, raw_time_text, broker_time_text, time_status,
             ingestion_source, processing_state, skip_reason, processed_trade_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'historical',$17,$18,$19)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'historical',$17,$18,NULL)
          ON CONFLICT (account_id, external_deal_id) DO NOTHING
          RETURNING id`,
         [
@@ -242,17 +194,49 @@ export async function importBatch(
           fill.entryType, fill.direction, fill.symbol, fill.volume, fill.price,
           fill.profit, fill.commission, fill.swap,
           fill.occurredAtUtc, fill.rawTimeText, fill.brokerTimeText, fill.timeStatus,
-          state, skipReason, tradeId,
+          state, skipReason,
         ],
       );
-      if (inserted.rowCount === 0) fillsDuplicate++;
-      else {
-        fillsInserted++;
-        if (skipReason !== null) quarantined++;
+      if (inserted.rowCount === 0) {
+        // A replayed provider deal: converged, never double-counted. Legacy
+        // INSERT IGNORE behaved the same — and, like Legacy, a duplicate does
+        // NOT re-open the position (only a NEW fill does).
+        fillsDuplicate++;
+        continue;
+      }
+      fillsInserted++;
+      if (skipReason !== null) quarantined++;
+
+      // --- 3. A NEW trade fill (re)opens its position's assessment ---------
+      // Legacy parity: recordFill inserted every deal `received`, so a new
+      // fill for an already-aggregated/skipped position flipped it back to
+      // pending. Only trade fills (in/out) with a VALID position id can ever
+      // assemble, so only they get/open a state row; balance/credit deals and
+      // keyless fills are ledgered as evidence and never assessed.
+      if (fill.entryType === "in" || fill.entryType === "out") {
+        if (positionGroupKey(fill.positionId) !== null) {
+          await client.query(
+            `INSERT INTO sync_position_state (account_id, position_id, state)
+             VALUES ($1, $2, 'received')
+             ON CONFLICT (account_id, position_id) DO UPDATE
+                SET state = 'received', skip_reason = NULL, trade_id = NULL,
+                    updated_at = now()`,
+            [account.accountId, fill.positionId as string],
+          );
+        }
       }
     }
 
-    // --- 4. Cursor advance, in the SAME transaction -------------------------
+    // --- 4. Reconcile pending positions, in the SAME transaction -----------
+    // Legacy ran reconcileAccount right after the fills, inside the same
+    // transaction — a failure there must roll back the cursor too.
+    const recon = await reconcilePositions(client, account, now);
+    tradesImported = recon.tradesImported;
+    tradesDuplicate = recon.tradesDuplicate;
+    positionsAssembled = recon.positionsAssembled;
+    positionsSkippedTerminal = recon.positionsSkippedTerminal;
+
+    // --- 5. Cursor advance, in the SAME transaction -------------------------
     await client.query(
       `UPDATE trading_accounts
           SET sync_cursor = $1, last_synced_at = $2, last_sync_error_code = NULL,
@@ -268,7 +252,10 @@ export async function importBatch(
   } finally {
     client.release();
   }
-  return { fillsInserted, fillsDuplicate, tradesImported, tradesDuplicate, quarantined };
+  return {
+    fillsInserted, fillsDuplicate, quarantined,
+    tradesImported, tradesDuplicate, positionsAssembled, positionsSkippedTerminal,
+  };
 }
 
 /**

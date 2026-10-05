@@ -506,3 +506,50 @@ test("PG D5 P18: the audit trail's new account reference does not weaken append-
     }
   } finally { await close(); }
 });
+
+test("PG D5 P19: sync_position_state is a mutable workflow table with an unerasable history (0029)", { skip: SKIP }, async () => {
+  const { pool, close } = await harness();
+  try {
+    const { userId, tradeId } = await seed(pool);
+    const a = await pool.query(
+      `INSERT INTO trading_accounts (user_id, external_account_id, broker_server, metaapi_account_id)
+       VALUES ($1,$2,'demo','d5-pos-state') RETURNING id`,
+      [userId, `d5-${Date.now()}`],
+    );
+    const accountId = String(a.rows[0].id);
+
+    // The worker runs the state machine: INSERT (open) and UPDATE (aggregate /
+    // skip / re-open) are its documented work — Legacy markAggregated/markSkipped.
+    await asRole(pool, "velora_worker", async (c) => {
+      const ins = await c.query(
+        `INSERT INTO sync_position_state (account_id, position_id, state)
+         VALUES ($1,'D5P19','received') RETURNING id`,
+        [accountId] as never[],
+      );
+      assert.ok(ins.rows[0].id, "the worker must be able to open a position assessment");
+      const upd = await c.query(
+        `UPDATE sync_position_state SET state = 'aggregated', skip_reason = NULL, trade_id = $2,
+                assessed_at = now(), updated_at = now()
+          WHERE account_id = $1 AND position_id = 'D5P19'`,
+        [accountId, tradeId] as never[],
+      );
+      assert.equal(upd.rowCount, 1, "the worker must be able to advance the state machine");
+    });
+
+    // The assessment history is evidence: DELETE stays refused for both roles.
+    await assertDenied(pool, "velora_worker", "DELETE FROM sync_position_state");
+    await assertDenied(pool, "app_readwrite", "DELETE FROM sync_position_state");
+
+    // The evidence ledger next door is STILL append-only — 0029 changed
+    // nothing about sync_fills.
+    await assertDenied(pool, "velora_worker", "UPDATE sync_fills SET volume = '1'");
+    await assertDenied(pool, "velora_worker", "DELETE FROM sync_fills");
+
+    // And TRUNCATE is refused at the privilege layer for the workflow table.
+    for (const role of ["velora_worker", "app_readwrite"]) {
+      const res = await pool.query(
+        "SELECT has_table_privilege($1,'sync_position_state','TRUNCATE') AS p", [role]);
+      assert.equal(res.rows[0].p, false, `${role} must not TRUNCATE sync_position_state`);
+    }
+  } finally { await close(); }
+});

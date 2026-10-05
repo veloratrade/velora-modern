@@ -14,3 +14,4 @@ export * from "./clientIp.js";
 export * from "./metrics.js";
 export * from "./journalExtraction.js";
 export * from "./telegramLinking.js";
+export * from "./metaApiPositionAssembly.js";

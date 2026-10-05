@@ -173,6 +173,16 @@ REVOKE UPDATE, DELETE, TRUNCATE ON TABLE sync_fills     FROM app_readwrite, velo
 -- account, defeating the invariant the table exists to enforce.
 REVOKE TRUNCATE                 ON TABLE sync_reservations FROM app_readwrite, velora_worker;
 
+-- `sync_position_state` (migration 0029) is the per-position reconciliation
+-- state machine (received → aggregated | skipped), the companion of the
+-- append-only `sync_fills` evidence ledger. It is mutable BY DESIGN — exactly
+-- like sync_reservations: aggregation/skip marking and the re-open of a
+-- position when a later fill arrives are UPDATEs. DELETE and TRUNCATE are
+-- revoked for both runtime roles: the assessment history is operational
+-- evidence (which positions were terminal-skipped, and why), and erasing it
+-- would silently re-open perpetual re-assembly or hide a data-quality problem.
+REVOKE DELETE, TRUNCATE         ON TABLE sync_position_state FROM app_readwrite, velora_worker;
+
 -- `user_credentials` (C-22, migration 0010) holds AES-256-GCM ciphertext for
 -- third-party integration secrets. The API owns the full lifecycle (create,
 -- read, revoke), so app_readwrite keeps ordinary DML. velora_worker gets NO

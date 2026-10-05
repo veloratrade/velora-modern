@@ -67,6 +67,27 @@ function closedDeal(id: string, over: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * One COMPLETE position (MG-METAAPI-ASSEMBLY): a DEAL_ENTRY_IN open leg and a
+ * DEAL_ENTRY_OUT close leg sharing a positionId — the shape Legacy assembles
+ * one closed-position trade from. `extras` appends further deals to the batch.
+ */
+function positionDeals(pid: string, extras: unknown[] = []) {
+  return [
+    closedDeal(`${pid}-in`, {
+      positionId: pid, entryType: 0, type: "DEAL_TYPE_BUY",
+      volume: 1, price: "1.10000", profit: "0", commission: "-2.00",
+      time: "2026-03-01T10:00:00.000Z", brokerTime: "2026-03-01 13:00:00",
+    }),
+    closedDeal(`${pid}-out`, {
+      positionId: pid, entryType: 1, type: "DEAL_TYPE_SELL",
+      volume: 1, price: "1.10500", profit: "125.50", commission: "-2.00",
+      time: "2026-03-01T11:00:00.000Z", brokerTime: "2026-03-01 14:00:00",
+    }),
+    ...extras,
+  ];
+}
+
 test("MetaAPI sync", { skip: URL ? false : "DATABASE_URL not set" }, async (t) => {
   const engine = await createEngine(URL!);
   await migrate(engine, MIGRATIONS);
@@ -143,12 +164,12 @@ test("MetaAPI sync", { skip: URL ? false : "DATABASE_URL not set" }, async (t) =
   });
 
   // --- 3. Import ----------------------------------------------------------
-  await t.test("E7: a successful import writes fill + trade + event, and advances the cursor", async () => {
-    await pool.query(`DELETE FROM trade_events; DELETE FROM sync_fills; DELETE FROM trades; DELETE FROM trading_accounts;`);
+  await t.test("E7: a successful import assembles ONE trade per POSITION and advances the cursor", async () => {
+    await pool.query(`DELETE FROM trade_events; DELETE FROM sync_position_state; DELETE FROM sync_fills; DELETE FROM trades; DELETE FROM trading_accounts;`);
     const { accountId, userId } = await seedAccount(pool, "acc-import-1");
     const seen: { url?: string; headers?: Record<string, string> } = {};
     const handler = createMetaApiSyncHandler({
-      pool, platformToken: TOKEN, holder: "test", fetchImpl: stubFetch([closedDeal("d-1")], seen),
+      pool, platformToken: TOKEN, holder: "test", fetchImpl: stubFetch(positionDeals("1001"), seen),
     });
 
     await handler({
@@ -167,25 +188,47 @@ test("MetaAPI sync", { skip: URL ? false : "DATABASE_URL not set" }, async (t) =
     assert.equal("idempotency-key" in seen.headers!, false);
     assert.equal("transaction-id" in seen.headers!, false);
 
-    const fill = await pool.query(`SELECT * FROM sync_fills WHERE account_id=$1`, [accountId]);
-    assert.equal(fill.rowCount, 1);
-    assert.equal(fill.rows[0]!.external_deal_id, "d-1");
-    assert.equal(fill.rows[0]!.user_id, userId, "ownership derived from the account row");
+    const fills = await pool.query(`SELECT * FROM sync_fills WHERE account_id=$1 ORDER BY id`, [accountId]);
+    assert.equal(fills.rowCount, 2, "both legs of the position are ledgered");
+    assert.equal(fills.rows[0]!.user_id, userId, "ownership derived from the account row");
+    // The fill ledger is EVIDENCE (append-only): trade fills stay `received`;
+    // the position state machine lives in sync_position_state (0029).
+    assert.equal(fills.rows[0]!.processing_state, "received");
+    assert.equal(fills.rows[1]!.processing_state, "received");
 
     const trade = await pool.query(`SELECT * FROM trades WHERE account_id=$1`, [accountId]);
-    assert.equal(trade.rowCount, 1);
+    assert.equal(trade.rowCount, 1, "one closed-position trade, NOT one per OUT fill");
     assert.equal(trade.rows[0]!.source, "metaapi");
     assert.equal(trade.rows[0]!.user_id, userId);
-    assert.equal(trade.rows[0]!.external_deal_id, "d-1");
-
-    // E10: provider P/L is authoritative on the canonical column.
+    // The trade's identity is the POSITION (MG-METAAPI-ASSEMBLY, audit §9.2).
+    assert.equal(trade.rows[0]!.external_deal_id, "pos-1001");
+    assert.equal(trade.rows[0]!.direction, "buy", "direction = the opening (IN) fill");
+    assert.equal(String(trade.rows[0]!.entry_price), "1.10000000");
+    assert.equal(String(trade.rows[0]!.exit_price), "1.10500000");
+    assert.equal(String(trade.rows[0]!.volume), "1.00000000", "volume = Σ IN");
+    // E10: provider P/L is authoritative — summed across ALL the position's fills.
     assert.equal(String(trade.rows[0]!.net_pnl), "125.50");
+    assert.equal(String(trade.rows[0]!.commission), "-4.00");
+    // Boundaries: earliest IN open, latest OUT close (ADR-004 columns).
+    assert.equal(new Date(trade.rows[0]!.occurred_open_at_utc).toISOString(), "2026-03-01T10:00:00.000Z");
+    assert.equal(new Date(trade.rows[0]!.occurred_close_at_utc).toISOString(), "2026-03-01T11:00:00.000Z");
+    assert.equal(new Date(trade.rows[0]!.occurred_at).toISOString(), "2026-03-01T11:00:00.000Z",
+      "occurred_at = close (Legacy analytics bucket by DATE(close_time))");
+
+    // The position state machine: received → aggregated, linked to its trade.
+    const state = await pool.query(
+      `SELECT s.state, s.skip_reason, s.trade_id FROM sync_position_state s WHERE s.account_id=$1`, [accountId]);
+    assert.equal(state.rowCount, 1);
+    assert.equal(state.rows[0]!.state, "aggregated");
+    assert.equal(state.rows[0]!.skip_reason, null);
+    assert.equal(String(state.rows[0]!.trade_id), String(trade.rows[0]!.id));
 
     // E14: actor is `sync`, event is TRADE_IMPORTED.
     const ev = await pool.query(
-      `SELECT type, actor FROM trade_events WHERE trade_id=$1`, [trade.rows[0]!.id]);
+      `SELECT type, actor, event_uid FROM trade_events WHERE trade_id=$1`, [trade.rows[0]!.id]);
     assert.equal(ev.rows[0]!.type, "TRADE_IMPORTED");
     assert.equal(ev.rows[0]!.actor, "sync");
+    assert.equal(ev.rows[0]!.event_uid, `metaapi:${accountId}:pos-1001`);
 
     // Cursor advanced to the window end, error cleared.
     const acct = await pool.query(
@@ -196,14 +239,13 @@ test("MetaAPI sync", { skip: URL ? false : "DATABASE_URL not set" }, async (t) =
     assert.equal(acct.rows[0]!.last_sync_error_code, null);
   });
 
-  await t.test("E8: replaying the SAME deal creates no duplicate row", async () => {
+  await t.test("E8: replaying the SAME batch creates no duplicate row", async () => {
     const { accountId } = await seedAccount(pool, "acc-replay-1");
     const mk = () => createMetaApiSyncHandler({
-      pool, platformToken: TOKEN, holder: "test", fetchImpl: stubFetch([closedDeal("dup-1")]),
+      pool, platformToken: TOKEN, holder: "test", fetchImpl: stubFetch(positionDeals("1002")),
     });
     const job = {
-      id: "j2", attempts: 0,
-      descriptor: { jobClass: "metaapi.sync-account", priorityClass: "sync", idempotencyKey: "k2",
+      id: "j2", attempts: 0, descriptor: { jobClass: "metaapi.sync-account", priorityClass: "sync", idempotencyKey: "k2",
         payload: { accountId, metaapiAccountId: "acc-replay-1",
           from: "2026-01-01T00:00:00.000Z", to: "2026-06-01T00:00:00.000Z" } },
     } as never;
@@ -212,20 +254,34 @@ test("MetaAPI sync", { skip: URL ? false : "DATABASE_URL not set" }, async (t) =
     await mk()(job); // full replay
 
     const fills = await pool.query(`SELECT count(*)::int c FROM sync_fills WHERE account_id=$1`, [accountId]);
-    assert.equal(fills.rows[0]!.c, 1);
+    assert.equal(fills.rows[0]!.c, 2);
     const trades = await pool.query(`SELECT count(*)::int c FROM trades WHERE account_id=$1`, [accountId]);
-    assert.equal(trades.rows[0]!.c, 1);
+    assert.equal(trades.rows[0]!.c, 1, "the position trade converged, not duplicated");
     const evs = await pool.query(
       `SELECT count(*)::int c FROM trade_events e JOIN trades t ON t.id=e.trade_id WHERE t.account_id=$1`,
       [accountId]);
     assert.equal(evs.rows[0]!.c, 1, "deterministic event_uid collapsed the replay");
+    const states = await pool.query(
+      `SELECT state FROM sync_position_state WHERE account_id=$1`, [accountId]);
+    assert.equal(states.rows[0]!.state, "aggregated", "still aggregated after the replay");
   });
-
   // --- 4. Timestamps (D-5) -------------------------------------------------
-  await t.test("E11/E12/E13: offset-explicit resolves; naive is evidence only", async () => {
+  await t.test("E11/E12/E13: offset-explicit assembles; naive is evidence only, never a boundary", async () => {
     const { accountId } = await seedAccount(pool, "acc-time-1");
     const deals = [
-      closedDeal("t-ok"), // offset-explicit
+      // A complete position whose OUT leg is offset-explicit → assembles.
+      closedDeal("t-ok-in", {
+        positionId: "pos-t-ok", entryType: 0, type: "DEAL_TYPE_BUY",
+        volume: 1, price: "1.10000", profit: "0",
+        time: "2026-03-01T10:00:00.000Z", brokerTime: "2026-03-01 13:00:00",
+      }),
+      closedDeal("t-ok"),
+      // The same shape whose OUT leg is NAIVE → the position can never close.
+      closedDeal("t-naive-in", {
+        positionId: "pos-t-naive", entryType: 0, type: "DEAL_TYPE_BUY",
+        volume: 1, price: "1.10000", profit: "0",
+        time: "2026-03-01T09:00:00.000Z", brokerTime: "2026-03-01 12:00:00",
+      }),
       closedDeal("t-naive", { time: "2026-03-01 10:15:00", brokerTime: "2026-03-01 13:15:00" }),
     ];
     await createMetaApiSyncHandler({
@@ -258,10 +314,17 @@ test("MetaAPI sync", { skip: URL ? false : "DATABASE_URL not set" }, async (t) =
     assert.equal(naive.rows[0]!.processing_state, "skipped");
     assert.equal(naive.rows[0]!.skip_reason, "UNRESOLVED_TIME");
 
+    // The resolved position assembled; the naive one can NEVER close.
+    const assembled = await pool.query(
+      `SELECT count(*)::int c FROM trades WHERE account_id=$1 AND external_deal_id='pos-pos-t-ok'`, [accountId]);
+    assert.equal(assembled.rows[0]!.c, 1, "the offset-explicit position assembled");
     const t = await pool.query(
-      `SELECT count(*)::int c FROM trades WHERE account_id=$1 AND external_deal_id='t-naive'`,
-      [accountId]);
-    assert.equal(t.rows[0]!.c, 0, "an unresolved fill never becomes a trade");
+      `SELECT count(*)::int c FROM trades WHERE account_id=$1 AND external_deal_id='pos-pos-t-naive'`, [accountId]);
+    assert.equal(t.rows[0]!.c, 0, "an unresolved boundary never becomes a trade");
+    const st = await pool.query(
+      `SELECT state, skip_reason FROM sync_position_state WHERE account_id=$1 AND position_id='pos-t-naive'`, [accountId]);
+    assert.equal(st.rows[0]!.state, "received", "repairable: a later resolved fill can still close it");
+    assert.equal(st.rows[0]!.skip_reason, null);
   });
 
   await t.test("D-5: the normalizer never applies a host timezone to a naive value", () => {
