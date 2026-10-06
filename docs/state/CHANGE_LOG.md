@@ -842,3 +842,11 @@ then a browser QA run. After that: phase 8 (integrations/worker/email), phase 9
 - **Deliberately NOT done:** remote `main` untouched at `0e9c4d7`; merge/promotion remains owner-gated (repo PR pattern; https://github.com/veloratrade/velora-modern/pull/new/integration/reconcile-lineages). No tags pushed (MG-OBS-2 unchanged).
 - **State sync:** `docs/state/current-state.json` + `CURRENT_STATE.md` updated (branch_work.pushed, current_verified.verification, last_battery re-captured at 7c6e246, last_updated 2026-10-06) in this same change.
 - **Security note:** the owner-provided fine-grained PAT was used only in transient command URLs (never written to any file, .git/config, or credential store — secret-scan re-run PASS after the change). Owner should rotate it after use, as it was shared in conversation.
+
+## AC-40 — 2026-10-06 · OWNER-INSTRUCTED PROMOTION: remote main fast-forwarded to the integration tip
+
+- **What:** owner instruction ("همه رو main کنیم") — remote `main` fast-forwarded `0e9c4d7` → `be4732d` (the `integration/reconcile-lineages` tip). Fast-forward only: no force, no history rewrite; branch history fully preserved. Local `main` fast-forwarded to match.
+- **Why now:** the owner reported seeing only SOME files on GitHub — they were viewing the default branch `main`, which AC-39 had deliberately left untouched at `0e9c4d7` pending the owner-gated promotion decision. That decision was made in-chat by the owner; this change executes it.
+- **Verification:** pre-push secret-scan PASS (0 findings) → push → `git ls-remote` confirms `refs/heads/main = be4732d` (= `refs/heads/integration/reconcile-lineages`). main now contains the full lineage: PR #8 governance campaign, both source lineages (AC-27 merge), AC-28..AC-38 campaign, AC-39 sync record.
+- **State sync (same change):** `current-state.json` (`current_verified.modern_sha` → `be4732d`, `branch_work.pushed=true`, `pushed_at`, heads/notes) + `CURRENT_STATE.md` State row.
+- **Not done:** no tags pushed (MG-OBS-2 unchanged); Legacy repo untouched (READ ONLY).
