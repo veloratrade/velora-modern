@@ -38,12 +38,12 @@
     }
   },
   "current_verified": {
-    "modern_sha": "be4732d7e3de710c101e57c00c03aeccc22f824a",
+    "modern_sha": "f0177c2d08795f819dcf579ece1cdafec911a6e1",
     "legacy_sha": "edede313280f2f0e298f5ccbf5bbdd4d676c80bd",
     "verified_at": "2026-10-06",
-    "verification": "STATIC (git), OWNER-INSTRUCTED PROMOTION 2026-10-06. Remote main fast-forwarded 0e9c4d7 → be4732d (owner instruction 'همه رو main کنیم'; fast-forward only, no history rewrite, no force). be4732d = the full integration lineage: PR #8 governance campaign (AC-1..AC-8, merge ab0eed7) + both source lineages merged (AC-27) + AC-28..AC-38 (assembly/security/web/emails/RBAC/cadence/ops-verify/worker-runtime/backup-drill) + AC-39 remote-sync record. Pre-push secret-scan PASS (0 findings); post-push verified via git ls-remote (main = be4732d = integration/reconcile-lineages). Legacy reference SHA unchanged: edede31 (READ ONLY).",
-    "notes": "AC-27 (2026-10-05): both unmerged session lineages (feat/telegram-journal-client AC-9..18, feat/mg-domain-legacy-only-achievements AC-19..26) integrated onto integration/reconcile-lineages with colliding AC numbering reconciled (domain renumbered AC-19..26) and the gap register unioned per-gap (more advanced status wins, reconciled_2026_10_05 provenance). AC-28 (2026-10-05): MG-METAAPI-ASSEMBLY implemented (one trade per POSITION: pos-<positionId> key, VWAP scale-8, sync_position_state companion 0029, self-healing, in-tx reconciliation, ops retire tool) — PARTIAL/RECORDED_RUNTIME, live provider round trip NOT_VERIFIED, OD-M-PA-1/2/3 adopted per recorded recommendations pending ratification; MG-SEC-COOKIE CLOSED (S1: cookie-only refresh + 128-char cap, human review flagged); MG-SEC-CSP PARTIAL (S2: Math.random nonce fallback removed, fail-closed 503; release pinning model owner-gated); stale register rows MG-SEC-EDGE-AUTHZ and MG-AUTH-EVENTS re-audited on the integrated tree → PARTIAL. Open owner decisions now include MG-AI-ANONYMIZE (AC-18) and OD-M-PA-1..3 ratification (AC-28).",
-    "modern_head": "be4732d7e3de710c101e57c00c03aeccc22f824a"
+    "verification": "RECORDED_RUNTIME 2026-10-06 @ f0177c2: AC-42 R2 trustedProxyCidrs wiring — tsc -b clean (5 projects), npm test 1,344/1,344 (0 fail, 0 skipped, EXIT=0) — 1,274 general + 70 PGlite, PGlite batch 70/70, secret-scan 0 findings, REAL-PG 17.11 battery 33×2=66 runs 0 fail (REHEARSAL_PASSED not re-run), next build exit 0 (all routes), ops:verify CLEAN (74 FK constraints checked, no orphans), legacy symlink restored, tesseract 5.5.0 verified.",
+    "notes": "AC-42 (2026-10-06): R2 wiring landed — TRUSTED_PROXY_CIDRS parsed in kernel/boot.ts (fail-closed empty, invalid skipped per PHP parity), wired through server-main.ts to ApiConfig.trustedProxyCidrs, documented in infra/env/.env.example. MG-OPS-TOOLING validation fixed (TESTED→RECORDED_RUNTIME, evidence paths clarified to validator's # convention). MG-G14 evidence expanded. Battery re-captured on disposable PostgreSQL 17.11 after sandbox recycle: tesseract 5.5.0 reinstalled via apt, legacy checkout symlink /home/user/legacy → veloratrade-legacy restored, velora_test DB recreated.",
+    "modern_head": "f0177c2d08795f819dcf579ece1cdafec911a6e1"
   },
   "artifacts": {
     "current_state_md": "docs/state/CURRENT_STATE.md",
@@ -112,7 +112,7 @@
     "entry": "AC-27..AC-38 (lineage reconciliation → ops tooling/worker/backup campaign) + Persian final report",
     "branch": "integration/reconcile-lineages",
     "base": "0e9c4d7e6e1f984287490ce02f5681c208e35c7a (main)",
-    "head": "be4732d7e3de710c101e57c00c03aeccc22f824a — remote branch integration/reconcile-lineages AND remote main (owner-instructed promotion 2026-10-06, fast-forward 0e9c4d7→be4732d, ls-remote verified) + AC-42 R2 trustedProxyCidrs wiring (uncommitted)",
+    "head": "f0177c2d08795f819dcf579ece1cdafec911a6e1 — AC-42 R2 wiring + governance fixes (f0177c2) — tesseract 5.5.0 and PG 17.11 re-verified",
     "commits": "ce78ad07467b (merge domain lineage) + af782f4745b2 (merge telegram lineage) + 06fd3a99673a (PnlResult merge fallout) + 761227b36d24 (assembly: packages/domain assembler 19/19, 0029 sync_position_state, roles.sql revokes, positionReconciler, importBatch rework, metaapiAssembly 8/8 + metaapiSync 13/13 + pgRoles P19 23/23 batteries, ops/metaapi/retirePerFillTrades tool, evidence doc) + dde116cfa595 (S1 cookie-only refresh + 128-char cap + S1 proof test 12/12; S2 fail-closed CSP nonce) + b500525ead8d (register + CHANGE_LOG sync)",
     "capability": "Both prior lineages' work (Telegram journal, phases 1-7 incl. AI capability; domain ports range-guard/Jalali/TradingSession/achievements, backup drill, pg-smoke fix) on ONE tree, plus the audit's largest behavioural divergence closed: MetaAPI sync now produces one trade per POSITION with true entry/exit prices and a durable reconciliation state machine, and the S1/S2 security regressions are fixed.",
     "pushed": true,
@@ -120,7 +120,7 @@
     "push_note": "PUSHED 2026-10-06 (AC-39): branch integration/reconcile-lineages → remote. PROMOTED to main same day (AC-40) by explicit owner instruction: remote main fast-forwarded 0e9c4d7 → be4732d (no force, no history rewrite). Pre-push secret-scan PASS 0 findings. Local main fast-forwarded to match."
   },
   "last_battery": {
-    "result": "RE-CAPTURED 2026-10-06 on integration/reconcile-lineages @ 7c6e246 (AC-36..AC-38): npm test 1,344/1,344 (0 fail / 0 skip, EXIT=0) · tsc -b clean (5 projects) · secret-scan PASS (0 findings) · REAL-PG sweep on disposable local PostgreSQL 17.11: tools/run-pg-batteries.sh — 33 batteries × forward+reverse = 66 runs, 642 tests, 0 fail, 0 skipped → REAL-PG EVIDENCE: PASS (logs: docs/state/evidence/pg-batteries-20261006T0444Z/) · load rehearsal REHEARSAL_PASSED at HEAD on real PG · restore drill at HEAD 0030 data-loaded source: parity 56 tables / 49 numeric columns, smoke 11/11, ADR-012 gate REJECT recorded · worker least-privilege runtime: velora_worker role, 7/7 metaapi.sync-tick fires completed (first execution anywhere)"
+    "result": "RE-CAPTURED 2026-10-06 @ f0177c2 (AC-42): npm test 1,344/1,344 (0 fail / 0 skipped, EXIT=0) — general 1,274/1,274 + PGlite 70/70, tsc -b clean (5 projects), secret-scan PASS (0 findings), REAL-PG disposable PostgreSQL 17.11: 33 batteries × forward+reverse = 66 runs, 0 fail, 0 skipped → REAL-PG EVIDENCE: PASS (fresh DB velora_test, user superuser), next build exit 0 (all routes incl. /admin etc.), ops:verify CLEAN (74 constraints checked, no orphans), tesseract 5.5.0 OCR 23/23 (real screenshot), legacy symlink restored."
   },
   "distribution": {
     "branch": "governance/agent-context",
