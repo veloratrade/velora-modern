@@ -871,3 +871,9 @@ then a browser QA run. After that: phase 8 (integrations/worker/email), phase 9
 - **Migration state:** `OD-AC-R2` removed from `current-state.json` open_owner_decisions (code wiring closed; operational CIDR values remain a per-environment owner declaration, not a code gap). `MG-G14` stays OPEN on remaining deploy items (worker hosting + digest pinning + prod host), but its `trustedProxyCidrs` dimension is now evidenced. Register: 14 OPEN / 29 PARTIAL / 13 CLOSED unchanged (R2 was not a separate gap row). Drift: the state file's `verification_state` and evidence fixes are governance-only (`docs/**`), the `boot.ts/server-main.ts/env.example` changes are application — state will be `DRIFTED` until the next `current_verified.modern_sha` bump and battery re-capture, which is the next commit in this increment.
 - **Authorization:** owner instruction 2026-10-06 (autonomous P0 infra implementation).
 
+## AC-42-state-sync — 2026-10-06 · state sync verified SHA bumps (governance)
+
+- **Commits:** `46c4098 state: AC-42 verified — bump current_verified to f0177c2 (1,344/1,344 + 66 PG + tesseract + legacy)` and `cb75e9e state: sync verified SHA to 46c4098 (AC-42 state sync)`.
+- **What:** governance-only state file twin sync — `docs/state/current-state.json` + `CURRENT_STATE.md` `current_verified.modern_sha` advanced to the AC-42 code commit `f0177c2` and then to `46c4098` to include the state file itself; `last_updated` 2026-10-06; `branch_work.head` updated. No application code, no gap status change.
+- **Verification:** `tools/agent-context.mjs` governance-delta check — both commits are `docs/state` only, and this CHANGE_LOG entry logs their SHAs/subjects, so the tool reports `CURRENT_GOVERNANCE_DELTA` (not DRIFTED) until the next application change.
+
