@@ -174,3 +174,108 @@ test("owner authority: a permission that does not exist yet still resolves for t
   assert.equal(canAct({ role: "admin", isSystemOwner: true }, future), true);
   assert.equal(canAct({ role: "super_admin", isSystemOwner: false }, future), false);
 });
+
+// ── AC-34 (MG-RBAC-VOCAB): the Legacy-24 → Modern vocabulary reconciliation ──
+// Source of truth for the legacy side: api/src/Auth/Role.php @edede31
+// (READ-ONLY source-read 2026-10-06). These tests PIN the reconciliation so a
+// future permission cannot appear/disappear silently:
+//   - the 10 legacy names carried over VERBATIM exist and are granted
+//   - users.suspend + users.activate are deliberately MERGED into
+//     users.manage_status (one status-mutation operation, documented)
+//   - communication.view/reply are the support.tickets.* pair (Phase 5 rename)
+//   - of Legacy's six super-admin-exclusive permissions, exactly the three
+//     whose operations exist today are landed — and landed SA-ONLY; the other
+//     three (system.settings.manage, feature_flags.edit, integrations.manage)
+//     must NOT exist until their operations do (no fabricated surface)
+//   - the two settings permissions were DEAD IN LEGACY (declared, zero
+//     enforcement points) and stay unported
+test("AC-34: the ten verbatim legacy permissions exist in Modern", () => {
+  const verbatim = [
+    "overview.view",
+    "users.view",
+    "users.change_role",
+    "users.verify_email",
+    "audit.view",
+    "audit.view_sensitive",
+    "system.health.view",
+    "analytics.view",
+    "aiManage",
+    "aiRouteManage",
+  ] as const;
+  for (const name of verbatim) {
+    assert.ok((PERMISSIONS as readonly string[]).includes(name), `missing verbatim: ${name}`);
+  }
+});
+
+test("AC-34: users.suspend/activate are merged into users.manage_status", () => {
+  assert.ok((PERMISSIONS as readonly string[]).includes("users.manage_status"));
+  // the merged operation is the ONLY status permission; legacy granted both
+  // halves to admin AND super_admin, so the merge must be granted to both too
+  assert.ok(ROLE_PERMISSIONS.admin.includes("users.manage_status"));
+  assert.ok(ROLE_PERMISSIONS.super_admin.includes("users.manage_status"));
+});
+
+test("AC-34: communication.view/reply live on as support.tickets.* (Phase 5 rename)", () => {
+  assert.ok((PERMISSIONS as readonly string[]).includes("support.tickets.view"));
+  assert.ok((PERMISSIONS as readonly string[]).includes("support.tickets.manage"));
+  // legacy granted communication.* to admin AND super_admin (Role.php 107-108)
+  assert.ok(ROLE_PERMISSIONS.admin.includes("support.tickets.view"));
+  assert.ok(ROLE_PERMISSIONS.admin.includes("support.tickets.manage"));
+  assert.ok(ROLE_PERMISSIONS.super_admin.includes("support.tickets.view"));
+  assert.ok(ROLE_PERMISSIONS.super_admin.includes("support.tickets.manage"));
+});
+
+test("AC-34: exactly the three landed SA-exclusive legacy permissions exist, SA-only", () => {
+  // Legacy SA-exclusive six (Role.php): users.change_role, audit.view_sensitive,
+  // system.settings.manage, feature_flags.edit, integrations.manage, aiRouteManage.
+  const landedSA = ["users.change_role", "audit.view_sensitive", "aiRouteManage"] as const;
+  const unlandedSA = [
+    "system.settings.manage",
+    "feature_flags.edit",
+    "integrations.manage",
+  ] as const;
+  for (const p of landedSA) {
+    assert.ok((PERMISSIONS as readonly string[]).includes(p), `${p} should be landed`);
+    assert.ok(!ROLE_PERMISSIONS.admin.includes(p), `${p} must stay super_admin-only`);
+    assert.ok(ROLE_PERMISSIONS.super_admin.includes(p));
+  }
+  for (const p of unlandedSA) {
+    assert.ok(!(PERMISSIONS as readonly string[]).includes(p), `${p} has no operation — must not be declared`);
+  }
+});
+
+test("AC-34: dead-in-legacy permissions stay unported (settings.* had zero enforcement points)", () => {
+  // Role.php declared P_SETTINGS_VIEW + P_SETTINGS_MANAGE as "reserved (Module
+  // K)" and no controller ever referenced them — there is no capability to
+  // migrate. Same for the not-yet-landed segments:
+  const unported = [
+    "settings.view",            // dead in legacy
+    "users.create",             // OD-gated (admin create-user policy)
+    "users.manage_subscription",// OD-AC-SUBMAP
+    "system.logs.view",         // owned by the MG-ADMIN logs segment
+    "billing.view",             // owned by the MG-ADMIN billing segment
+    "feature_flags.view",       // owned by the MG-ADMIN flags segment
+    "integrations.view",        // owned by the MG-ADMIN integrations segment
+  ] as const;
+  for (const p of unported) {
+    assert.ok(!(PERMISSIONS as readonly string[]).includes(p), `${p} must not be declared yet`);
+  }
+});
+
+test("AC-34: legacy grant parity for every landed permission (no widening)", () => {
+  // Legacy Role.php grants, for the landed vocabulary (admin list lines 95-113
+  // minus the unported names; super_admin redeclares everything).
+  const legacyAdmin = new Set([
+    "overview.view", "users.view", "users.manage_status" /* suspend+activate */,
+    "users.verify_email", "audit.view", "system.health.view", "analytics.view",
+    "support.tickets.view", "support.tickets.manage", "aiManage",
+  ]);
+  const modernAdminOnly = ROLE_PERMISSIONS.admin.filter(
+    (p) => !(legacyAdmin.has(p) || p === "rbac.self.view" || p === "admin.panel.access"),
+  );
+  assert.deepEqual(modernAdminOnly, [], "admin holds nothing legacy did not grant (except the two modern diagnostics)");
+  // and everything legacy granted admin (that is landed) is granted:
+  for (const p of legacyAdmin) {
+    assert.ok(ROLE_PERMISSIONS.admin.includes(p as Permission), `admin lost: ${p}`);
+  }
+});

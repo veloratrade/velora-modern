@@ -740,7 +740,7 @@
     {
       "id": "MG-RBAC-VOCAB",
       "section": "B",
-      "title": "6 of 24 legacy RBAC permissions enforced (18 have no enforcement point)",
+      "title": "RBAC vocabulary reconciled: 15 of 24 legacy permissions enforced on real operations; 9 remainder precisely owned (2 dead-in-legacy, 2 OD-gated, 5 segment-owned)",
       "status": "PARTIAL",
       "priority": "P2",
       "verification_state": "STATIC",
@@ -749,12 +749,14 @@
       ],
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
-        "packages/contracts/src/rbac.ts"
+        "packages/contracts/src/rbac.ts",
+        "packages/contracts/src/rbac.test.ts"
       ],
       "decisions": [],
       "closure_criteria": "Permissions land with their admin operations",
       "related": [],
-      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC."
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC.",
+      "closure_note": "AC-34 (2026-10-06): full Legacy-24 → Modern-16 reconciliation, pinned by 6 new tests (packages/contracts/src/rbac.test.ts, 23/23 total). LANDED: 10 verbatim names (overview.view, users.view, users.change_role, users.verify_email, audit.view, audit.view_sensitive, system.health.view, analytics.view, aiManage, aiRouteManage) + users.suspend/activate MERGED into users.manage_status (documented adaptation: one status-mutation operation) + communication.view/reply as support.tickets.view/manage (Phase 5 rename) = 15 legacy permissions enforced on real endpoints (admin console READ_ROUTES, AI admin 7, user management, support, rbac self/matrix). Every permission in the map is granted to ≥1 role; super_admin ⊇ admin holds as a proven property; grant parity asserted (admin holds NOTHING legacy did not grant, minus the two modern diagnostics rbac.self.view/admin.panel.access). SA-EXCLUSIVE: of legacy's six, exactly the three whose operations exist are landed SA-only (users.change_role, audit.view_sensitive, aiRouteManage); the other three must NOT be declared until their operations land (no fabricated surface — asserted). REMAINDER, each precisely owned: settings.view + system.settings.manage DEAD-IN-LEGACY (Role.php declared 'reserved Module K', zero controller references — INTENTIONALLY_NOT_MIGRATED); users.create OD-gated (admin create-user policy) + users.manage_subscription OD-AC-SUBMAP (owner decisions unchanged); system.logs.view, billing.view, feature_flags.view/edit, integrations.view/manage owned by the MG-ADMIN segments (logs/billing/flags/integrations) — they land with those operations per the closure criteria."
     },
     {
       "id": "MG-AUTH-EVENTS",
