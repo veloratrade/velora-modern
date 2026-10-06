@@ -659,3 +659,44 @@ test("MG-RANGE-GUARD: exit recompute with out-of-range PnL → 422 OUT_OF_RANGE"
     { field: "profitLoss", code: "OUT_OF_RANGE", messageKey: "errors.validation.range" },
   );
 });
+
+// ── MG-EMAIL-TYPES: the post-create notification hook ────────────────────────
+
+test("trades: createTrade fires onTradeCreated after the trade is durable", async () => {
+  const calls: { userId: string; symbol: string; direction: string }[] = [];
+  const store = new MemoryTradeStore();
+  const svc = new TradeService({
+    store,
+    getUserTimezone: async () => "UTC",
+    verifyAccountOwnership: async () => true,
+    now: () => NOW,
+    newEventUid: (() => { let n = 0; return () => `evt-${++n}`; })(),
+    onTradeCreated: async (input) => { calls.push(input); },
+  });
+  const created = await svc.createTrade(OWNER, { ...VECTOR_A });
+  assert.ok(typeof created["id"] === "string");
+  assert.equal(calls.length, 1, "hook fired exactly once");
+  assert.equal(calls[0]!.symbol, "EURUSD");
+  assert.equal(calls[0]!.direction, "buy");
+  assert.equal(calls[0]!.userId, OWNER);
+});
+
+test("trades: a hook failure NEVER fails the create (Legacy fail-silent)", async () => {
+  const store = new MemoryTradeStore();
+  const svc = new TradeService({
+    store,
+    getUserTimezone: async () => "UTC",
+    verifyAccountOwnership: async () => true,
+    now: () => NOW,
+    newEventUid: (() => { let n = 0; return () => `evt-${++n}`; })(),
+    onTradeCreated: async () => { throw new Error("notification transport exploded"); },
+  });
+  const created = await svc.createTrade(OWNER, { ...VECTOR_A });
+  assert.ok(typeof created["id"] === "string", "the trade is durable regardless");
+});
+
+test("trades: no hook configured → create unchanged (offline/test boots)", async () => {
+  const { svc } = makeService();
+  const created = await svc.createTrade(OWNER, { ...VECTOR_A });
+  assert.ok(typeof created["id"] === "string");
+});

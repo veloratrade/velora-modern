@@ -15,3 +15,7 @@ export * from "./metrics.js";
 export * from "./journalExtraction.js";
 export * from "./telegramLinking.js";
 export * from "./metaApiPositionAssembly.js";
+export * from "./notifications/emailCopy.js";
+export * from "./notifications/emailTemplate.js";
+export * from "./notifications/emailLocale.js";
+export * from "./notifications/emailMessages.js";

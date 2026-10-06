@@ -16,7 +16,13 @@
 // CLOSED with reason "not-configured" — it never falls back to another
 // transport and never silently drops mail.
 
-import { MAIL_FROM, type MailMessage, type MailPort, type MailResult } from "./mailPort.js";
+import {
+  MAIL_FROM,
+  MAIL_REPLY_TO,
+  type MailMessage,
+  type MailPort,
+  type MailResult,
+} from "./mailPort.js";
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -39,6 +45,12 @@ export interface ResendMailProviderOptions {
   readonly apiKey: string | undefined;
   readonly transport?: HttpTransport;
   readonly timeoutMs?: number;
+  /**
+   * Frontend origin for the RFC 2369 List-Unsubscribe header (BUG-A9 in
+   * Legacy, set at the Mailer level on EVERY send). No trailing slash.
+   * Defaults to the Legacy default origin when unset.
+   */
+  readonly appOrigin?: string;
 }
 
 export class ResendMailProvider implements MailPort {
@@ -47,6 +59,7 @@ export class ResendMailProvider implements MailPort {
   private readonly apiKey: string | undefined;
   private readonly transport: HttpTransport;
   private readonly timeoutMs: number;
+  private readonly appOrigin: string;
 
   constructor(options: ResendMailProviderOptions) {
     const key = options.apiKey?.trim();
@@ -56,6 +69,8 @@ export class ResendMailProvider implements MailPort {
       ((url, init) =>
         fetch(url, init).then((r) => ({ status: r.status, text: () => r.text() })));
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    // Legacy listUnsubscribeValue(): FRONTEND_URL env, default veloratrade.ir.
+    this.appOrigin = (options.appOrigin ?? "https://veloratrade.ir").replace(/\/+$/, "");
   }
 
   /** True when an API key is present. Never reveals the key itself. */
@@ -74,8 +89,26 @@ export class ResendMailProvider implements MailPort {
       to: [message.to],
       subject: message.subject,
       text: message.text,
+      // Legacy Mailer::sendResend set both of these on EVERY request:
+      reply_to: MAIL_REPLY_TO,
+      // BUG-A9 (Legacy): RFC 2369 one-click unsubscribe/manage-preferences.
+      headers: {
+        "List-Unsubscribe":
+          `<mailto:support@veloratrade.ir?subject=unsubscribe>, ` +
+          `<${this.appOrigin}/profile?focus=email-preferences>`,
+      },
     };
     if (message.html !== undefined) payload["html"] = message.html;
+    if (message.inlineImages !== undefined && message.inlineImages.length > 0) {
+      // Legacy: attachments[] with base64 content + content_id; the HTML
+      // references cid:<content_id>. Over-length CIDs are truncated to 127
+      // exactly like Legacy (mb_substr).
+      payload["attachments"] = message.inlineImages.map((img) => ({
+        filename: img.filename,
+        content: img.contentBase64,
+        content_id: img.cid.slice(0, 127),
+      }));
+    }
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);

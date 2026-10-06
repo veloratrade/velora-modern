@@ -58,6 +58,20 @@ import { CredentialService } from "./credentials/credentialService.js";
 import { makeDbProbe } from "./kernel/dbProbe.js";
 import type { MailPort } from "./mail/mailPort.js";
 import { ResendMailProvider } from "./mail/resendMailProvider.js";
+import {
+  NotificationService,
+} from "./notifications/notificationService.js";
+import { FirstTradeNotifier } from "./notifications/firstTradeNotifier.js";
+import {
+  MemoryAchievementStore,
+  MemoryDeviceRegistry,
+  MemoryEmailNotificationLog,
+} from "./notifications/notificationStores.js";
+import {
+  PgAchievementStore,
+  PgDeviceRegistry,
+  PgEmailNotificationLog,
+} from "./notifications/pgNotificationStores.js";
 import { LogMailProvider } from "./mail/logMailProvider.js";
 // AUD-03: the single transaction primitive used across the API adapters.
 import { withTransaction, poolQuery } from "./persistence/pg.js";
@@ -222,6 +236,55 @@ async function main(): Promise<void> {
   // Provider NAME only — never the key, and never the message contents.
   console.log(JSON.stringify({ level: "info", event: "mail.provider", provider: mail.name }));
 
+  // MG-EMAIL-TYPES — the branded transactional-email orchestrator (Legacy
+  // NotificationService): ten email types, catalog copy, CID logo + per-type
+  // icon, preference gating, and the email_notifications delivery log. The
+  // stores follow the same pool/memory rule as every other capability: a
+  // pool-backed boot persists logs/devices/achievements; an offline boot
+  // keeps them in memory (and the LogMailProvider sends nothing real).
+  const notificationLog =
+    pool !== undefined ? new PgEmailNotificationLog(pool) : new MemoryEmailNotificationLog();
+  const deviceRegistry =
+    pool !== undefined ? new PgDeviceRegistry(pool) : new MemoryDeviceRegistry();
+  const achievementLedger =
+    pool !== undefined ? new PgAchievementStore(pool) : new MemoryAchievementStore();
+  const notifications = new NotificationService({
+    mail,
+    log: notificationLog,
+    appOrigin: boot.appOrigin,
+    ...(process.env.SUPPORT_NOTIFY_EMAIL !== undefined &&
+    process.env.SUPPORT_NOTIFY_EMAIL.trim() !== ""
+      ? { supportDeskEmail: process.env.SUPPORT_NOTIFY_EMAIL.trim() }
+      : {}),
+  });
+  // Preference gates — Legacy EmailPreferenceRepository::canSend, mapped onto
+  // the 0003 columns. Absent row ⇒ allowed (Legacy repository policy).
+  notifications.preferences = async (userId, gate) => {
+    const prefs = await userStore.getEmailPreferences(userId);
+    switch (gate) {
+      case "welcome":
+        return prefs.welcomeEmail;
+      case "security":
+        return prefs.securityAlerts;
+      case "trades":
+        return prefs.tradeNotifications;
+      case "achievements":
+        return prefs.achievementNotifications;
+    }
+  };
+  // Legacy TradeService: the first-trade email + FIRST_TRADE achievement
+  // fire on the user's FIRST active trade. The decision lives in the tested
+  // FirstTradeNotifier adapter; both trade ingestion surfaces (HTTP + the
+  // Telegram journal) share ONE instance, exactly like Legacy's one
+  // TradeService served every surface.
+  const firstTradeNotifier = new FirstTradeNotifier({
+    notifications,
+    achievements: achievementLedger,
+    countActiveTrades: async (userId) =>
+      (await tradeStore.searchTrades({ userId }, 1, 1)).total,
+    findUser: (userId) => userStore.findUserById(userId),
+  });
+
   // Without a boot JWT secret every capability route stays fail-closed (503).
   // C-22 store; B-1 wraps it in a CredentialService and exposes authenticated
   // self-service routes. The store itself is still never handed to createApp —
@@ -277,6 +340,10 @@ async function main(): Promise<void> {
       // Verification/reset links must point at this environment's validated
       // origin (ADR-013); boot already guarantees it is present and canonical.
       appOrigin: boot.appOrigin,
+      // MG-EMAIL-TYPES: branded mail + new-device alerts + achievements.
+      notifications,
+      devices: deviceRegistry,
+      achievements: achievementLedger,
     });
     // Plan lookup through the entitlement module — fail-closed (503 on store
     // errors, never a silent 'free') per the Remote EntitlementService invariant.
@@ -292,6 +359,7 @@ async function main(): Promise<void> {
       getUserTimezone: async (userId) => (await userStore.findUserById(userId))?.timezone ?? "UTC",
       verifyAccountOwnership: async (accountId, userId) =>
         (await accountStore.findByIdForUser(accountId, userId)) !== null,
+      onTradeCreated: (input) => firstTradeNotifier.onTradeCreated(input),
     });
     // Installation ownership (System Owner) and the admin user surface. The
     // admin service resolves the owner from AUTHORITATIVE STORAGE so the owner
@@ -638,7 +706,47 @@ async function main(): Promise<void> {
     // Phase 5: the support ticket capability. The SERVICE wraps the store so the
     // lifecycle rules (who may reply, what a reopen does, the note-never-moves
     // rule) live in ONE place — the admin surface in phase 6 reuses it unchanged.
-    capabilities.support = new SupportService({ store: new PgSupportStore(q) });
+    // MG-EMAIL-TYPES: the two support emails (Legacy Phase 9A) —
+    // SUPPORT_NEW_TICKET to the desk inbox, SUPPORT_FIRST_REPLY to the user.
+    capabilities.support = new SupportService({
+      store: new PgSupportStore(q),
+      notifications: {
+        onNewTicket: async ({ ticketId, userId, subject, preview }) => {
+          const user = await userStore.findUserById(userId);
+          const locale = user?.locale === "en" ? "en" : null; // desk email: hint only
+          await notifications.sendSupportNewTicketEmail(
+            {
+              userId,
+              email: user?.email ?? "unknown@veloratrade.ir",
+              fullName: user?.fullName ?? null,
+              locale: user?.locale ?? null,
+            },
+            {
+              ticketId,
+              subject,
+              userLabel: user?.fullName || user?.email || userId,
+              preview,
+            },
+            locale,
+          );
+        },
+        onFirstReply: async ({ ticketId, userId, subject, preview }) => {
+          const user = await userStore.findUserById(userId);
+          if (user === null) return;
+          const locale = user.locale === "en" ? "en" : "fa";
+          await notifications.sendSupportReplyEmail(
+            {
+              userId: user.id,
+              email: user.email,
+              fullName: user.fullName,
+              locale: user.locale,
+            },
+            { ticketId, subject, preview },
+            locale,
+          );
+        },
+      },
+    });
     // v3.0 developer-key AUTHENTICATION. Its own lookup (hash → live key) and
     // the SAME durable limiter store the auth routes use, so the per-key
     // requests/minute limit holds across processes instead of per instance.
@@ -825,11 +933,15 @@ async function main(): Promise<void> {
       // able to journal (and to refuse to, explicitly, if it cannot). Both
       // instances are thin wrappers over the SAME stores, so the ADR-002 fold,
       // validation and event log are identical on either path.
+      const journalTradeStore = new PgTradeStore(pool);
       const journalTrades = new TradeService({
-        store: new PgTradeStore(pool),
+        store: journalTradeStore,
         getUserTimezone: async (userId) => (await profileQuery(userId))?.timezone ?? "UTC",
         verifyAccountOwnership: async (accountId, userId) =>
           (await q("SELECT 1 FROM trading_accounts WHERE id = $1 AND user_id = $2 LIMIT 1", [accountId, userId])).length > 0,
+        // Same first-trade side effect as the HTTP path — Legacy's one
+        // TradeService served every ingestion surface, journaling included.
+        onTradeCreated: (input) => firstTradeNotifier.onTradeCreated(input),
       });
       const journal = new JournalApplicationService({
         trades: journalTrades,

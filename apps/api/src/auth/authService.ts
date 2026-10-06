@@ -23,6 +23,13 @@ import type { UserStore, UserRecord, SessionRecord, EmailPreferences } from "./u
 import { DEFAULT_EMAIL_PREFERENCES } from "./userStore.js";
 import type { JwtService, JwtPayload } from "./jwt.js";
 import type { MailPort } from "../mail/mailPort.js";
+import type {
+  AchievementStore,
+} from "@velora/domain";
+import { ACHIEVEMENTS, unlockAchievement } from "@velora/domain";
+import { emailLocaleOrDefault, type EmailLocale } from "@velora/domain";
+import type { DeviceRegistry } from "../notifications/notificationStores.js";
+import type { NotificationService } from "../notifications/notificationService.js";
 import type { AuthEventStore, AuthEventFailureReason } from "./authEventStore.js";
 
 export const ACCESS_TOKEN_TTL_SECONDS = 900;
@@ -104,6 +111,30 @@ export interface AuthDeps {
   readonly mail: MailPort;
   /** Base URL used to build verification/reset links (no trailing slash). */
   readonly appOrigin?: string;
+  /**
+   * Branded transactional email (MG-EMAIL-TYPES): template + catalog copy +
+   * preference gating + the email_notifications delivery log.
+   *
+   * OPTIONAL BY DESIGN (the same policy as authEvents below): the service is
+   * fully functional without it — tests and offline boots keep the bare
+   * text-mail path — while the PRODUCTION boot (server-main) always passes
+   * the real orchestrator, so no production flow silently degrades. When
+   * present, verification/reset/changed/welcome/new-device/achievement mail
+   * is dispatched through it (localized, branded, logged); when absent, the
+   * plain sendMailSafely path runs unchanged.
+   */
+  readonly notifications?: NotificationService;
+  /**
+   * Login-device registry behind the new-device alert (Legacy
+   * UserDeviceRepository). Same optionality policy as `notifications`.
+   */
+  readonly devices?: DeviceRegistry;
+  /**
+   * The achievements ledger (domain AchievementStore port). Same optionality
+   * policy as `notifications`; unlock is idempotent and fail-silent in the
+   * domain, so a missing store simply means no achievement emails.
+   */
+  readonly achievements?: AchievementStore;
   /**
    * Authentication-attempt history (SEC-03, migration 0024).
    *
@@ -274,6 +305,44 @@ export class AuthService {
     }
     await this.deps.store.consumeVerification(record.id, this.now());
     await this.deps.store.markEmailVerified(record.userId, this.now());
+
+    // Legacy AuthService::verifyEmail: the FIRST verification triggers the
+    // welcome email + the EMAIL_VERIFIED achievement unlock (and its email,
+    // only on the first unlock). Both side effects fail-silent.
+    if (this.deps.notifications !== undefined) {
+      try {
+        const user = await this.deps.store.findUserById(record.userId);
+        if (user !== null) {
+          const locale: EmailLocale = user.locale === "en" ? "en" : "fa";
+          await this.deps.notifications.sendWelcomeEmail(
+            { userId: user.id, email: user.email, fullName: user.fullName, locale: user.locale },
+            `${this.origin()}/dashboard`,
+            locale,
+          );
+          if (this.deps.achievements !== undefined) {
+            const firstUnlock = await unlockAchievement(
+              user.id,
+              ACHIEVEMENTS["EMAIL_VERIFIED"]!,
+              this.deps.achievements,
+              this.now(),
+            );
+            if (firstUnlock) {
+              await this.deps.notifications.sendAchievementUnlockedEmail(
+                { userId: user.id, email: user.email, fullName: user.fullName, locale: user.locale },
+                {
+                  achievementTitle: ACHIEVEMENTS["EMAIL_VERIFIED"]!.titleKey,
+                  achievementDescription: ACHIEVEMENTS["EMAIL_VERIFIED"]!.descriptionKey,
+                },
+                locale,
+              );
+            }
+          }
+        }
+      } catch {
+        /* verification already succeeded — side effects never undo it */
+      }
+    }
+
     return { verified: true, alreadyVerified: false, messageKey: "auth.emailVerified", params: {} };
   }
 
@@ -344,6 +413,33 @@ export class AuthService {
       ipAddress: input.ipAddress ?? null,
       userAgent: input.userAgent ?? null,
     });
+
+    // Legacy AuthService: every successful login fingerprints (ip|ua) and the
+    // FIRST sighting of a device dispatches the new-device security alert
+    // (preference-gated 'security'). Failures never break authentication.
+    if (this.deps.devices !== undefined && this.deps.notifications !== undefined) {
+      try {
+        const isNewDevice = await this.deps.devices.recordAndCheckNewDevice(
+          found.id,
+          input.ipAddress,
+          input.userAgent,
+        );
+        if (isNewDevice) {
+          await this.deps.notifications.sendNewDeviceDetectedEmail(
+            { userId: found.id, email: found.email, fullName: found.fullName, locale: found.locale },
+            {
+              ip: (input.ipAddress ?? "").trim(),
+              userAgent: (input.userAgent ?? "").trim(),
+              time: this.now().toISOString().replace("T", " ").slice(0, 19) + " UTC",
+            },
+            found.locale === "en" ? "en" : "fa",
+          );
+        }
+      } catch {
+        /* device tracking must never decide authentication */
+      }
+    }
+
     return this.issueTokenPair(found, input.ipAddress, input.userAgent);
   }
 
@@ -560,6 +656,10 @@ export class AuthService {
     const newHash = await this.deps.hasher.hash(input.newPassword);
     await this.deps.store.updateUserPasswordHash(userId, newHash, this.now());
     await this.deps.store.revokeAllSessionsForUser(userId, this.now());
+
+    // Legacy PasswordService::changePassword sends the same notice here.
+    await this.notifyPasswordChanged(user);
+
     return { changed: true, messageKey: "auth.passwordChanged", params: {} };
   }
 
@@ -602,15 +702,27 @@ export class AuthService {
     });
 
     // Delivery failure must NOT change the response (it would leak existence).
-    await this.sendMailSafely({
-      to: user.email,
-      subject: "Reset your VELORA TRADE password",
-      text:
-        `A password reset was requested for your account.\n\n` +
-        `${this.resetLink(token)}\n\n` +
-        `This link can be used once and expires in 60 minutes. ` +
-        `If you did not request it, no action is needed.`,
-    });
+    if (this.deps.notifications !== undefined) {
+      try {
+        await this.deps.notifications.sendPasswordResetTokenEmail(
+          { userId: user.id, email: user.email, fullName: user.fullName, locale: user.locale },
+          this.resetLink(token),
+          user.locale === "en" ? "en" : "fa",
+        );
+      } catch {
+        /* anti-enumeration: provider state stays unobservable */
+      }
+    } else {
+      await this.sendMailSafely({
+        to: user.email,
+        subject: "Reset your VELORA TRADE password",
+        text:
+          `A password reset was requested for your account.\n\n` +
+          `${this.resetLink(token)}\n\n` +
+          `This link can be used once and expires in 60 minutes. ` +
+          `If you did not request it, no action is needed.`,
+      });
+    }
 
     return uniform;
   }
@@ -660,6 +772,10 @@ export class AuthService {
     // Consume BEFORE reporting success — the token must never be replayable.
     await this.deps.store.consumePasswordReset(record.id, now);
     await this.deps.store.revokeAllSessionsForUser(user.id, now);
+
+    // Legacy PasswordService: successful reset dispatches the security
+    // "password changed" notice (ungated — security mail is not a preference).
+    await this.notifyPasswordChanged(user);
 
     return { reset: true, messageKey: "auth.passwordReset", params: {} };
   }
@@ -720,6 +836,21 @@ export class AuthService {
 
   /** Single source of truth for the verification email body. */
   private async sendVerificationMail(to: string, token: string): Promise<void> {
+    if (this.deps.notifications !== undefined) {
+      try {
+        const user = await this.deps.store.findUserByEmail(to);
+        if (user !== null) {
+          await this.deps.notifications.sendVerificationEmail(
+            { userId: user.id, email: user.email, fullName: user.fullName, locale: user.locale },
+            this.verificationLink(token),
+            user.locale === "en" ? "en" : "fa",
+          );
+          return;
+        }
+      } catch {
+        /* fall through to the bare path — dispatch must never break the flow */
+      }
+    }
     await this.sendMailSafely({
       to,
       subject: "Verify your VELORA TRADE email address",
@@ -741,6 +872,24 @@ export class AuthService {
 
   private origin(): string {
     return (this.deps.appOrigin ?? "").replace(/\/+$/, "");
+  }
+
+  /**
+   * The security "password changed" notice (Legacy sendPasswordChangedEmail,
+   * ungated). Bare-text fallback keeps offline/test boots working.
+   */
+  private async notifyPasswordChanged(user: {
+    id: string; email: string; fullName: string; locale: string;
+  }): Promise<void> {
+    if (this.deps.notifications === undefined) return;
+    try {
+      await this.deps.notifications.sendPasswordChangedEmail(
+        { userId: user.id, email: user.email, fullName: user.fullName, locale: user.locale },
+        user.locale === "en" ? "en" : "fa",
+      );
+    } catch {
+      /* the password already changed — the notice must not fail the request */
+    }
   }
 
   /**

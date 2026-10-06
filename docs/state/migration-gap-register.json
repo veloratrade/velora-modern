@@ -708,7 +708,7 @@
     {
       "id": "MG-EMAIL-TYPES",
       "section": "B",
-      "title": "2 of 10 transactional email types; no templates/CID/locale-aware copy/delivery log",
+      "title": "All 10 legacy transactional email types ported (branded template, locale copy, delivery log); runtime delivery still deploy-gated",
       "status": "PARTIAL",
       "priority": "P2",
       "verification_state": "STATIC",
@@ -716,12 +716,26 @@
         "§12.3"
       ],
       "evidence": [
-        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "packages/domain/src/notifications/emailCopy.ts",
+        "packages/domain/src/notifications/emailTemplate.ts",
+        "packages/domain/src/notifications/emailMessages.ts",
+        "packages/domain/src/notifications/notifications.test.ts",
+        "apps/api/src/notifications/notificationService.ts",
+        "apps/api/src/notifications/notificationService.test.ts",
+        "apps/api/src/notifications/firstTradeNotifier.ts",
+        "apps/api/src/notifications/firstTradeNotifier.test.ts",
+        "apps/api/src/notifications/pgNotificationStores.ts",
+        "apps/api/src/auth/authNotifications.test.ts",
+        "apps/api/src/support/supportNotifications.test.ts",
+        "db/migrations/0030_email_notifications.sql",
+        "db/tests/notificationStores.pg.test.ts"
       ],
       "decisions": [],
       "closure_criteria": "Email types ported or owner-scoped",
       "related": [],
-      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC."
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC.",
+      "closure_note": "AC-33 (2026-10-06): the transactional-email capability is ported end-to-end at the code level. DOMAIN (packages/domain/src/notifications/, 7/7 tests): emailCopy.ts — 88 keys/locale byte-verbatim from legacy public/locales/{fa,en}.json (one-time extraction proof: byte-identical both locales); emailTemplate.ts — the full XHTML table shell (RTL/LTR, gold design, CID logo+icon, footer, List-Unsubscribe links) + htmlToPlain (MIME_HTML_ONLY avoidance); emailLocale.ts — resolveEmailLocale/formatName; emailMessages.ts — all TEN builders incl. BUG-A3 localizeCopy (raw keys can never leak). API: MailPort +inlineImages (CID via Resend attachments content_id, reply_to + List-Unsubscribe at the provider level — 12/12 adapter tests); NotificationService (10 types, preference gates exactly where legacy gated: welcome/security/trades/achievements — essential mail NEVER gated; icon asset missing ⇒ send fails + logged, sendWithIcon parity — 7/7 tests); icons vendored md5-identical (9 files, 40KB). MIGRATION 0030: email_notifications (10-type CHECK list, sent/failed + sent_at/failed_at/error_message) + user_achievements (UNIQUE(user_id, achievement_key) = idempotent unlock) + user_devices EXTENDED with legacy ip_address/user_agent (reuse-not-duplicate: 0001 already had the table + UNIQUE fingerprint; this closes MG-DEVICE-TRACKING — the table's first writer is now the login path, so the admin console device list renders real data). WIRING: authService (verification/reset/changed/welcome/new-device/EMAIL_VERIFIED achievement, anti-enumeration preserved), TradeService onTradeCreated → tested FirstTradeNotifier (count===1 → first-trade email + FIRST_TRADE unlock; shared by HTTP + Telegram journal paths like legacy's one TradeService), SupportService (SUPPORT_NEW_TICKET to desk inbox (SUPPORT_NOTIFY_EMAIL env, legacy default), SUPPORT_FIRST_REPLY once per ticket, internal notes excluded); server-main composes PG stores (pool) or memory (offline). TESTS: +35 (domain 7, mail 3, service 7, auth wiring 6, first-trade 6, support 3, trades hooks 3, PGlite stores 3 — incl. the fail-open log contract and the UNIQUE race-closure); full battery 1,263+63 = 1,326 pass / 0 fail; typecheck clean; secret-scan 0. REMAINDER (deploy-gated, not code): CURRENT_RUNTIME verification of a real Resend delivery (same evidence class as MG-WORKER-DEPLOY); admin-invite email type is implemented + tested but UNWIRED because the invitation capability itself is OD-gated (owner decision unchanged); a user-facing read surface for the delivery log is admin-console scope (recentForUser read helper exists)."
     },
     {
       "id": "MG-RBAC-VOCAB",

@@ -179,6 +179,28 @@ export function validateBody(raw: unknown): string {
 
 export interface SupportServiceDeps {
   readonly store: SupportStore;
+  /**
+   * Transactional-email hooks (MG-EMAIL-TYPES — Legacy SupportService Phase
+   * 9A): SUPPORT_NEW_TICKET (desk-facing, once per ticket after create) and
+   * SUPPORT_FIRST_REPLY (user-facing, once per ticket on the first admin
+   * text reply). OPTIONAL: production boot wires the notification
+   * orchestrator; tests/offline boots omit it. Failures never break the
+   * support flow.
+   */
+  readonly notifications?: {
+    onNewTicket(input: {
+      ticketId: string;
+      userId: string;
+      subject: string;
+      preview: string;
+    }): Promise<void>;
+    onFirstReply(input: {
+      ticketId: string;
+      userId: string;
+      subject: string;
+      preview: string;
+    }): Promise<void>;
+  };
 }
 
 export class SupportService {
@@ -189,7 +211,22 @@ export class SupportService {
   async createTicket(userId: string, input: { subject?: unknown; message?: unknown }): Promise<{ id: string }> {
     const subject = validateSubject(input.subject);
     const body = validateBody(input.message);
-    return this.deps.store.createTicket(userId, subject, body);
+    const created = await this.deps.store.createTicket(userId, subject, body);
+    // Legacy Phase 9A: exactly one SUPPORT_NEW_TICKET email per ticket, after
+    // the create committed; bounded preview, safe operational data only.
+    if (this.deps.notifications !== undefined) {
+      try {
+        await this.deps.notifications.onNewTicket({
+          ticketId: created.id,
+          userId,
+          subject,
+          preview: body.slice(0, 220),
+        });
+      } catch {
+        /* the ticket exists — the notification must never undo it */
+      }
+    }
+    return created;
   }
 
   async listUserTickets(userId: string, query: { status?: string; page?: number }): Promise<{
@@ -315,6 +352,20 @@ export class SupportService {
       requireLive: false,
     });
     if (appended === null) throw new SupportError(404, "SUPPORT_TICKET_NOT_FOUND", "Ticket not found.");
+    // Legacy Phase 9A: the first admin TEXT reply triggers exactly one
+    // SUPPORT_FIRST_REPLY email to the ticket owner (firstReplyNow sentinel).
+    if (appended.firstReplyNow && !internal && this.deps.notifications !== undefined) {
+      try {
+        await this.deps.notifications.onFirstReply({
+          ticketId,
+          userId: conversation.userId,
+          subject: conversation.subject,
+          preview: body.slice(0, 220),
+        });
+      } catch {
+        /* the reply exists — the notification must never undo it */
+      }
+    }
     return { id: appended.messageId, status: appended.status, waitingFor: appended.waitingFor, firstReply: appended.firstReplyNow };
   }
 

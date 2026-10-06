@@ -40,6 +40,18 @@ export interface TradeServiceDeps {
   readonly verifyAccountOwnership: (accountId: string, userId: string) => Promise<boolean>;
   readonly now?: () => Date;
   readonly newEventUid?: () => string;
+  /**
+   * Post-create side-effect hook (MG-EMAIL-TYPES): Legacy TradeService, after
+   * a successful insert, checked countTradesForUser === 1 and dispatched the
+   * first-trade email + the FIRST_TRADE achievement (and its email) — all
+   * fail-silent. OPTIONAL: the production boot wires the notification
+   * orchestrator here; tests and offline boots omit it.
+   */
+  readonly onTradeCreated?: (input: {
+    userId: string;
+    symbol: string;
+    direction: string;
+  }) => Promise<void>;
 }
 
 export interface TradeSearchQuery {
@@ -359,6 +371,19 @@ export class TradeService {
     }, now);
     try {
       const created = await this.deps.store.createTrade(record, stored);
+      // Legacy parity: the trade is durable BEFORE any notification runs, and
+      // a notification failure can never fail the create.
+      if (this.deps.onTradeCreated !== undefined) {
+        try {
+          await this.deps.onTradeCreated({
+            userId,
+            symbol: record.symbol,
+            direction: record.direction,
+          });
+        } catch {
+          /* fail-silent — Legacy wrapped the email in try/catch too */
+        }
+      }
       return this.serialize(created);
     } catch (err) {
       this.rethrowLedger(err);

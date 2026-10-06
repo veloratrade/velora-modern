@@ -111,3 +111,71 @@ test("RESEND: 2xx with unparsable body is still a successful send", async () => 
   const mail = new ResendMailProvider({ apiKey: "k", transport });
   assert.deepEqual(await mail.send(MSG), { ok: true, id: null });
 });
+
+// --- MG-EMAIL-TYPES: branded sends (inline CID images, RFC 2369 header) ------
+
+test("RESEND: inline CID images become attachments with content_id (Legacy parity)", async () => {
+  const { transport, calls } = stub(200, JSON.stringify({ id: "msg_cid" }));
+  const mail = new ResendMailProvider({ apiKey: "test-key-not-real", transport });
+
+  const res = await mail.send({
+    to: "trader@example.test",
+    subject: "Subject",
+    text: "Body",
+    html: '<img src="cid:velora-logo" />',
+    inlineImages: [
+      { cid: "velora-logo", filename: "velora-email-logo.png", contentBase64: "aGVsbG8=" },
+      { cid: "velora-verification", filename: "verification.png", contentBase64: "d29ybGQ=" },
+    ],
+  });
+
+  assert.deepEqual(res, { ok: true, id: "msg_cid" });
+  const sent = JSON.parse(calls[0]!.body) as {
+    attachments: { filename: string; content: string; content_id: string }[];
+  };
+  assert.equal(sent.attachments.length, 2);
+  assert.deepEqual(sent.attachments[0], {
+    filename: "velora-email-logo.png",
+    content: "aGVsbG8=",
+    content_id: "velora-logo",
+  });
+  assert.deepEqual(sent.attachments[1], {
+    filename: "verification.png",
+    content: "d29ybGQ=",
+    content_id: "velora-verification",
+  });
+});
+
+test("RESEND: every send carries reply_to + List-Unsubscribe (Mailer-level, BUG-A9)", async () => {
+  const { transport, calls } = stub(200);
+  const mail = new ResendMailProvider({
+    apiKey: "test-key-not-real",
+    transport,
+    appOrigin: "https://app.example.test/",
+  });
+  await mail.send(MSG);
+  const sent = JSON.parse(calls[0]!.body) as {
+    reply_to: string;
+    headers: Record<string, string>;
+  };
+  assert.equal(sent.reply_to, "no-reply@veloratrade.ir");
+  assert.equal(
+    sent.headers["List-Unsubscribe"],
+    "<mailto:support@veloratrade.ir?subject=unsubscribe>, " +
+      "<https://app.example.test/profile?focus=email-preferences>",
+  );
+});
+
+test("RESEND: over-length CID truncates to 127 (Legacy mb_substr cap)", async () => {
+  const { transport, calls } = stub(200);
+  const mail = new ResendMailProvider({ apiKey: "test-key-not-real", transport });
+  const longCid = "a".repeat(200);
+  await mail.send({
+    to: "trader@example.test",
+    subject: "s",
+    text: "t",
+    inlineImages: [{ cid: longCid, filename: "x.png", contentBase64: "" }],
+  });
+  const sent = JSON.parse(calls[0]!.body) as { attachments: { content_id: string }[] };
+  assert.equal(sent.attachments[0]!.content_id.length, 127);
+});

@@ -18,6 +18,26 @@
 /** Fixed sender identity — external contract C-09 (do not parameterize). */
 export const MAIL_FROM = "VELORA TRADE <no-reply@veloratrade.ir>";
 
+/**
+ * Fixed reply-to identity — Legacy `Mailer::sendResend` set reply_to on every
+ * request (@edede31 source-read 2026-10-06): 'no-reply@veloratrade.ir'.
+ */
+export const MAIL_REPLY_TO = "no-reply@veloratrade.ir";
+
+/**
+ * One CID-referenced inline image (Legacy `Mailer::sendWithInlineImages` →
+ * Resend `attachments: [{filename, content, content_id}]`). The HTML body
+ * references it as `cid:<cid>`.
+ */
+export interface MailInlineImage {
+  /** CID used in the HTML body, e.g. "velora-logo". Max 127 chars (Legacy cap). */
+  readonly cid: string;
+  /** Attachment filename shown by the provider, e.g. "velora-logo.png". */
+  readonly filename: string;
+  /** File bytes, base64. Callers read the asset once and cache it. */
+  readonly contentBase64: string;
+}
+
 export interface MailMessage {
   /** Recipient address (single recipient; transactional only). */
   readonly to: string;
@@ -26,6 +46,12 @@ export interface MailMessage {
   readonly text: string;
   /** Optional HTML alternative. */
   readonly html?: string;
+  /**
+   * Optional CID inline images for the HTML alternative (MG-EMAIL-TYPES:
+   * Legacy's branded template ships its logo + per-type icon this way).
+   * Adapters that cannot carry them (the log driver) simply record them.
+   */
+  readonly inlineImages?: readonly MailInlineImage[];
 }
 
 /**
