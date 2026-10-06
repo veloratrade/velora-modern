@@ -38,12 +38,12 @@
     }
   },
   "current_verified": {
-    "modern_sha": "f0177c2d08795f819dcf579ece1cdafec911a6e1",
+    "modern_sha": "46c409871a4d749b67aabe76fe167b840ad0504b",
     "legacy_sha": "edede313280f2f0e298f5ccbf5bbdd4d676c80bd",
     "verified_at": "2026-10-06",
     "verification": "RECORDED_RUNTIME 2026-10-06 @ f0177c2: AC-42 R2 trustedProxyCidrs wiring — tsc -b clean (5 projects), npm test 1,344/1,344 (0 fail, 0 skipped, EXIT=0) — 1,274 general + 70 PGlite, PGlite batch 70/70, secret-scan 0 findings, REAL-PG 17.11 battery 33×2=66 runs 0 fail (REHEARSAL_PASSED not re-run), next build exit 0 (all routes), ops:verify CLEAN (74 FK constraints checked, no orphans), legacy symlink restored, tesseract 5.5.0 verified.",
     "notes": "AC-42 (2026-10-06): R2 wiring landed — TRUSTED_PROXY_CIDRS parsed in kernel/boot.ts (fail-closed empty, invalid skipped per PHP parity), wired through server-main.ts to ApiConfig.trustedProxyCidrs, documented in infra/env/.env.example. MG-OPS-TOOLING validation fixed (TESTED→RECORDED_RUNTIME, evidence paths clarified to validator's # convention). MG-G14 evidence expanded. Battery re-captured on disposable PostgreSQL 17.11 after sandbox recycle: tesseract 5.5.0 reinstalled via apt, legacy checkout symlink /home/user/legacy → veloratrade-legacy restored, velora_test DB recreated.",
-    "modern_head": "f0177c2d08795f819dcf579ece1cdafec911a6e1"
+    "modern_head": "46c409871a4d749b67aabe76fe167b840ad0504b"
   },
   "artifacts": {
     "current_state_md": "docs/state/CURRENT_STATE.md",
@@ -112,7 +112,7 @@
     "entry": "AC-27..AC-38 (lineage reconciliation → ops tooling/worker/backup campaign) + Persian final report",
     "branch": "integration/reconcile-lineages",
     "base": "0e9c4d7e6e1f984287490ce02f5681c208e35c7a (main)",
-    "head": "f0177c2d08795f819dcf579ece1cdafec911a6e1 — AC-42 R2 wiring + governance fixes (f0177c2) — tesseract 5.5.0 and PG 17.11 re-verified",
+    "head": "46c409871a4d749b67aabe76fe167b840ad0504b — AC-42 state sync (verified, 1,344/1,344 + 66 PG)",
     "commits": "ce78ad07467b (merge domain lineage) + af782f4745b2 (merge telegram lineage) + 06fd3a99673a (PnlResult merge fallout) + 761227b36d24 (assembly: packages/domain assembler 19/19, 0029 sync_position_state, roles.sql revokes, positionReconciler, importBatch rework, metaapiAssembly 8/8 + metaapiSync 13/13 + pgRoles P19 23/23 batteries, ops/metaapi/retirePerFillTrades tool, evidence doc) + dde116cfa595 (S1 cookie-only refresh + 128-char cap + S1 proof test 12/12; S2 fail-closed CSP nonce) + b500525ead8d (register + CHANGE_LOG sync)",
     "capability": "Both prior lineages' work (Telegram journal, phases 1-7 incl. AI capability; domain ports range-guard/Jalali/TradingSession/achievements, backup drill, pg-smoke fix) on ONE tree, plus the audit's largest behavioural divergence closed: MetaAPI sync now produces one trade per POSITION with true entry/exit prices and a durable reconciliation state machine, and the S1/S2 security regressions are fixed.",
     "pushed": true,
