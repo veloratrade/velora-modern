@@ -37,6 +37,8 @@ export interface BootConfig {
   readonly jwtSecret?: string;
   /** Non-blocking findings (SC-008/009 development allowances, EO-010…). */
   readonly warnings: readonly BootFinding[];
+  /** Trusted reverse-proxy CIDRs for X-Forwarded-For (R2). Empty = fail-closed, never trust header. */
+  readonly trustedProxyCidrs: readonly string[];
 }
 
 export class BootError extends Error {
@@ -116,6 +118,12 @@ export function assertBootable(env: Record<string, string | undefined>): BootCon
   const allowedOrigins =
     explicitOrigins.length > 0 ? explicitOrigins : [`http://127.0.0.1:${port}`];
 
+  // R2 — trusted reverse-proxy CIDRs for X-Forwarded-For (PHP RateLimiter parity).
+  // Fail-closed default: empty list never trusts the header. Invalid CIDRs are
+  // silently skipped by the domain's matchesAnyCidr (same as PHP), so boot does
+  // not BLOCK on a malformed entry.
+  const trustedProxyCidrs = parseCsv(env.TRUSTED_PROXY_CIDRS);
+
   return {
     environment,
     port,
@@ -124,5 +132,6 @@ export function assertBootable(env: Record<string, string | undefined>): BootCon
     persistence,
     ...(security.jwtSecret !== undefined ? { jwtSecret: security.jwtSecret } : {}),
     warnings: allFindings.filter((f) => f.severity === "WARN"),
+    trustedProxyCidrs,
   };
 }

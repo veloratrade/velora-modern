@@ -295,7 +295,11 @@
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
         "railway.json",
-        "infra/docker-compose.yml"
+        "infra/docker-compose.yml",
+        "apps/api/src/kernel/boot.ts",
+        "apps/api/src/server-main.ts",
+        "packages/domain/src/clientIp.ts",
+        "infra/env/.env.example"
       ],
       "decisions": [
         "OD-AC-R2",
@@ -304,7 +308,8 @@
       ],
       "closure_criteria": "Worker service defined; digests pinned; R2 wired; production host exists",
       "related": [],
-      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC."
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC.",
+      "closure_note": "R2 wiring landed AC-42: TRUSTED_PROXY_CIDRS parsed in kernel/boot.ts (fail-closed empty), wired through server-main.ts to ApiConfig.trustedProxyCidrs, documented in infra/env/.env.example. The header is never trusted when the list is empty (PHP parity). Operational CIDR values remain an owner decision per environment, but the code gap is closed."
     },
     {
       "id": "MG-G15",
@@ -566,7 +571,7 @@
         "ops/backup/tests/restoreDrill.test.ts",
         "ops/backup/evidence/restore-drill-staging-20261004T095454Z.json",
         "docs/evidence/BACKUP-RESTORE-LOCAL-DRILL-2026-10-03.md",
-        "ops/backup/evidence/restore-drill-staging-20261006T170536Z.json (drill re-run at HEAD 0030 with data-loaded source: backup 31,853 B sha256 5bd21bcb…, pg_restore 406 ms, parity PASS 56 tables / 49 numeric columns, smoke 11/11, ADR-012 gate correctly REJECT — RESTORE_VERIFIED)"
+        "ops/backup/evidence/restore-drill-staging-20261006T170536Z.json"
       ],
       "decisions": [
         "OD-AC-RPORTO"
@@ -678,7 +683,7 @@
         "apps/web/src/app/checkout/CheckoutForm.tsx",
         "apps/web/src/app/blog/posts.ts",
         "apps/web/src/i18n/contentSurfaces.test.ts",
-        "docs/reports/REMOTE-BRANCH-INVENTORY-FA.md (2026-10-06): the unmerged remote branch feature/phase-6f-frontend-parity (217 files) audited page-by-page — SUPERSEDED, not missing: all 17 surfaces incl. trades/new and accounts/connect have equal-or-superior equivalents in apps/web on main (feat/web-full-frontend PR #7 + AC-32). Only salvage candidate: 69 legacy-style icon/flag assets — raised as candidate owner decision OD-11 (icon UI wanted or not)."
+        "docs/reports/REMOTE-BRANCH-INVENTORY-FA.md"
       ],
       "decisions": [
         "OD-AC-R8"
@@ -895,19 +900,18 @@
       "title": "Legacy ops probe/monitoring toolset — modern counterpart delivered (ops:verify CLI, read-only, test-pinned)",
       "status": "CLOSED",
       "priority": "P3",
-      "verification_state": "TESTED",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [
         "§17.1"
       ],
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
-        "ops/verify/README.md (capability mapping: 6 legacy probe templates → modern CLI)",
-        "ops/verify/verifyEnvironment.ts (read-only core: SELECT/catalog only)",
-        "tools/ops-verify.mjs + npm run ops:verify (--json/--check, exit 1 on drift, exit 2 on failure, DSN masked, driver errors logged as code only)",
-        "db/tests/opsVerify.test.ts AC36-01..06: clean verdict / missing-ledger drift / phantom-ledger drift / orphaned-FK drift with attribution / runtime SELECT-only spy / static write-DDL keyword scan — 6/6 pass",
-        "Full battery 1,343/1,343 pass, tsc -b clean (5 projects), secret-scan 0",
-        "docs/evidence/WORKER-LEAST-PRIVILEGE-RUNTIME-EVIDENCE-2026-10-06.md §6 (live-PG probe run as velora_worker: nopriv recording + hollow-FK-scan bug found & fixed)",
-        "db/tests/opsVerify.test.ts now 7/7 (added AC36-06b least-privilege 42501 pin + fkConstraintsChecked >= 50 pin)"
+        "ops/verify/README.md",
+        "ops/verify/verifyEnvironment.ts",
+        "tools/ops-verify.mjs",
+        "db/tests/opsVerify.test.ts",
+        "docs/evidence/WORKER-LEAST-PRIVILEGE-RUNTIME-EVIDENCE-2026-10-06.md",
+        "docs/state/CHANGE_LOG.md#AC-36"
       ],
       "decisions": [
         "OD-AC-CADENCE"
@@ -935,7 +939,7 @@
         "tools/legacyLoadGates.test.ts",
         "db/data-step/fixtures/legacy-export.FIXTURE/",
         "ops/backup/evidence/load-rehearsal-20261004T095828Z.json",
-        "ops/backup/evidence/load-rehearsal-20261006T044525Z.json (re-run at HEAD on disposable real PostgreSQL 17.11 — all gates PASS, verdict REHEARSAL_PASSED (SYNTHETIC FIXTURE))"
+        "ops/backup/evidence/load-rehearsal-20261006T044525Z.json"
       ],
       "decisions": [
         "OD-AC-ADR004",

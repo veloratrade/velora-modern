@@ -1014,6 +1014,7 @@ async function main(): Promise<void> {
     // PERSISTENCE=postgres; per-app memory store otherwise — identical to the
     // createApp default in the memory posture).
     rateLimiter: new FixedWindowRateLimiter(rateLimitStore),
+    trustedProxyCidrs: boot.trustedProxyCidrs,
     ...capabilities,
   });
   // HOST: bind address for deployed environments (container platforms need

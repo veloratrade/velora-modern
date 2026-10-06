@@ -74,7 +74,6 @@
     "migration_closure": "NOT_CLOSED (phase 7 web slice, then phases 8-9)",
     "open_owner_decisions": [
       "R1 password policy at login",
-      "R2 trustedProxyCidrs wiring",
       "R8 public vs protected routes (markets/news/support)",
       "R9 strategy winRate/order/untagged semantics",
       "OD-1 canonical staging origin",
@@ -113,7 +112,7 @@
     "entry": "AC-27..AC-38 (lineage reconciliation → ops tooling/worker/backup campaign) + Persian final report",
     "branch": "integration/reconcile-lineages",
     "base": "0e9c4d7e6e1f984287490ce02f5681c208e35c7a (main)",
-    "head": "be4732d7e3de710c101e57c00c03aeccc22f824a — remote branch integration/reconcile-lineages AND remote main (owner-instructed promotion 2026-10-06, fast-forward 0e9c4d7→be4732d, ls-remote verified)",
+    "head": "be4732d7e3de710c101e57c00c03aeccc22f824a — remote branch integration/reconcile-lineages AND remote main (owner-instructed promotion 2026-10-06, fast-forward 0e9c4d7→be4732d, ls-remote verified) + AC-42 R2 trustedProxyCidrs wiring (uncommitted)",
     "commits": "ce78ad07467b (merge domain lineage) + af782f4745b2 (merge telegram lineage) + 06fd3a99673a (PnlResult merge fallout) + 761227b36d24 (assembly: packages/domain assembler 19/19, 0029 sync_position_state, roles.sql revokes, positionReconciler, importBatch rework, metaapiAssembly 8/8 + metaapiSync 13/13 + pgRoles P19 23/23 batteries, ops/metaapi/retirePerFillTrades tool, evidence doc) + dde116cfa595 (S1 cookie-only refresh + 128-char cap + S1 proof test 12/12; S2 fail-closed CSP nonce) + b500525ead8d (register + CHANGE_LOG sync)",
     "capability": "Both prior lineages' work (Telegram journal, phases 1-7 incl. AI capability; domain ports range-guard/Jalali/TradingSession/achievements, backup drill, pg-smoke fix) on ONE tree, plus the audit's largest behavioural divergence closed: MetaAPI sync now produces one trade per POSITION with true entry/exit prices and a durable reconciliation state machine, and the S1/S2 security regressions are fixed.",
     "pushed": true,
