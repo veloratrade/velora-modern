@@ -834,3 +834,11 @@ then a browser QA run. After that: phase 8 (integrations/worker/email), phase 9
 - **Verification:** drill verdict RESTORE_DRILL_PASSED, evidence JSON in-repo; working tree battery/tsc/secret-scan gates re-verified post-reinstall (npm ci; suites unchanged since `80f6720`).
 - **Migration state:** MG-BACKUP-RESTORE PARTIAL — machinery + local evidence now at HEAD; closure still waits on the three owner items (offsite upload credential, staging/prod drill, RPO/RTO).
 - **Authorization:** owner instruction 2026-10-05 (autonomous gap implementation).
+
+## AC-39 — 2026-10-06 · remote sync: integration branch PUSHED (state recorded)
+
+- **What:** first remote sync of the integration lineage. Inventory check (owner request, with owner-provided token) found **remote main @ `0e9c4d7` with NONE of the AC-27..AC-38 work** — the earlier belief that AC-32 (`73bacfd`) was pushed was incorrect (verified: no AC-2x/AC-3x commit is reachable from any remote ref; remote has the two raw source lineages and the PR #8 governance campaign only).
+- **Action:** pre-push secret-scan PASS (0 findings) → `git push` of `integration/reconcile-lineages` @ `7c6e246` as a NEW remote branch — **74 commits / 463 files (+59,460/−919) over remote main** — verified after push via `git ls-remote`.
+- **Deliberately NOT done:** remote `main` untouched at `0e9c4d7`; merge/promotion remains owner-gated (repo PR pattern; https://github.com/veloratrade/velora-modern/pull/new/integration/reconcile-lineages). No tags pushed (MG-OBS-2 unchanged).
+- **State sync:** `docs/state/current-state.json` + `CURRENT_STATE.md` updated (branch_work.pushed, current_verified.verification, last_battery re-captured at 7c6e246, last_updated 2026-10-06) in this same change.
+- **Security note:** the owner-provided fine-grained PAT was used only in transient command URLs (never written to any file, .git/config, or credential store — secret-scan re-run PASS after the change). Owner should rotate it after use, as it was shared in conversation.
