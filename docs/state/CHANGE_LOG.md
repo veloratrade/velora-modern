@@ -796,3 +796,12 @@ then a browser QA run. After that: phase 8 (integrations/worker/email), phase 9
 - **Verification:** rbac 23/23; contracts suite green; register row updated with the full diff table.
 - **Migration state:** `MG-RBAC-VOCAB` PARTIAL (vocabulary work complete; the row now tracks its 9-name remainder through the MG-ADMIN segments and the two owner decisions). Register: 15 OPEN / 29 PARTIAL / 12 CLOSED.
 - **Authorization:** owner instruction 2026-10-05 (autonomous gap implementation).
+
+## AC-35 — 2026-10-06 · MG-METAAPI-CADENCE: cadence made operational config; manual trigger verified landed; default value raised as OD-AC-CADENCE
+
+- **Commits:** this change (worker scheduler + tests + register).
+- **What changed:** the audit's "hourly vs per-minute" finding decomposed into its three parts. The MANUAL TRIGGER half of the closure criteria was already landed (POST /accounts/{id}/sync → 202 {jobId,status,deduplicated}); Modern is WEBHOOK-FIRST where Legacy was poll-only, so the scheduled tick is the safety net for missed webhooks, not the primary feed. The sweep cadence is now operational config: `METAAPI_SYNC_CRON` (strict 5-field minute-precision grammar, range-checked, day-names deliberately rejected; invalid values fall back to the audited default LOUDLY — `scheduler.cadence_rejected` warn). The DEFAULT IS UNCHANGED (hourly) because changing it is a business call; the value is recorded as **OD-AC-CADENCE** with three explicit options (keep hourly / `*/5` recommended middle ground / legacy per-minute parity at 60× volume). Legacy's reference cadence is pinned as `LEGACY_SYNC_CRON`.
+- **Tests:** 5 new (default unchanged, absent/empty env silent, valid override verbatim incl. `*/5` and legacy parity, invalid values fall back loudly incl. 6-field crons + range violations, grammar/range validators) — worker suite 58/58.
+- **Verification:** worker tests green; `tsc -b` clean. Runtime cadence behavior is deploy-gated (MG-WORKER-DEPLOY evidence class) — the scheduling mechanism itself is the pg-boss native cron already unit-pinned.
+- **Migration state:** `MG-METAAPI-CADENCE` PARTIAL — the code half of the closure criteria is met (cadence decided-and-configurable + manual trigger); the row now waits on OD-AC-CADENCE (default value) and the deploy-gated runtime evidence. Register: 15 OPEN / 29 PARTIAL / 12 CLOSED; owner_decisions now 10.
+- **Authorization:** owner instruction 2026-10-05 (autonomous gap implementation). The default was deliberately NOT changed autonomously — governance rule (business ambiguity → owner decision).

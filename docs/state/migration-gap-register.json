@@ -786,7 +786,7 @@
     {
       "id": "MG-METAAPI-CADENCE",
       "section": "B",
-      "title": "Hourly vs per-minute sync safety net; manual sync trigger missing",
+      "title": "Sync cadence: webhook-first + manual trigger + hourly sweep default (METAAPI_SYNC_CRON-tunable); default value = OD-AC-CADENCE",
       "status": "PARTIAL",
       "priority": "P2",
       "verification_state": "STATIC",
@@ -801,12 +801,17 @@
         "apps/api/src/accounts/manualSyncRoutes.ts",
         "packages/contracts/src/metaapiSync.ts",
         "apps/worker/src/scheduler/syncScheduler.ts",
-        "db/tests/manualSync.pg.test.ts"
+        "db/tests/manualSync.pg.test.ts",
+        "apps/worker/src/scheduler/syncCadence.ts",
+        "apps/worker/src/scheduler/syncCadence.test.ts"
       ],
-      "decisions": [],
+      "decisions": [
+        "OD-AC-CADENCE"
+      ],
       "closure_criteria": "Cadence decided + manual trigger or owner-acceptance",
       "related": [],
-      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=PARTIAL/STATIC."
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=PARTIAL/STATIC.",
+      "closure_note": "AC-35 (2026-10-06): the cadence gap is resolved into its three parts. (1) MANUAL TRIGGER — already landed (POST /accounts/{id}/sync → 202 {jobId,status,deduplicated}; manualSyncService/Routes + PGlite test, verified in evidence). (2) INGESTION ARCHITECTURE — Modern is webhook-first (webhookRoutes dispatches on provider events) where Legacy was poll-only; the scheduled tick is the SAFETY NET for missed webhooks, not the primary feed. (3) THE SWEEP CADENCE — the audited default (hourly, '0 * * * *') is UNCHANGED (changing it is a business call: MetaAPI request volume vs journal freshness) but is now operationally tunable via METAAPI_SYNC_CRON with strict validation (5-field minute-precision grammar, range-checked, no day-names; invalid values fall back to the default LOUDLY — scheduler.cadence_rejected warn). Legacy's per-minute reference point is pinned as LEGACY_SYNC_CRON. The default VALUE is recorded as OD-AC-CADENCE: options are keep-hourly (webhooks carry realtime), tighten to */5 (12x safety-net improvement, ~1/12th of legacy's polling volume), or legacy parity * * * * (60x volume); owner picks. Worker suite 58/58 (5 new cadence tests)."
     },
     {
       "id": "MG-RMULTIPLE-SCALE",
@@ -1323,6 +1328,18 @@
       "original_id": "worker service",
       "subject": "worker service definition in railway.json",
       "audit_ref": "§13.2"
+    },
+    {
+      "id": "OD-AC-CADENCE",
+      "subject": "MetaAPI safety-net sweep cadence default (hourly vs */5 vs legacy per-minute)",
+      "audit_ref": "§12.1",
+      "raised_by": "AC-35",
+      "context": "Legacy polled every minute (poll-only ingestion). Modern is webhook-first + manual trigger + scheduled sweep. The sweep default stays the audited hourly value; METAAPI_SYNC_CRON makes it operationally tunable with validation. Options: keep hourly (webhooks carry realtime), tighten to */5 (12x safety-net improvement at ~1/12th of legacy's polling volume), or legacy parity * * * * (60x volume). Tradeoff is MetaAPI request volume vs worst-case journal staleness for missed webhooks.",
+      "options": [
+        "0 * * * * (current default)",
+        "*/5 * * * * (recommended middle ground)",
+        "* * * * * (legacy parity)"
+      ]
     }
   ],
   "verified_complete": [

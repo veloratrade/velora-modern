@@ -35,8 +35,10 @@ export const SYNC_TICK_JOB_CLASS = "metaapi.sync-tick";
  *
  * Conservative by intent — historical sync is a catch-up mechanism, not a
  * realtime feed, and ADR-007 requires bounded load on the shared PostgreSQL.
+ * The constant lives in ./syncCadence.js (AC-35: METAAPI_SYNC_CRON override +
+ * validation); re-exported here for the callers that imported it from here.
  */
-export const DEFAULT_SYNC_CRON = "0 * * * *";
+export { DEFAULT_SYNC_CRON } from "./syncCadence.js";
 
 /**
  * How far back a first-ever sync reaches.

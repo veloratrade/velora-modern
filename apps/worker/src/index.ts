@@ -24,7 +24,8 @@ import { createHandlerRegistry } from "./handlers/registry.js";
 import { createMetaApiSyncHandler } from "./handlers/metaApiSyncHandler.js";
 import { DEFAULT_JOB_POLICIES, METAAPI_SYNC_JOB_CLASS } from "@velora/contracts";
 import type { MetaApiSyncPayload } from "@velora/contracts";
-import { runSyncTick, SYNC_TICK_JOB_CLASS, DEFAULT_SYNC_CRON } from "./scheduler/syncScheduler.js";
+import { runSyncTick, SYNC_TICK_JOB_CLASS } from "./scheduler/syncScheduler.js";
+import { resolveSyncCron } from "./scheduler/syncCadence.js";
 import { runFxTick, FX_TICK_JOB_CLASS, FX_RATES_JOB_CLASS, DEFAULT_FX_CRON } from "./scheduler/fxScheduler.js";
 import { fetchText, makeFxRatesHandler, poolRateQuery } from "./handlers/fxRatesHandler.js";
 import { PgSignalQueue, poolQueryFn } from "./copytrading/signalQueue.js";
@@ -156,8 +157,26 @@ if (databaseUrl) {
     registry.register(SYNC_TICK_JOB_CLASS, tickHandler);
 
     try {
-      await queue.schedule(SYNC_TICK_JOB_CLASS, DEFAULT_SYNC_CRON);
-      log({ level: "info", event: "scheduler.registered", jobClass: SYNC_TICK_JOB_CLASS });
+      // MG-METAAPI-CADENCE: sweep cadence is operational config. The DEFAULT
+      // stays the audited hourly value (OD-AC-CADENCE owns any change);
+      // METAAPI_SYNC_CRON lets an operator tighten it (e.g. "*/5 * * * *")
+      // without a code change. An invalid value falls back LOUDLY.
+      const cadence = resolveSyncCron(process.env["METAAPI_SYNC_CRON"]);
+      await queue.schedule(SYNC_TICK_JOB_CLASS, cadence.cron);
+      if (cadence.rejectedEnvValue !== null) {
+        log({
+          level: "warn",
+          event: "scheduler.cadence_rejected",
+          reason: "invalid METAAPI_SYNC_CRON",
+          fallback: cadence.cron,
+        });
+      }
+      log({
+        level: "info",
+        event: "scheduler.registered",
+        jobClass: SYNC_TICK_JOB_CLASS,
+        cadenceSource: cadence.source,
+      });
     } catch (err) {
       // A missing schedule must not take the worker down: it still serves jobs
       // enqueued by any other authorized producer. Code only, never the error.
