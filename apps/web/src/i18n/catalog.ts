@@ -31,6 +31,15 @@ import faTrades from "../../messages/fa/trades.json";
 import faDashboard from "../../messages/fa/dashboard.json";
 import faSupport from "../../messages/fa/support.json";
 import faAdmin from "../../messages/fa/admin.json";
+import faMarkets from "../../messages/fa/markets.json";
+import faNews from "../../messages/fa/news.json";
+import faPerformance from "../../messages/fa/performance.json";
+import faWallet from "../../messages/fa/wallet.json";
+import faIntelligence from "../../messages/fa/intelligence.json";
+import faPrivacy from "../../messages/fa/privacy.json";
+import faTerms from "../../messages/fa/terms.json";
+import faCheckout from "../../messages/fa/checkout.json";
+import faBlog from "../../messages/fa/blog.json";
 import enCommon from "../../messages/en/common.json";
 import enErrors from "../../messages/en/errors.json";
 import enTelegram from "../../messages/en/telegram.json";
@@ -42,6 +51,15 @@ import enTrades from "../../messages/en/trades.json";
 import enDashboard from "../../messages/en/dashboard.json";
 import enSupport from "../../messages/en/support.json";
 import enAdmin from "../../messages/en/admin.json";
+import enMarkets from "../../messages/en/markets.json";
+import enNews from "../../messages/en/news.json";
+import enPerformance from "../../messages/en/performance.json";
+import enWallet from "../../messages/en/wallet.json";
+import enIntelligence from "../../messages/en/intelligence.json";
+import enPrivacy from "../../messages/en/privacy.json";
+import enTerms from "../../messages/en/terms.json";
+import enCheckout from "../../messages/en/checkout.json";
+import enBlog from "../../messages/en/blog.json";
 
 // `settings` is the account surface's catalog (Phase 1 — profile + settings).
 // PROVENANCE: 23 of its keys are byte copies of Legacy `public/locales/{fa,en}.json`
@@ -80,7 +98,7 @@ import enAdmin from "../../messages/en/admin.json";
 // ticket words in `pages.support.*`). Those are deliberately NOT duplicated here:
 // one string, one home. `apps/web/src/i18n/adminSurface.test.ts` proves that every
 // key the page can render resolves in one of the four chunks it loads.
-export type Feature = "common" | "errors" | "auth" | "landing" | "landing-interactive" | "telegram" | "settings" | "trades" | "dashboard" | "support" | "admin";
+export type Feature = "common" | "errors" | "auth" | "landing" | "landing-interactive" | "telegram" | "settings" | "trades" | "dashboard" | "support" | "admin" | "markets" | "news" | "performance" | "wallet" | "intelligence" | "privacy" | "terms" | "checkout" | "blog";
 export type Messages = Readonly<Record<string, string>>;
 
 interface ChunkFile {
@@ -91,8 +109,8 @@ interface ChunkFile {
 }
 
 export const CATALOG_FILES: Readonly<Record<Locale, Readonly<Record<Feature, ChunkFile>>>> = {
-  fa: { common: faCommon, errors: faErrors, auth: faAuth, landing: faLanding, "landing-interactive": faLandingInteractive, telegram: faTelegram, settings: faSettings, trades: faTrades, dashboard: faDashboard, support: faSupport, admin: faAdmin },
-  en: { common: enCommon, errors: enErrors, auth: enAuth, landing: enLanding, "landing-interactive": enLandingInteractive, telegram: enTelegram, settings: enSettings, trades: enTrades, dashboard: enDashboard, support: enSupport, admin: enAdmin },
+  fa: { common: faCommon, errors: faErrors, auth: faAuth, landing: faLanding, "landing-interactive": faLandingInteractive, telegram: faTelegram, settings: faSettings, trades: faTrades, dashboard: faDashboard, support: faSupport, admin: faAdmin, markets: faMarkets, news: faNews, performance: faPerformance, wallet: faWallet, intelligence: faIntelligence, privacy: faPrivacy, terms: faTerms, checkout: faCheckout, blog: faBlog },
+  en: { common: enCommon, errors: enErrors, auth: enAuth, landing: enLanding, "landing-interactive": enLandingInteractive, telegram: enTelegram, settings: enSettings, trades: enTrades, dashboard: enDashboard, support: enSupport, admin: enAdmin, markets: enMarkets, news: enNews, performance: enPerformance, wallet: enWallet, intelligence: enIntelligence, privacy: enPrivacy, terms: enTerms, checkout: enCheckout, blog: enBlog },
 };
 
 const merged = new Map<string, Messages>();

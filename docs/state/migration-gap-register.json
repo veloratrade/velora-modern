@@ -661,13 +661,23 @@
         "docs/audits/2026-10-04-PHASE5-STATUS.md",
         "docs/audits/phase5-ui/visual-qa-results.json",
         "docs/audits/2026-10-04-PHASE6-STATUS.md",
-        "apps/web/src/app/(app)/admin/page.tsx"
+        "apps/web/src/app/(app)/admin/page.tsx",
+        "apps/web/src/app/(app)/performance/page.tsx",
+        "apps/web/src/app/(app)/wallet/page.tsx",
+        "apps/web/src/app/(app)/intelligence/page.tsx",
+        "apps/web/src/app/(app)/markets/page.tsx",
+        "apps/web/src/app/(app)/news/page.tsx",
+        "apps/web/src/features/legal/PrivacyDocument.tsx",
+        "apps/web/src/features/legal/TermsDocument.tsx",
+        "apps/web/src/app/checkout/CheckoutForm.tsx",
+        "apps/web/src/app/blog/posts.ts",
+        "apps/web/src/i18n/contentSurfaces.test.ts"
       ],
       "decisions": [
         "OD-AC-R8"
       ],
       "closure_criteria": "Surfaces implemented or owner-scoped",
-      "closure_note": "PARTIAL 2026-10-05 (Phases 5-6). Two more badged shells became real surfaces: `/support` (Phase 5 — 0026 + SupportService/SupportRoutes + the page, verified by a real-PG battery, an HTTP route battery and a 29/29 browser QA run, docs/audits/phase5-ui/) and `/admin` (Phase 6 — 0027 + the console API + seven permission-driven tabs, verified by 17/17 route, 16/16 service, 14/14 real-PG tests and a 62/62 browser QA run, docs/audits/phase6-ui/). `/profile`, `/settings`, `/trades` and `/dashboard` were already real. Still open in this row: `/performance` and `/wallet` (phase 9), `/intelligence` (phase 7, AI), blog/privacy/terms (TRD-10 content) and checkout (PLT-11). `/markets` and `/news` are LEGACY_ONLY content surfaces (TRD-11), not shells to fill.",
+      "closure_note": "AC-32 (2026-10-06): all AC-32 content surfaces implemented and guarded. Real-API surfaces: performance (monthly PnL via Intl persian-calendar month attribution), wallet (listAccounts + getSubscriptionMe), intelligence (GET /api/v1/ai/status + insights(10) + POST /api/v1/ai/weekly-report). Honest-content surfaces: markets (legacy watchlist keys, snapshotNote, no fake quotes), news (static key cards), blog fa+en (key-driven posts from posts.ts with generateStaticParams), privacy/terms (shared features/legal/{PrivacyDocument,TermsDocument}.tsx + fa canonical + en mirrors), checkout (CheckoutForm → POST /api/v1/ai/../subscription/checkout → Stripe res.url; BILLING_NOT_CONFIGURED→billingOff, 401→loginRequired; /fa/checkout alias). Guard test apps/web/src/i18n/contentSurfaces.test.ts (5/5): fa/en parity per namespace, t()-key resolution for all 8 rewritten page files, posts.ts key resolution, legacy chunk byte-verbatim anchors, 107 root-catalog lifts byte-identical. Web build green (all new routes compiled). Remaining for this gap: /admin surface (MG-RBAC-VOCAB) and /support is done (Phase 5).",
       "last_updated": "2026-10-05",
       "related": [],
       "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC."
@@ -675,7 +685,7 @@
     {
       "id": "MG-I18N-COVERAGE",
       "section": "B",
-      "title": "697 of 1,765 i18n keys migrated (39.5%)",
+      "title": "i18n coverage: 1,263 of 1,994 legacy keys (63%); all AC-32 surface keys resolve; remainder mapped to queue",
       "status": "PARTIAL",
       "priority": "P2",
       "verification_state": "STATIC",
@@ -684,12 +694,16 @@
       ],
       "evidence": [
         "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
-        "apps/web/messages/fa/common.json"
+        "apps/web/messages/fa/common.json",
+        "apps/web/messages/fa/markets.json",
+        "apps/web/messages/fa/blog.json",
+        "apps/web/src/i18n/contentSurfaces.test.ts"
       ],
       "decisions": [],
       "closure_criteria": "Missing chunks migrate with their surfaces",
       "related": [],
-      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC."
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/STATIC, domain=PARTIAL/STATIC.",
+      "closure_note": "AC-32 (2026-10-06): +10 namespaces ported byte-verbatim (markets, news, performance, wallet, intelligence, privacy, terms, checkout, blog + 107 common lifts from legacy root catalog); authored-only additions limited to surface.* keys for capability-state chrome. Coverage fa=en=1,263/1,994 (63%) with perfect fa/en parity. Live-reference analysis of every legacy HTML/JS file: 1,444 keys actually referenced; missing 411 = admin 187 (MG-RBAC-VOCAB), pages.accounts/accounts 37 (accounts surface), pages.trades 24 + trades 4, pages.dashboard/dashboard 26, ai 13, nav 28 + common 31 + auth 4 (shell), pages.blog 31 + test 14 INTENTIONALLY_NOT_MIGRATED (duplicate EN key-family for the same articles — content served from the ported chunk family; test-localization.html is a legacy dev fixture). Guard: contentSurfaces.test.ts 5/5 (parity, t()-resolution, verbatim chunks, byte-identical lifts). profile chunk folded into settings/common (21 duplicate keys removed — one-string-one-home)."
     },
     {
       "id": "MG-EMAIL-TYPES",

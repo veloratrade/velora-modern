@@ -1,0 +1,362 @@
+/*
+ * Content-page styles — AC-32 (privacy / terms / blog / checkout + the
+ * performance / wallet / intelligence / markets / news app surfaces).
+ *
+ * Design language is the Velora system (obsidian #04050a base, gold #e9c45c,
+ * dark glass panels) — the same tokens the (app) shell and the landing page
+ * use. Public pages live outside the (app) layout, so they carry their own
+ * sheet; classes reuse the landing/auth conventions rather than inventing a
+ * second visual language.
+ */
+
+:root {
+  --velora-bg: #04050a;
+  --velora-panel: rgba(17, 24, 42, 0.78);
+  --velora-line: rgba(255, 255, 255, 0.13);
+  --velora-gold: #e9c45c;
+  --velora-gold-light: #ffe7a1;
+  --velora-text: #f5f3eb;
+  --velora-muted: #9ca7b8;
+  --velora-green: #4cd39a;
+  --velora-red: #f87171;
+}
+
+/* ── legal / blog / checkout shells ─────────────────────────────────── */
+
+.legal-shell,
+.checkout-shell {
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(700px 460px at 85% -10%, rgba(233, 196, 92, 0.16), transparent 65%),
+    var(--velora-bg);
+  color: var(--velora-text);
+  font-family: Estedad, Vazirmatn, Tahoma, Arial, sans-serif;
+}
+
+.legal-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 72px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--velora-line);
+}
+
+.legal-brand {
+  color: var(--velora-gold-light);
+  font-weight: 800;
+  letter-spacing: 4px;
+  text-decoration: none;
+}
+
+.legal-back {
+  color: var(--velora-muted);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.legal-hero {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 48px 24px 8px;
+}
+
+.legal-eyebrow {
+  color: var(--velora-gold);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.legal-hero h1 {
+  margin: 9px 0;
+  font-size: 30px;
+}
+
+.legal-lead {
+  color: var(--velora-muted);
+  font-size: 14px;
+  line-height: 2;
+}
+
+.legal-doc {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 16px 24px;
+}
+
+.legal-doc h1 {
+  font-size: 26px;
+}
+
+.legal-intro {
+  color: var(--velora-muted);
+  line-height: 2;
+}
+
+.legal-section {
+  margin-top: 26px;
+}
+
+.legal-section h2 {
+  font-size: 16px;
+  color: var(--velora-gold-light);
+}
+
+.legal-section p,
+.legal-doc p {
+  line-height: 2.1;
+  color: var(--velora-text);
+}
+
+.legal-section ol {
+  padding-inline-start: 22px;
+  line-height: 2.1;
+}
+
+.legal-cta {
+  max-width: 860px;
+  margin: 24px auto;
+  padding: 22px;
+  border: 1px solid var(--velora-line);
+  border-radius: 19px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02) 48%, rgba(233, 196, 92, 0.045));
+}
+
+.legal-cta h2 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.legal-footer {
+  padding: 26px 24px 34px;
+  text-align: center;
+}
+
+/* ── blog ───────────────────────────────────────────────────────────── */
+
+.blog-grid {
+  max-width: 1020px;
+  margin: 0 auto;
+  padding: 12px 24px 34px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+
+.blog-card {
+  text-decoration: none;
+  color: var(--velora-text);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.blog-card b {
+  font-size: 15px;
+}
+
+@media (max-width: 780px) {
+  .blog-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── checkout ───────────────────────────────────────────────────────── */
+
+.checkout-main {
+  max-width: 1020px;
+  margin: 0 auto;
+  padding: 40px 24px;
+  display: grid;
+  grid-template-columns: 1fr 330px;
+  gap: 20px;
+  align-items: start;
+}
+
+.checkout-main h1 {
+  margin: 9px 0;
+  font-size: 30px;
+}
+
+.checkout-summary {
+  position: sticky;
+  top: 16px;
+}
+
+.plan-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--velora-line);
+}
+
+.plan-row .price {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--velora-gold-light);
+  direction: ltr;
+}
+
+.row-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  color: var(--velora-muted);
+  font-size: 12px;
+}
+
+.row-line.total {
+  border-top: 1px solid var(--velora-line);
+  padding-top: 14px;
+  color: var(--velora-text);
+  font-weight: 800;
+}
+
+@media (max-width: 860px) {
+  .checkout-main {
+    grid-template-columns: 1fr;
+  }
+  .checkout-summary {
+    position: static;
+    order: -1;
+  }
+}
+
+/* ── shared bits the public pages reuse from the app vocabulary ─────── */
+
+.legal-shell .card,
+.checkout-shell .card,
+.blog-grid .card {
+  border: 1px solid var(--velora-line);
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02) 48%, rgba(233, 196, 92, 0.045));
+  padding: 16px;
+}
+
+.legal-shell .card-alt,
+.checkout-shell .card-alt {
+  border: 1px solid var(--velora-line);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.16);
+  padding: 13px;
+}
+
+.legal-shell .label,
+.checkout-shell .label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--velora-gold);
+}
+
+.legal-shell .muted-xs,
+.checkout-shell .muted-xs,
+.blog-card .muted-xs {
+  color: var(--velora-muted);
+  font-size: 11px;
+}
+
+.legal-shell .muted-sm,
+.checkout-shell .muted-sm {
+  color: var(--velora-muted);
+  font-size: 13px;
+}
+
+.legal-shell .grid-2,
+.checkout-shell .grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.legal-shell .mt-6 { margin-top: 6px; }
+.legal-shell .mt-8 { margin-top: 8px; }
+.legal-shell .mt-12 { margin-top: 12px; }
+.legal-shell .mt-16 { margin-top: 16px; }
+.checkout-shell .mt-6 { margin-top: 6px; }
+.checkout-shell .mt-8 { margin-top: 8px; }
+.checkout-shell .mt-12 { margin-top: 12px; }
+.checkout-shell .mt-16 { margin-top: 16px; }
+
+.legal-shell .badge,
+.checkout-shell .badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border: 1px solid var(--velora-line);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--velora-muted);
+  background: rgba(0, 0, 0, 0.2);
+  cursor: default;
+}
+
+.legal-shell .badge-connected,
+.checkout-shell .badge-connected {
+  border-color: rgba(76, 211, 154, 0.5);
+  color: var(--velora-green);
+}
+
+.legal-shell .badge-disconnected,
+.checkout-shell .badge-disconnected {
+  border-color: rgba(248, 113, 113, 0.4);
+  color: var(--velora-red);
+}
+
+.btn-gold {
+  display: inline-block;
+  padding: 12px 22px;
+  border: 1px solid rgba(255, 235, 168, 0.64);
+  border-radius: 11px;
+  background: linear-gradient(135deg, #ffe8a6, #d7a83a);
+  color: #211704;
+  font-weight: 800;
+  font-size: 13px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.btn-gold:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* ── app-surface stats/tables (performance / wallet) ────────────────── */
+
+.stat-value {
+  display: block;
+  margin-top: 10px;
+  font-size: 21px;
+  font-weight: 800;
+  color: #fff0bd;
+  direction: ltr;
+  font-variant-numeric: lining-nums;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.data-table th {
+  text-align: start;
+  color: var(--velora-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--velora-line);
+}
+
+.data-table td {
+  padding: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}

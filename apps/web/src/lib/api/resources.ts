@@ -821,3 +821,53 @@ export function replySupportTicket(id: string, message: string): Promise<{ messa
 export function reopenSupportTicket(id: string): Promise<{ status: SupportStatus; waitingFor: SupportWaiting }> {
   return api.request(`/api/v1/support/tickets/${encodeURIComponent(id)}/reopen`, { method: "POST", body: {} });
 }
+
+// ── AI Coach (intelligence surface) + Subscriptions (wallet/checkout surfaces) ──
+// AC-32: the intelligence page reads STORED insights (generation is worker-gated,
+// see aicoach/aiCoachRoutes.ts — the page must not invent coaching content), and
+// the wallet/checkout surfaces read the subscription state the billing
+// capability really owns. All four helpers go through the same typed api client.
+
+export interface AiCoachInsight {
+  id: string;
+  feature: string;
+  insight: string;
+  window_from: string | null;
+  window_to: string | null;
+  created_at: string;
+}
+
+export interface AiCoachInsightsView {
+  consent: { consented: boolean; consentedAt: string | null };
+  insights: AiCoachInsight[];
+}
+
+export function getAiCoachInsights(limit?: number): Promise<AiCoachInsightsView> {
+  const qs = limit ? `?limit=${encodeURIComponent(String(limit))}` : "";
+  return api.request(`/api/v1/ai-coach/latest-insights${qs}`);
+}
+
+export interface SubscriptionView {
+  plan: string;
+  entitled: boolean;
+  purchasedPlan: string;
+  subscription: {
+    id: string;
+    plan: string;
+    status: string;
+    currentPeriodEnd: string | null;
+  } | null;
+}
+
+export function getSubscriptionMe(): Promise<SubscriptionView> {
+  return api.request("/api/v1/subscriptions/me");
+}
+
+export function postSubscriptionCheckout(
+  interval: "month" | "year",
+): Promise<{ url: string }> {
+  return api.request("/api/v1/subscriptions/checkout", {
+    method: "POST",
+    body: { interval },
+  });
+}

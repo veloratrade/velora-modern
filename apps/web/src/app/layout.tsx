@@ -6,6 +6,7 @@ import { localeMeta } from "../i18n/registry";
 import "../features/landing/styles/fonts.css";
 import "../features/landing/styles/landing.css";
 import "../features/auth/styles/auth.css";
+import "../features/content/styles/content.css"; // AC-32: legal/blog/checkout + shared stat/table styles
 import { SessionProvider } from "../lib/auth/session";
 
 export const metadata: Metadata = {
