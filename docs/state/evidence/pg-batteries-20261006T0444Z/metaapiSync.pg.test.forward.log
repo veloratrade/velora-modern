@@ -1,0 +1,76 @@
+TAP version 13
+# Subtest: MetaAPI sync
+    # Subtest: E3: metaapi_account_id persists and is globally unique
+    ok 1 - E3: metaapi_account_id persists and is globally unique
+      ---
+      duration_ms: 12.168257
+      ...
+    # Subtest: E3b: external_account_id semantics are unchanged (not overloaded)
+    ok 2 - E3b: external_account_id semantics are unchanged (not overloaded)
+      ---
+      duration_ms: 27.820331
+      ...
+    # Subtest: E3c: NULL metaapi_account_id is allowed (manual accounts)
+    ok 3 - E3c: NULL metaapi_account_id is allowed (manual accounts)
+      ---
+      duration_ms: 3.777372
+      ...
+    # Subtest: E5: the producer enqueues ONLY MetaAPI-provisioned accounts
+    ok 4 - E5: the producer enqueues ONLY MetaAPI-provisioned accounts
+      ---
+      duration_ms: 15.169045
+      ...
+    # Subtest: E5b: a repeated tick is idempotent (same window ⇒ one job)
+    ok 5 - E5b: a repeated tick is idempotent (same window ⇒ one job)
+      ---
+      duration_ms: 2.737214
+      ...
+    # Subtest: E7: a successful import assembles ONE trade per POSITION and advances the cursor
+    ok 6 - E7: a successful import assembles ONE trade per POSITION and advances the cursor
+      ---
+      duration_ms: 37.215963
+      ...
+    # Subtest: E8: replaying the SAME batch creates no duplicate row
+    ok 7 - E8: replaying the SAME batch creates no duplicate row
+      ---
+      duration_ms: 26.439572
+      ...
+    # Subtest: E11/E12/E13: offset-explicit assembles; naive is evidence only, never a boundary
+    ok 8 - E11/E12/E13: offset-explicit assembles; naive is evidence only, never a boundary
+      ---
+      duration_ms: 19.755336
+      ...
+    # Subtest: D-5: the normalizer never applies a host timezone to a naive value
+    ok 9 - D-5: the normalizer never applies a host timezone to a naive value
+      ---
+      duration_ms: 0.466518
+      ...
+    # Subtest: E9: two concurrent attempts cannot both own the reservation
+    ok 10 - E9: two concurrent attempts cannot both own the reservation
+      ---
+      duration_ms: 18.527624
+      ...
+    # Subtest: E9b: a FAILED attempt does not advance the cursor
+    ok 11 - E9b: a FAILED attempt does not advance the cursor
+      ---
+      duration_ms: 8.071865
+      ...
+    # Subtest: E4: a missing MetaAPI id fails explicitly and is never guessed
+    ok 12 - E4: a missing MetaAPI id fails explicitly and is never guessed
+      ---
+      duration_ms: 4.20345
+      ...
+    1..12
+ok 1 - MetaAPI sync
+  ---
+  duration_ms: 915.190556
+  ...
+1..1
+# tests 13
+# suites 0
+# pass 13
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1395.073103

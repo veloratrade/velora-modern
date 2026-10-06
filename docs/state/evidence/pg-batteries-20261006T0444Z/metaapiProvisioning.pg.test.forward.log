@@ -1,0 +1,142 @@
+TAP version 13
+# Subtest: MetaAPI provisioning — real PostgreSQL
+    # Subtest: 0014: the two authorized audit actions are accepted
+    ok 1 - 0014: the two authorized audit actions are accepted
+      ---
+      duration_ms: 13.088176
+      ...
+    # Subtest: 0014: CREDENTIAL_REVEALED is still REJECTED by the CHECK
+    ok 2 - 0014: CREDENTIAL_REVEALED is still REJECTED by the CHECK
+      ---
+      duration_ms: 4.841945
+      ...
+    # Subtest: 0014: the audit account reference survives account deletion
+    ok 3 - 0014: the audit account reference survives account deletion
+      ---
+      duration_ms: 17.628068
+      ...
+    # Subtest: binding persists and is readable
+    ok 4 - binding persists and is readable
+      ---
+      duration_ms: 5.622073
+      ...
+    # Subtest: ownership is enforced: a non-owner cannot bind or read
+    ok 5 - ownership is enforced: a non-owner cannot bind or read
+      ---
+      duration_ms: 5.719699
+      ...
+    # Subtest: GLOBAL uniqueness: a second account cannot take a bound id
+    ok 6 - GLOBAL uniqueness: a second account cannot take a bound id
+      ---
+      duration_ms: 6.101905
+      ...
+    # Subtest: compare-and-set: an already-bound account is not silently rebound
+    ok 7 - compare-and-set: an already-bound account is not silently rebound
+      ---
+      duration_ms: 15.75863
+      ...
+    # Subtest: the 0013 CHECK rejects a malformed provider id
+    ok 8 - the 0013 CHECK rejects a malformed provider id
+      ---
+      duration_ms: 3.052647
+      ...
+    # Subtest: CONCURRENCY: two simultaneous binds on separate connections → exactly one wins
+    ok 9 - CONCURRENCY: two simultaneous binds on separate connections → exactly one wins
+      ---
+      duration_ms: 27.827037
+      ...
+    # Subtest: CONCURRENCY: two simultaneous reserves converge on ONE operation
+    ok 10 - CONCURRENCY: two simultaneous reserves converge on ONE operation
+      ---
+      duration_ms: 17.693605
+      ...
+    # Subtest: operation lifecycle: evidence of a provider outcome is never erased
+    ok 11 - operation lifecycle: evidence of a provider outcome is never erased
+      ---
+      duration_ms: 8.650508
+      ...
+    # Subtest: a marker cannot be reused by a second operation
+    ok 12 - a marker cannot be reused by a second operation
+      ---
+      duration_ms: 13.777749
+      ...
+    # Subtest: the operations table rejects a non-hex operation key and a bad marker
+    ok 13 - the operations table rejects a non-hex operation key and a bad marker
+      ---
+      duration_ms: 15.570217
+      ...
+    # Subtest: DISCONNECT: unbinding leaves imported trades physically untouched
+    ok 14 - DISCONNECT: unbinding leaves imported trades physically untouched
+      ---
+      duration_ms: 27.426639
+      ...
+    # Subtest: DISCONNECT: the account is no longer syncable afterwards
+    ok 15 - DISCONNECT: the account is no longer syncable afterwards
+      ---
+      duration_ms: 8.662958
+      ...
+    # Subtest: DISCONNECT: a non-owner cannot unbind
+    ok 16 - DISCONNECT: a non-owner cannot unbind
+      ---
+      duration_ms: 7.895564
+      ...
+    # Subtest: DISCONNECT then RECONNECT: the freed id may be bound again
+    ok 17 - DISCONNECT then RECONNECT: the freed id may be bound again
+      ---
+      duration_ms: 5.165729
+      ...
+    # Subtest: no provisioning table can hold a secret-looking value
+    ok 18 - no provisioning table can hold a secret-looking value
+      ---
+      duration_ms: 6.597315
+      ...
+    1..18
+ok 1 - MetaAPI provisioning — real PostgreSQL
+  ---
+  duration_ms: 826.460373
+  ...
+# Subtest: AUD-03 atomicity — real PostgreSQL
+    # Subtest: HAPPY PATH: binding and its audit row commit together
+    ok 1 - HAPPY PATH: binding and its audit row commit together
+      ---
+      duration_ms: 9.499864
+      ...
+    # Subtest: ROLLBACK: an audit failure must leave NO binding committed
+    ok 2 - ROLLBACK: an audit failure must leave NO binding committed
+      ---
+      duration_ms: 11.176289
+      ...
+    # Subtest: ROLLBACK: a terminal-state failure must leave NO binding and NO audit row
+    ok 3 - ROLLBACK: a terminal-state failure must leave NO binding and NO audit row
+      ---
+      duration_ms: 6.857214
+      ...
+    # Subtest: the service's own connect path commits binding AND audit together
+    ok 4 - the service's own connect path commits binding AND audit together
+      ---
+      duration_ms: 15.193019
+      ...
+    # Subtest: SERVICE-LEVEL ROLLBACK: an audit failure inside connect() leaves NO binding
+    ok 5 - SERVICE-LEVEL ROLLBACK: an audit failure inside connect() leaves NO binding
+      ---
+      duration_ms: 15.622115
+      ...
+    # Subtest: BUILT-IN NEGATIVE CONTROL: without the transaction the AUD-03 defect reappears
+    ok 6 - BUILT-IN NEGATIVE CONTROL: without the transaction the AUD-03 defect reappears
+      ---
+      duration_ms: 11.053831
+      ...
+    1..6
+ok 2 - AUD-03 atomicity — real PostgreSQL
+  ---
+  duration_ms: 698.277467
+  ...
+1..2
+# tests 26
+# suites 0
+# pass 26
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1910.714611

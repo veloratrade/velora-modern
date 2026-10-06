@@ -1,0 +1,85 @@
+TAP version 13
+# Subtest: webhook_events deduplicates on (source, event_id) at the DATABASE level
+ok 1 - webhook_events deduplicates on (source, event_id) at the DATABASE level
+  ---
+  duration_ms: 624.935642
+  ...
+# Subtest: sync status is ownership scoped in SQL
+ok 2 - sync status is ownership scoped in SQL
+  ---
+  duration_ms: 509.783645
+  ...
+# Subtest: analytics reads exclude soft-deleted and quarantined trades and bucket by day
+ok 3 - analytics reads exclude soft-deleted and quarantined trades and bucket by day
+  ---
+  duration_ms: 608.212
+  ...
+# Subtest: tags: real UNIQUE, real CHECK, real ownership
+ok 4 - tags: real UNIQUE, real CHECK, real ownership
+  ---
+  duration_ms: 532.655389
+  ...
+# Subtest: attachments satisfy 0015's CHECK constraints and soft-delete
+ok 5 - attachments satisfy 0015's CHECK constraints and soft-delete
+  ---
+  duration_ms: 771.958391
+  ...
+# Subtest: subscriptions: the plan CHECK forces the checkout/downgrade split to hold
+ok 6 - subscriptions: the plan CHECK forces the checkout/downgrade split to hold
+  ---
+  duration_ms: 762.130559
+  ...
+# Subtest: AI coach: consent gates the read and the log vocabulary holds
+ok 7 - AI coach: consent gates the read and the log vocabulary holds
+  ---
+  duration_ms: 654.304032
+  ...
+# Subtest: admin metrics count real rows
+ok 8 - admin metrics count real rows
+  ---
+  duration_ms: 743.562054
+  ...
+# Subtest: portfolio aggregates per account with real numeric sums
+ok 9 - portfolio aggregates per account with real numeric sums
+  ---
+  duration_ms: 699.069013
+  ...
+# Subtest: EA keys resolve by hash and device tokens satisfy 0019's column contract
+ok 10 - EA keys resolve by hash and device tokens satisfy 0019's column contract
+  ---
+  duration_ms: 651.157007
+  ...
+# Subtest: public profiles and copy relationships obey 0020's constraints
+ok 11 - public profiles and copy relationships obey 0020's constraints
+  ---
+  duration_ms: 675.666832
+  ...
+# Subtest: developer keys: unique hash, scope whitelist, revocation
+ok 12 - developer keys: unique hash, scope whitelist, revocation
+  ---
+  duration_ms: 581.715286
+  ...
+# Subtest: PG v1.5: account groups write atomically and 0018 enforces ownership itself
+ok 13 - PG v1.5: account groups write atomically and 0018 enforces ownership itself
+  ---
+  duration_ms: 607.338369
+  ...
+# Subtest: PG v1.5: prop rules upsert is idempotent and round-trips exact values
+ok 14 - PG v1.5: prop rules upsert is idempotent and round-trips exact values
+  ---
+  duration_ms: 632.944049
+  ...
+# Subtest: PG v1.0: AI attempts are recorded with 0017's vocabulary, and the schema refuses the rest
+ok 15 - PG v1.0: AI attempts are recorded with 0017's vocabulary, and the schema refuses the rest
+  ---
+  duration_ms: 633.20313
+  ...
+1..15
+# tests 15
+# suites 0
+# pass 15
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 10229.830541

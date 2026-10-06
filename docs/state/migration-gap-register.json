@@ -369,7 +369,7 @@
     {
       "id": "MG-WORKER-DEPLOY",
       "section": "B",
-      "title": "Worker not deployed (no service definition; no scheduled job ever run)",
+      "title": "Worker deploy: service defined + least-privilege runtime proven locally (incl. first-ever MetaAPI sync tick); hosting deploy owner-gated",
       "status": "OPEN",
       "priority": "P1",
       "verification_state": "RECORDED_RUNTIME",
@@ -381,7 +381,10 @@
         "railway.json",
         "apps/worker/src/index.ts",
         "infra/docker-compose.yml",
-        "docs/evidence/WORKER-ONE-TICK-RUNTIME-PROOF-2026-10-03.md"
+        "docs/evidence/WORKER-ONE-TICK-RUNTIME-PROOF-2026-10-03.md",
+        "docs/evidence/WORKER-LEAST-PRIVILEGE-RUNTIME-EVIDENCE-2026-10-06.md",
+        "infra/Dockerfile.worker",
+        "docs/deployment-contract.md"
       ],
       "decisions": [
         "OD-AC-WORKER"
@@ -389,7 +392,9 @@
       "closure_criteria": "Worker service defined + one tick of each scheduler proven in a real environment",
       "note": "2026-10-04 (TRD-06 runtime check, local): with the API running against a fresh local PostgreSQL, `pgboss.queue` held ONLY the queues the local worker created — no pg-boss schema from any deployment — and a manual sync job sat in state `created` with `retry_count 0` until a worker started. The queue path is real and observable; in production it has no consumer until this gap closes.",
       "related": [],
-      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/NOT_VERIFIED, domain=OPEN/RECORDED_RUNTIME."
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/NOT_VERIFIED, domain=OPEN/RECORDED_RUNTIME.",
+      "closure_note": "2026-10-06 (AC-37) local-evidence half COMPLETE: full deployment-contract sequence executed on disposable real PostgreSQL 17.11 (provision pre/migrate-as-migrator/post, privilege grid 8/8 incl. negative checks); worker booted and ran as the REAL least-privilege velora_worker role (superuser caveat of the 2026-10-03 proof remedied for boot+tick); pg-boss timekeeper fired metaapi.sync-tick 7×/7 completed (first execution anywhere — previously token-gated), count=0 fail-closed with zero accounts; METAAPI_SYNC_CRON env override proven live (schedule row '* * * * *', other defaults unchanged) = AC-35 runtime evidence; graceful SIGTERM shutdown. Companion: ops:verify run as velora_worker surfaced+fixed a real probe bug (array_agg wire-string → hollow FK scan; now json_agg + fail-closed + 'constraints checked: 74'). REMAINING (owner/external-gated): actual hosting deploy (OD-AC-WORKER — Railway cannot declare a second service in-repo), FX tick (would call ECB), copy tick (no transport), real MetaAPI round-trip. Row stays OPEN on the deploy itself.",
+      "last_updated": "2026-10-06"
     },
     {
       "id": "MG-SEC-COOKIE",
@@ -898,7 +903,9 @@
         "ops/verify/verifyEnvironment.ts (read-only core: SELECT/catalog only)",
         "tools/ops-verify.mjs + npm run ops:verify (--json/--check, exit 1 on drift, exit 2 on failure, DSN masked, driver errors logged as code only)",
         "db/tests/opsVerify.test.ts AC36-01..06: clean verdict / missing-ledger drift / phantom-ledger drift / orphaned-FK drift with attribution / runtime SELECT-only spy / static write-DDL keyword scan — 6/6 pass",
-        "Full battery 1,343/1,343 pass, tsc -b clean (5 projects), secret-scan 0"
+        "Full battery 1,343/1,343 pass, tsc -b clean (5 projects), secret-scan 0",
+        "docs/evidence/WORKER-LEAST-PRIVILEGE-RUNTIME-EVIDENCE-2026-10-06.md §6 (live-PG probe run as velora_worker: nopriv recording + hollow-FK-scan bug found & fixed)",
+        "db/tests/opsVerify.test.ts now 7/7 (added AC36-06b least-privilege 42501 pin + fkConstraintsChecked >= 50 pin)"
       ],
       "decisions": [
         "OD-AC-CADENCE"
@@ -906,7 +913,7 @@
       "closure_criteria": "Modern equivalent or owner-dropped",
       "related": [],
       "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC.",
-      "closure_note": "Legacy probe capability decomposed (audit §17.1): (1) session-status report already covered by tools/agent-context.mjs (ADR-017); (2) backup probe already ported and extended in ops/backup/ (audit §17.2); (3) CI cost guard moot — GitHub Actions disabled per owner cost policy; (4) the remaining gap, the velora-mgmt read-only environment probe (inspect/verify templates), is now tools/ops-verify.mjs: server identity, migration ledger diff vs db/migrations files, per-table row counts, connection-user privilege audit (report-only), FK orphan scan. Read-only by construction and pinned two ways (runtime spy: every statement SELECT; static scan: no write/DDL keywords). No HTTP surface, no one-use FTP upload, no token gate needed — the modern deployment reality. Mutating legacy ops (migrate) remain the separately gated CLIs + ADR-012 backup gate. Per-domain recompute probes (PnL etc.) intentionally land with MG-DATA-MIGRATION, which reuses this core's primitives. Owner sign-off requested."
+      "closure_note": "Legacy probe capability decomposed (audit §17.1): (1) session-status report already covered by tools/agent-context.mjs (ADR-017); (2) backup probe already ported and extended in ops/backup/ (audit §17.2); (3) CI cost guard moot — GitHub Actions disabled per owner cost policy; (4) the remaining gap, the velora-mgmt read-only environment probe (inspect/verify templates), is now tools/ops-verify.mjs: server identity, migration ledger diff vs db/migrations files, per-table row counts, connection-user privilege audit (report-only), FK orphan scan. Read-only by construction and pinned two ways (runtime spy: every statement SELECT; static scan: no write/DDL keywords). No HTTP surface, no one-use FTP upload, no token gate needed — the modern deployment reality. Mutating legacy ops (migrate) remain the separately gated CLIs + ADR-012 backup gate. Per-domain recompute probes (PnL etc.) intentionally land with MG-DATA-MIGRATION, which reuses this core's primitives. Owner sign-off requested. HARDENED 2026-10-06 after the first live-PG run: least-privilege roles get a full report (42501 → 'nopriv' counts + 'fkUnverifiable' constraints, never a crash, never drift); a hollow-scan defect was found (node-pg returns array_agg(name) as a string → every FK constraint silently skipped → fabricated 'no orphans') and fixed fail-closed (json_agg + non-array payload aborts + the report prints how many constraints were actually checked). Lesson recorded: PGlite-backed tests alone cannot certify driver-serialization behavior."
     },
     {
       "id": "MG-DATA-MIGRATION",
@@ -925,7 +932,8 @@
         "tools/lib/legacyLoadGates.ts",
         "tools/legacyLoadGates.test.ts",
         "db/data-step/fixtures/legacy-export.FIXTURE/",
-        "ops/backup/evidence/load-rehearsal-20261004T095828Z.json"
+        "ops/backup/evidence/load-rehearsal-20261004T095828Z.json",
+        "ops/backup/evidence/load-rehearsal-20261006T044525Z.json (re-run at HEAD on disposable real PostgreSQL 17.11 — all gates PASS, verdict REHEARSAL_PASSED (SYNTHETIC FIXTURE))"
       ],
       "decisions": [
         "OD-AC-ADR004",
@@ -933,7 +941,7 @@
       ],
       "closure_criteria": "Sampling decided; rehearsal executed with full validation gates",
       "closure_note": "PARTIAL 2026-10-04 (Phase 4). The gates are now executable and refusing: tools/load_rehearsal.ts runs the A-gates (source/locale/leverage/direction vocabularies, money fraction digits, symbol canonicalisation, time census, canonical-email uniqueness, referential integrity, the v0.3 financial guards, and A12 field-level mapping), loads id-preservingly, then runs the B-gates plus gate 6 (PnL golden recomputation under the legacy rounding mode). A rehearsal was EXECUTED against a disposable PostgreSQL on the synthetic fixture: A-gates reported MAPPED/QUARANTINE/RECORDED, the load preserved ids (4 users / 3 accounts / 5 trades / 2 exits), row-count and money parity matched exactly (commission 16.50, swap -1.00, net 1484.50) and all 5 trades recomputed to their stored values including R at scale 4. BLOCKED on the owner (unchanged): (a) the ADR-004 naive-datetime sampling decision — unresolved rows were QUARANTINED, never interpreted; (b) a REAL export produced by the transform tool, which needs the read-only source access the audit registers as an owner decision. Also open: the legacy plan/subscription lifecycle has no target (see MG-SCHEMA-MAPPING).",
-      "last_updated": "2026-10-04",
+      "last_updated": "2026-10-06",
       "related": [],
       "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/RECORDED_RUNTIME, domain=OPEN/NOT_VERIFIED."
     },

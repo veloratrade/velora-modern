@@ -1,0 +1,36 @@
+TAP version 13
+# Subtest: schema-aware readiness on real PostgreSQL
+    # Subtest: reachable but UNMIGRATED → not ready (the deploy-safety case)
+    ok 1 - reachable but UNMIGRATED → not ready (the deploy-safety case)
+      ---
+      duration_ms: 483.736841
+      ...
+    # Subtest: reachable and migrated → ready
+    ok 2 - reachable and migrated → ready
+      ---
+      duration_ms: 357.691642
+      ...
+    # Subtest: tracking table present but EMPTY → not ready
+    ok 3 - tracking table present but EMPTY → not ready
+      ---
+      duration_ms: 240.329598
+      ...
+    # Subtest: unreachable database → not ready
+    ok 4 - unreachable database → not ready
+      ---
+      duration_ms: 6.750287
+      ...
+    1..4
+ok 1 - schema-aware readiness on real PostgreSQL
+  ---
+  duration_ms: 1090.605791
+  ...
+1..1
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1445.493076

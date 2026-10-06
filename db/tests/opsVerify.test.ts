@@ -17,6 +17,9 @@
 //   4. READ-ONLY by construction, pinned TWO ways: a runtime spy asserting
 //      every executed statement begins with SELECT, and a static scan of the
 //      core's source (comments stripped) for write/DDL keywords.
+//   5. LEAST-PRIVILEGE resilience: a 42501 (permission denied) on individual
+//      tables is RECORDED ("nopriv" / unverifiable FK) — the probe reports the
+//      privilege boundary instead of crashing or fabricating a finding.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
@@ -59,6 +62,10 @@ test("AC36-01 clean verdict on fully migrated instance", async () => {
     assert.deepEqual(result.unmigrated, []);
     assert.deepEqual(result.phantomLedgerEntries, []);
     assert.deepEqual(result.fkOrphans, []);
+    assert.ok(
+      result.fkConstraintsChecked >= 50,
+      `the FK scan must actually evaluate constraints (checked ${result.fkConstraintsChecked}) — a hollow scan must never report "no orphans"`,
+    );
     assert.equal(result.tableCounts["users"], 0, "users table must be inventoried");
     assert.equal(result.tableCounts["trades"], 0, "trades table must be inventoried");
     assert.ok(
@@ -136,6 +143,36 @@ test("AC36-05 verification core executes SELECT-only statements (runtime spy)", 
         `verification must be SELECT-only, got: ${sql.trimStart().slice(0, 80)}`,
       );
     }
+  });
+});
+
+test("AC36-06b least-privilege role: 42501 is recorded, never a crash", async () => {
+  // A role without SELECT on some tables (e.g. velora_worker vs audit_log)
+  // must still get a full report: denied counts surface as "nopriv", denied
+  // FK constraints surface as unverifiable — neither is drift, neither stops
+  // the run. The denial is privilege evidence, not a failure.
+  await withMigratedInstance(async (_q, engine) => {
+    const denied = new Set(["users", "user_sessions"]);
+    const partial = async (sql, params = []) => {
+      const fromMatch = /\bFROM\s+"?([a-z_]+)"?/i.exec(sql) ?? [];
+      const table = fromMatch[1];
+      if (table && denied.has(table)) {
+        const err = new Error("permission denied for table " + table) as NodeJS.ErrnoException;
+        err.code = "42501";
+        throw err;
+      }
+      return (await engine.query(sql, [...params])).rows;
+    };
+    const result = await runEnvironmentVerification(partial, migrationFileNames());
+
+    assert.equal(result.tableCounts["users"], "nopriv");
+    assert.equal(result.tableCounts["trades"], 0, "non-denied tables still counted");
+    assert.equal(result.drift, false, "a privilege boundary is not drift");
+    assert.ok(
+      result.fkUnverifiable.some((u) => u.reason === "nopriv"),
+      "denied FK constraints must be recorded as unverifiable",
+    );
+    assert.deepEqual(result.fkOrphans, [], "no fabricated orphan findings");
   });
 });
 

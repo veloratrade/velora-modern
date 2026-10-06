@@ -1,0 +1,30 @@
+TAP version 13
+# Subtest: PG: auth_events stores an unknown-account attempt with user_id NULL
+ok 1 - PG: auth_events stores an unknown-account attempt with user_id NULL
+  ---
+  duration_ms: 640.828058
+  ...
+# Subtest: PG: a success can never carry a failure reason (CHECK), and a failure keeps its code
+ok 2 - PG: a success can never carry a failure reason (CHECK), and a failure keeps its code
+  ---
+  duration_ms: 587.731709
+  ...
+# Subtest: PG: history is newest-first, filtered, paginated, and scoped to one user
+ok 3 - PG: history is newest-first, filtered, paginated, and scoped to one user
+  ---
+  duration_ms: 651.594681
+  ...
+# Subtest: PG: the history is append-only at the privilege layer, and a real login writes it
+ok 4 - PG: the history is append-only at the privilege layer, and a real login writes it
+  ---
+  duration_ms: 659.429683
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2876.541658

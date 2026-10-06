@@ -1,0 +1,40 @@
+TAP version 13
+# Subtest: PG: user lifecycle — create, find by email/id, password update, verify, timestamps
+ok 1 - PG: user lifecycle — create, find by email/id, password update, verify, timestamps
+  ---
+  duration_ms: 1188.230623
+  ...
+# Subtest: PG: duplicate email maps SQLSTATE 23505 → UserEmailExistsError
+ok 2 - PG: duplicate email maps SQLSTATE 23505 → UserEmailExistsError
+  ---
+  duration_ms: 1053.740874
+  ...
+# Subtest: PG: CONCURRENT duplicate create — exactly one row, losers get UserEmailExistsError
+ok 3 - PG: CONCURRENT duplicate create — exactly one row, losers get UserEmailExistsError
+  ---
+  duration_ms: 1094.169904
+  ...
+# Subtest: PG: sessions — create, find by refresh hash, rotate, revoke, revoke-all
+ok 4 - PG: sessions — create, find by refresh hash, rotate, revoke, revoke-all
+  ---
+  duration_ms: 1112.771762
+  ...
+# Subtest: PG: verifications — create, count-since, latest, consume, delete-all
+ok 5 - PG: verifications — create, count-since, latest, consume, delete-all
+  ---
+  duration_ms: 1075.445571
+  ...
+# Subtest: PG: preferences — locale patch, aiConsentAt set/null-clear, email prefs default + upsert
+ok 6 - PG: preferences — locale patch, aiConsentAt set/null-clear, email prefs default + upsert
+  ---
+  duration_ms: 1137.061875
+  ...
+1..6
+# tests 6
+# suites 0
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 7108.854074

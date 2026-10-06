@@ -1,0 +1,35 @@
+TAP version 13
+# Subtest: PG ownership: claim persists and reads back through the adapter
+ok 1 - PG ownership: claim persists and reads back through the adapter
+  ---
+  duration_ms: 115.222216
+  ...
+# Subtest: PG ownership: a second claim raises OwnershipAlreadyClaimedError
+ok 2 - PG ownership: a second claim raises OwnershipAlreadyClaimedError
+  ---
+  duration_ms: 86.863252
+  ...
+# Subtest: PG ownership: CONCURRENT claims — exactly one winner
+ok 3 - PG ownership: CONCURRENT claims — exactly one winner
+  ---
+  duration_ms: 116.829001
+  ...
+# Subtest: PG ownership: ON DELETE RESTRICT protects the owner's user row
+ok 4 - PG ownership: ON DELETE RESTRICT protects the owner's user row
+  ---
+  duration_ms: 92.696197
+  ...
+# Subtest: PG ownership: the FK rejects an owner id that does not exist
+ok 5 - PG ownership: the FK rejects an owner id that does not exist
+  ---
+  duration_ms: 49.842538
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 844.652204

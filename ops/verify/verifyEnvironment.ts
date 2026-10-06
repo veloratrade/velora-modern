@@ -30,6 +30,10 @@ export interface EnvironmentVerification {
   /** Per-table grants of the CURRENT connection user (report-only). */
   readonly privileges: ReadonlyArray<{ readonly table: string; readonly privs: string }>;
   readonly fkOrphans: readonly OrphanedFk[];
+  /** FK constraints whose rows this role may not read (least-privilege runs). */
+  readonly fkUnverifiable: ReadonlyArray<{ readonly constraint: string; readonly reason: string }>;
+  /** How many FK constraints the orphan scan actually evaluated. */
+  readonly fkConstraintsChecked: number;
   readonly drift: boolean;
 }
 
@@ -56,7 +60,11 @@ export async function runEnvironmentVerification(
   const unmigrated = files.filter((f) => !ledger.has(f));
   const phantomLedgerEntries = [...ledger].filter((name) => !fileSet.has(name));
 
-  // 3 — table inventory + exact row counts (pgboss internals skipped)
+  // 3 — table inventory + exact row counts (pgboss internals skipped).
+  // A table the connection may not count (42501) is recorded as "nopriv" —
+  // that denial is itself privilege evidence, not a failure: the probe must
+  // stay useful to a least-privilege role (legacy probe law: report what you
+  // can see, surface what you cannot).
   const tables = await q(
     `SELECT c.relname AS table_name
        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -70,8 +78,16 @@ export async function runEnvironmentVerification(
       tableCounts[name] = "-";
       continue;
     }
-    const exact = await q(`SELECT COUNT(*)::bigint AS n FROM "${name}"`);
-    tableCounts[name] = Number((exact[0] as Record<string, unknown>)["n"]);
+    try {
+      const exact = await q(`SELECT COUNT(*)::bigint AS n FROM "${name}"`);
+      tableCounts[name] = Number((exact[0] as Record<string, unknown>)["n"]);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "42501") {
+        tableCounts[name] = "nopriv";
+      } else {
+        throw err;
+      }
+    }
   }
 
   // 4 — privilege audit (report-only)
@@ -83,43 +99,69 @@ export async function runEnvironmentVerification(
   );
 
   // 5 — FK integrity: orphaned child rows per relationship (pairwise columns,
-  // NULLs excluded on the child side — a NULL FK does not reference anything)
+  // NULLs excluded on the child side — a NULL FK does not reference anything).
+  // Columns come back as json_agg (NOT array_agg): node-postgres does not
+  // deserialize name[] to a JS array, it returns the wire literal string —
+  // which made every constraint silently skippable in the live-PG path while
+  // PGlite (real arrays) hid the difference in tests. json is parsed by BOTH
+  // drivers, and an unusable column payload now FAILS CLOSED instead of skip.
   const fks = await q(
     `SELECT conname,
             conrelid::regclass::text AS child,
             confrelid::regclass::text AS parent,
-            (SELECT array_agg(a.attname ORDER BY x.ord)
+            (SELECT coalesce(json_agg(a.attname ORDER BY x.ord), '[]'::json)
                FROM unnest(conkey) WITH ORDINALITY AS x(attnum, ord)
                JOIN pg_attribute a ON a.attrelid = conrelid AND a.attnum = x.attnum) AS child_cols,
-            (SELECT array_agg(a.attname ORDER BY x.ord)
+            (SELECT coalesce(json_agg(a.attname ORDER BY x.ord), '[]'::json)
                FROM unnest(confkey) WITH ORDINALITY AS x(attnum, ord)
                JOIN pg_attribute a ON a.attrelid = confrelid AND a.attnum = x.attnum) AS parent_cols
        FROM pg_constraint
       WHERE contype = 'f' AND connamespace = 'public'::regnamespace`,
   );
   const fkOrphans: OrphanedFk[] = [];
+  const fkUnverifiable: Array<{ readonly constraint: string; readonly reason: string }> = [];
+  let fkConstraintsChecked = 0;
   for (const fk of fks) {
     const child = String(fk["child"]);
     const parent = String(fk["parent"]);
     const childCols = fk["child_cols"];
     const parentCols = fk["parent_cols"];
-    if (!Array.isArray(childCols) || !Array.isArray(parentCols)) continue;
+    if (!Array.isArray(childCols) || !Array.isArray(parentCols)) {
+      // FAIL CLOSED: a constraint whose column payload is not an array means
+      // the driver serialization changed — reporting "no orphans" without
+      // having looked would be a fabricated finding.
+      throw new Error(
+        `verifyEnvironment: fk ${String(fk["conname"])} returned non-array column payload (${typeof childCols}/${typeof parentCols}) — refusing to report an unverified scan`,
+      );
+    }
+    fkConstraintsChecked += 1;
     const predicate = (childCols as string[])
       .map((c, i) => `p."${(parentCols as string[])[i]!}" IS NOT DISTINCT FROM c."${c}"`)
       .join(" AND ");
     const notNull = (childCols as string[]).map((c) => `c."${c}" IS NOT NULL`).join(" AND ");
-    const rows = await q(
-      `SELECT COUNT(*)::bigint AS n FROM ${child} c
-        WHERE (${notNull}) AND NOT EXISTS (SELECT 1 FROM ${parent} p WHERE ${predicate})`,
-    );
-    const n = Number((rows[0] as Record<string, unknown>)["n"]);
-    if (n > 0) {
-      fkOrphans.push({
-        constraint: String(fk["conname"]),
-        child,
-        parent,
-        orphaned: n,
-      });
+    try {
+      const rows = await q(
+        `SELECT COUNT(*)::bigint AS n FROM ${child} c
+          WHERE (${notNull}) AND NOT EXISTS (SELECT 1 FROM ${parent} p WHERE ${predicate})`,
+      );
+      const n = Number((rows[0] as Record<string, unknown>)["n"]);
+      if (n > 0) {
+        fkOrphans.push({
+          constraint: String(fk["conname"]),
+          child,
+          parent,
+          orphaned: n,
+        });
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "42501") {
+        // Least-privilege connection: the constraint exists in the catalog
+        // but the rows are not readable to this role. Recorded, never a
+        // silent skip and never counted as drift.
+        fkUnverifiable.push({ constraint: String(fk["conname"]), reason: "nopriv" });
+      } else {
+        throw err;
+      }
     }
   }
 
@@ -136,6 +178,8 @@ export async function runEnvironmentVerification(
       privs: String(g["privs"]),
     })),
     fkOrphans,
+    fkUnverifiable,
+    fkConstraintsChecked,
     drift,
   };
 }

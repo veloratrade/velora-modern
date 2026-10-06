@@ -1,0 +1,80 @@
+TAP version 13
+# Subtest: 0027 — the audit vocabulary admits the two Phase 6 actions and still admits every earlier one
+ok 1 - 0027 — the audit vocabulary admits the two Phase 6 actions and still admits every earlier one
+  ---
+  duration_ms: 668.682317
+  ...
+# Subtest: 0027 — the migration is idempotent: a re-run keeps the vocabulary and the rows
+ok 2 - 0027 — the migration is idempotent: a re-run keeps the vocabulary and the rows
+  ---
+  duration_ms: 610.922401
+  ...
+# Subtest: OVERVIEW — counts exclude tombstoned trades and every group is consistent
+ok 3 - OVERVIEW — counts exclude tombstoned trades and every group is consistent
+  ---
+  duration_ms: 657.807729
+  ...
+# Subtest: TRADING ANALYTICS — half-open windows partition the data and money stays exact
+ok 4 - TRADING ANALYTICS — half-open windows partition the data and money stays exact
+  ---
+  duration_ms: 665.638062
+  ...
+# Subtest: USERS ANALYTICS — the registration trend counts only the window and reconciles with the total
+ok 5 - USERS ANALYTICS — the registration trend counts only the window and reconciles with the total
+  ---
+  duration_ms: 639.555791
+  ...
+# Subtest: SECURITY FEED — the newest first, filterable by result, and the total matches the filter
+ok 6 - SECURITY FEED — the newest first, filterable by result, and the total matches the filter
+  ---
+  duration_ms: 652.737491
+  ...
+# Subtest: PLATFORM LISTS — user scoping, status filter and tombstone rule hold on both lists
+ok 7 - PLATFORM LISTS — user scoping, status filter and tombstone rule hold on both lists
+  ---
+  duration_ms: 734.07033
+  ...
+# Subtest: AUDIT READ — the filters narrow, the total narrows with them, and the e-mails are joined
+ok 8 - AUDIT READ — the filters narrow, the total narrows with them, and the e-mails are joined
+  ---
+  duration_ms: 779.208007
+  ...
+# Subtest: REVOKE — the conditional writes refuse a foreign or already-revoked session and count what they changed
+ok 9 - REVOKE — the conditional writes refuse a foreign or already-revoked session and count what they changed
+  ---
+  duration_ms: 684.158456
+  ...
+# Subtest: VERIFY — the conditional update changes the row ONCE, even under a race, and the audit is transactional
+ok 10 - VERIFY — the conditional update changes the row ONCE, even under a race, and the audit is transactional
+  ---
+  duration_ms: 668.45039
+  ...
+# Subtest: VERIFY — a failed audit write rolls the grant back (the trail is part of the operation)
+ok 11 - VERIFY — a failed audit write rolls the grant back (the trail is part of the operation)
+  ---
+  duration_ms: 667.610869
+  ...
+# Subtest: REVOKE — a failed audit write rolls the revocation back too
+ok 12 - REVOKE — a failed audit write rolls the revocation back too
+  ---
+  duration_ms: 697.635147
+  ...
+# Subtest: HEALTH FACTS — the numbers come from the live catalogue, and the head is the newest migration
+ok 13 - HEALTH FACTS — the numbers come from the live catalogue, and the head is the newest migration
+  ---
+  duration_ms: 710.195428
+  ...
+# Subtest: DEVICES — the table is readable and honestly empty: nothing in Modern writes to it yet
+ok 14 - DEVICES — the table is readable and honestly empty: nothing in Modern writes to it yet
+  ---
+  duration_ms: 698.647402
+  ...
+1..14
+# tests 14
+# suites 0
+# pass 14
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 9838.214578

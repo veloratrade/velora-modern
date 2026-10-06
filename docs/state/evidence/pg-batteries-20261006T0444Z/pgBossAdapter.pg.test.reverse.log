@@ -1,0 +1,91 @@
+TAP version 13
+# Subtest: pgBossAdapter on real pg-boss
+    # Subtest: enqueue creates a REAL persisted job (not a silent null)
+    ok 1 - enqueue creates a REAL persisted job (not a silent null)
+      ---
+      duration_ms: 160.030257
+      ...
+    # Subtest: claim retrieves the real job with its descriptor intact
+    ok 2 - claim retrieves the real job with its descriptor intact
+      ---
+      duration_ms: 176.545138
+      ...
+    # Subtest: B7: attempts comes from pg-boss retryCount, not a hardcoded 0
+    ok 3 - B7: attempts comes from pg-boss retryCount, not a hardcoded 0
+      ---
+      duration_ms: 4717.590658
+      ...
+    # Subtest: complete() acknowledges and removes the job from the queue
+    ok 4 - complete() acknowledges and removes the job from the queue
+      ---
+      duration_ms: 256.996104
+      ...
+    # Subtest: retry is bounded by maxAttempts, then the job stops being delivered
+    ok 5 - retry is bounded by maxAttempts, then the job stops being delivered
+      ---
+      duration_ms: 8068.996425
+      ...
+    # Subtest: exhausted jobs land on the dead-letter queue
+    ok 6 - exhausted jobs land on the dead-letter queue
+      ---
+      duration_ms: 188.777623
+      ...
+    # Subtest: deadLetter() records a bounded, classified reason
+    ok 7 - deadLetter() records a bounded, classified reason
+      ---
+      duration_ms: 183.236082
+      ...
+    # Subtest: MG-OBS-7: schedule() stores a complete descriptor the timekeeper copies into fired jobs
+    ok 8 - MG-OBS-7: schedule() stores a complete descriptor the timekeeper copies into fired jobs
+      ---
+      duration_ms: 201.312685
+      ...
+    # Subtest: MG-OBS-7: a timekeeper-shaped job (data = the schedule's descriptor) runs end to end
+    ok 9 - MG-OBS-7: a timekeeper-shaped job (data = the schedule's descriptor) runs end to end
+      ---
+      duration_ms: 206.464004
+      ...
+    # Subtest: MG-OBS-7: a malformed job (empty data) is failed with a bounded reason, not a process crash
+    ok 10 - MG-OBS-7: a malformed job (empty data) is failed with a bounded reason, not a process crash
+      ---
+      duration_ms: 168.461383
+      ...
+    # Subtest: idempotent enqueue: the same key does not create a second job
+    ok 11 - idempotent enqueue: the same key does not create a second job
+      ---
+      duration_ms: 188.560972
+      ...
+    # Subtest: an unregistered job class is rejected instead of silently dropped
+    ok 12 - an unregistered job class is rejected instead of silently dropped
+      ---
+      duration_ms: 159.883955
+      ...
+    # Subtest: the runner drives a real queue end to end
+    ok 13 - the runner drives a real queue end to end
+      ---
+      duration_ms: 186.779837
+      ...
+    # Subtest: a handler failure dead-letters through the real queue, secret-free
+    ok 14 - a handler failure dead-letters through the real queue, secret-free
+      ---
+      duration_ms: 185.024433
+      ...
+    # Subtest: no secret from a job payload is persisted by the queue
+    ok 15 - no secret from a job payload is persisted by the queue
+      ---
+      duration_ms: 193.745428
+      ...
+    1..15
+ok 1 - pgBossAdapter on real pg-boss
+  ---
+  duration_ms: 15313.789775
+  ...
+1..1
+# tests 16
+# suites 0
+# pass 16
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 15656.296243

@@ -1,0 +1,80 @@
+TAP version 13
+# Subtest: PG D4 A1: MIXED RACE — createExit vs updateTrade (two service instances) → winner-set invariants, exact contracts, no lost event
+ok 1 - PG D4 A1: MIXED RACE — createExit vs updateTrade (two service instances) → winner-set invariants, exact contracts, no lost event
+  ---
+  duration_ms: 1236.36069
+  ...
+# Subtest: PG D4 A2: MIXED RACE — createExit vs deleteTrade (tombstone) → winner-set invariants; tombstone/no-tombstone consistency
+ok 2 - PG D4 A2: MIXED RACE — createExit vs deleteTrade (tombstone) → winner-set invariants; tombstone/no-tombstone consistency
+  ---
+  duration_ms: 1141.751127
+  ...
+# Subtest: PG D4 A3: MIXED RACE — updateTrade vs deleteTrade → winner-set invariants; loser exact contract; projection consistent
+ok 3 - PG D4 A3: MIXED RACE — updateTrade vs deleteTrade → winner-set invariants; loser exact contract; projection consistent
+  ---
+  duration_ms: 1170.497267
+  ...
+# Subtest: PG D4 B: different-trade concurrency — simultaneous edit/exit/tombstone all succeed; rows isolated; foreign user non-disclosing 404
+ok 4 - PG D4 B: different-trade concurrency — simultaneous edit/exit/tombstone all succeed; rows isolated; foreign user non-disclosing 404
+  ---
+  duration_ms: 1002.585926
+  ...
+# Subtest: PG D4 C: service-level stale CAS → exact 409 CONFLICT, no event written, version unchanged by loser
+ok 5 - PG D4 C: service-level stale CAS → exact 409 CONFLICT, no event written, version unchanged by loser
+  ---
+  duration_ms: 980.970876
+  ...
+# Subtest: PG D4 D1: concurrent FULL-volume exits (8 racers, two services) → exactly ONE success; losers exact 409/422; allocation exactly 1.0
+ok 6 - PG D4 D1: concurrent FULL-volume exits (8 racers, two services) → exactly ONE success; losers exact 409/422; allocation exactly 1.0
+  ---
+  duration_ms: 1139.537181
+  ...
+# Subtest: PG D4 D2: concurrent PARTIAL exits (8 × 0.2, two services) → every failure exact 409/422; allocation == 0.2 × successes exactly; never over-allocated
+ok 7 - PG D4 D2: concurrent PARTIAL exits (8 × 0.2, two services) → every failure exact 409/422; allocation == 0.2 × successes exactly; never over-allocated
+  ---
+  duration_ms: 1149.977216
+  ...
+# Subtest: PG D4 E: createExit vs deleteExit race → winner-set invariants; allocation increment/decrement stays exactly consistent
+ok 8 - PG D4 E: createExit vs deleteExit race → winner-set invariants; allocation increment/decrement stays exactly consistent
+  ---
+  duration_ms: 1282.325754
+  ...
+# Subtest: PG D4 F/N: tombstone finality — every mutation path non-disclosing 404; no resurrection; version frozen; no new events
+ok 9 - PG D4 F/N: tombstone finality — every mutation path non-disclosing 404; no resurrection; version frozen; no new events
+  ---
+  duration_ms: 1127.029462
+  ...
+# Subtest: PG D4 G: over-allocation → 422 with FULL rollback — no partial exit row, no partial event, projection intact (serial + concurrent)
+ok 10 - PG D4 G: over-allocation → 422 with FULL rollback — no partial exit row, no partial event, projection intact (serial + concurrent)
+  ---
+  duration_ms: 1069.6449
+  ...
+# Subtest: PG D4 H: lock release after failure — failed transactions release row locks; subsequent mutations complete within explicit timeouts
+ok 11 - PG D4 H: lock release after failure — failed transactions release row locks; subsequent mutations complete within explicit timeouts
+  ---
+  duration_ms: 1084.266131
+  ...
+# Subtest: PG D4 I/J: duplicate event_uid → honest constraint failure with FULL rollback (idempotency boundary; replay convergence is Phase H)
+ok 12 - PG D4 I/J: duplicate event_uid → honest constraint failure with FULL rollback (idempotency boundary; replay convergence is Phase H)
+  ---
+  duration_ms: 971.788483
+  ...
+# Subtest: PG D4 K: NUMERIC exactness after races — ADR-001 scales as exact strings through the whole race lifecycle
+ok 13 - PG D4 K: NUMERIC exactness after races — ADR-001 scales as exact strings through the whole race lifecycle
+  ---
+  duration_ms: 1040.754706
+  ...
+# Subtest: PG D4 L/M: no lost events + bounded replay — projection == fold(trade_events) for every raced sequence (ADR-002)
+ok 14 - PG D4 L/M: no lost events + bounded replay — projection == fold(trade_events) for every raced sequence (ADR-002)
+  ---
+  duration_ms: 1049.916289
+  ...
+1..14
+# tests 14
+# suites 0
+# pass 14
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 15873.037467

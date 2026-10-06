@@ -1,0 +1,96 @@
+TAP version 13
+# Subtest: D-6 sync substrate
+    # Subtest: migration is idempotent (re-running changes nothing)
+    ok 1 - migration is idempotent (re-running changes nothing)
+      ---
+      duration_ms: 15.033725
+      ...
+    # Subtest: cursor columns exist on trading_accounts and default to NULL
+    ok 2 - cursor columns exist on trading_accounts and default to NULL
+      ---
+      duration_ms: 6.124351
+      ...
+    # Subtest: last_sync_error_code accepts a CODE and rejects free text
+    ok 3 - last_sync_error_code accepts a CODE and rejects free text
+      ---
+      duration_ms: 5.411047
+      ...
+    # Subtest: CONCURRENT reservation: exactly one of two racing workers wins
+    ok 4 - CONCURRENT reservation: exactly one of two racing workers wins
+      ---
+      duration_ms: 31.599685
+      ...
+    # Subtest: a released reservation frees the account for a new one
+    ok 5 - a released reservation frees the account for a new one
+      ---
+      duration_ms: 7.403184
+      ...
+    # Subtest: STALE recovery: an expired lease is reclaimable and stays visible
+    ok 6 - STALE recovery: an expired lease is reclaimable and stays visible
+      ---
+      duration_ms: 4.964986
+      ...
+    # Subtest: a lease that expires before it is acquired is rejected
+    ok 7 - a lease that expires before it is acquired is rejected
+      ---
+      duration_ms: 2.861002
+      ...
+    # Subtest: IDEMPOTENCY: the same provider deal cannot be imported twice
+    ok 8 - IDEMPOTENCY: the same provider deal cannot be imported twice
+      ---
+      duration_ms: 5.463783
+      ...
+    # Subtest: the same provider deal id is allowed on a DIFFERENT account
+    ok 9 - the same provider deal id is allowed on a DIFFERENT account
+      ---
+      duration_ms: 9.177127
+      ...
+    # Subtest: OWNERSHIP: fills require real user and account references
+    ok 10 - OWNERSHIP: fills require real user and account references
+      ---
+      duration_ms: 3.071079
+      ...
+    # Subtest: OWNERSHIP: deleting an account removes its fills and reservations
+    ok 11 - OWNERSHIP: deleting an account removes its fills and reservations
+      ---
+      duration_ms: 20.002241
+      ...
+    # Subtest: TZ-M1: unresolved time must NOT carry a UTC instant
+    ok 12 - TZ-M1: unresolved time must NOT carry a UTC instant
+      ---
+      duration_ms: 11.747148
+      ...
+    # Subtest: TZ-M1: offset-explicit time resolves; raw text is retained verbatim
+    ok 13 - TZ-M1: offset-explicit time resolves; raw text is retained verbatim
+      ---
+      duration_ms: 16.653143
+      ...
+    # Subtest: broker_time_text exists and does NOT overload raw_time_text (D-5)
+    ok 14 - broker_time_text exists and does NOT overload raw_time_text (D-5)
+      ---
+      duration_ms: 9.677842
+      ...
+    # Subtest: QUARANTINE: the flag persists and defaults to false
+    ok 15 - QUARANTINE: the flag persists and defaults to false
+      ---
+      duration_ms: 6.306818
+      ...
+    # Subtest: A-1: TRADE_IMPORTED with actor 'sync' is accepted by the DB (no migration needed)
+    ok 16 - A-1: TRADE_IMPORTED with actor 'sync' is accepted by the DB (no migration needed)
+      ---
+      duration_ms: 5.904633
+      ...
+    1..16
+ok 1 - D-6 sync substrate
+  ---
+  duration_ms: 455.151658
+  ...
+1..1
+# tests 17
+# suites 0
+# pass 17
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 738.970759

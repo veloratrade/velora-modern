@@ -98,17 +98,20 @@ async function main() {
   console.log("");
   console.log("Tables (live row counts):");
   for (const [table, n] of Object.entries(result.tableCounts)) {
-    console.log(`${String(n).padStart(9)}  ${table}`);
+    console.log(`${String(n).padStart(9)}  ${table}${n === "nopriv" ? "   (no SELECT privilege as this role)" : ""}`);
   }
   console.log("");
   console.log("Privileges of this connection user (report-only):");
   for (const g of result.privileges) console.log(`  ${g.table}: ${g.privs}`);
   console.log("");
   console.log("FK integrity:");
+  console.log(`  constraints checked: ${result.fkConstraintsChecked}`);
   if (result.fkOrphans.length === 0) console.log("  ✓ no orphaned child rows");
   else
     for (const o of result.fkOrphans)
       console.log(`  ✗ ${o.constraint}: ${o.orphaned} orphaned rows in ${o.child} → ${o.parent}`);
+  for (const u of result.fkUnverifiable ?? [])
+    console.log(`  ⚠ ${u.constraint}: not verifiable as this role (${u.reason})`);
   console.log("");
   console.log(`VERDICT: ${result.drift ? "DRIFT" : "CLEAN"}`);
   return result.drift && checkMode ? 1 : 0;

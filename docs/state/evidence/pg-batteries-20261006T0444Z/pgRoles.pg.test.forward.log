@@ -1,0 +1,125 @@
+TAP version 13
+# Subtest: PG D5 P1: all four roles exist after applying the privilege layer
+ok 1 - PG D5 P1: all four roles exist after applying the privilege layer
+  ---
+  duration_ms: 1054.694275
+  ...
+# Subtest: PG D5 P2: roles.sql is idempotent — re-applying twice is a clean no-op
+ok 2 - PG D5 P2: roles.sql is idempotent — re-applying twice is a clean no-op
+  ---
+  duration_ms: 777.24593
+  ...
+# Subtest: PG D5 P3: app_readwrite CAN INSERT into trade_events (append allowed)
+ok 3 - PG D5 P3: app_readwrite CAN INSERT into trade_events (append allowed)
+  ---
+  duration_ms: 913.503398
+  ...
+# Subtest: PG D5 P4: app_readwrite CANNOT UPDATE trade_events → 42501
+ok 4 - PG D5 P4: app_readwrite CANNOT UPDATE trade_events → 42501
+  ---
+  duration_ms: 818.661664
+  ...
+# Subtest: PG D5 P5: app_readwrite CANNOT DELETE trade_events → 42501
+ok 5 - PG D5 P5: app_readwrite CANNOT DELETE trade_events → 42501
+  ---
+  duration_ms: 878.489307
+  ...
+# Subtest: PG D5 P6: app_readwrite CANNOT UPDATE/DELETE webhook_events → 42501
+ok 6 - PG D5 P6: app_readwrite CANNOT UPDATE/DELETE webhook_events → 42501
+  ---
+  duration_ms: 791.815158
+  ...
+# Subtest: PG D5 P7: velora_worker CAN INSERT into both ledger tables (append allowed)
+ok 7 - PG D5 P7: velora_worker CAN INSERT into both ledger tables (append allowed)
+  ---
+  duration_ms: 843.095416
+  ...
+# Subtest: PG D5 P8: velora_worker CANNOT UPDATE/DELETE either ledger table → 42501
+ok 8 - PG D5 P8: velora_worker CANNOT UPDATE/DELETE either ledger table → 42501
+  ---
+  duration_ms: 779.149639
+  ...
+# Subtest: PG D5 P9: app_readwrite retains full DML on ordinary application tables
+ok 9 - PG D5 P9: app_readwrite retains full DML on ordinary application tables
+  ---
+  duration_ms: 1192.569183
+  ...
+# Subtest: PG D5 P10: velora_readonly CAN SELECT
+ok 10 - PG D5 P10: velora_readonly CAN SELECT
+  ---
+  duration_ms: 856.679424
+  ...
+# Subtest: PG D5 P11: velora_readonly CANNOT INSERT/UPDATE/DELETE → 42501
+ok 11 - PG D5 P11: velora_readonly CANNOT INSERT/UPDATE/DELETE → 42501
+  ---
+  duration_ms: 836.925511
+  ...
+# Subtest: PG D5 P12: velora_migrator can perform schema DDL (CREATE/ALTER/DROP)
+ok 12 - PG D5 P12: velora_migrator can perform schema DDL (CREATE/ALTER/DROP)
+  ---
+  duration_ms: 837.526724
+  ...
+# Subtest: PG D5 P13: velora_migrator holds NO runtime DML on application tables → 42501
+ok 13 - PG D5 P13: velora_migrator holds NO runtime DML on application tables → 42501
+  ---
+  duration_ms: 857.879752
+  ...
+# Subtest: PG D5 P14: least privilege does not break the exit path — trigger UPDATEs trades as invoker
+ok 14 - PG D5 P14: least privilege does not break the exit path — trigger UPDATEs trades as invoker
+  ---
+  duration_ms: 890.474901
+  ...
+# Subtest: PG D5 P14b: over-allocation still rejected under app_readwrite (guard intact)
+ok 15 - PG D5 P14b: over-allocation still rejected under app_readwrite (guard intact)
+  ---
+  duration_ms: 858.819709
+  ...
+# Subtest: PG D5 P15: ALTER DEFAULT PRIVILEGES covers FUTURE migrator-created tables
+ok 16 - PG D5 P15: ALTER DEFAULT PRIVILEGES covers FUTURE migrator-created tables
+  ---
+  duration_ms: 921.99648
+  ...
+# Subtest: PG D5 P15b: DOCUMENTED RESIDUAL RISK — a future ledger table is NOT append-only automatically
+ok 17 - PG D5 P15b: DOCUMENTED RESIDUAL RISK — a future ledger table is NOT append-only automatically
+  ---
+  duration_ms: 884.353388
+  ...
+# Subtest: PG D5 P16: no unnecessary privileges — PUBLIC cannot CREATE in schema public
+ok 18 - PG D5 P16: no unnecessary privileges — PUBLIC cannot CREATE in schema public
+  ---
+  duration_ms: 868.851871
+  ...
+# Subtest: PG D5 P17: velora_worker has NO privilege of any kind on provisioning_operations
+ok 19 - PG D5 P17: velora_worker has NO privilege of any kind on provisioning_operations
+  ---
+  duration_ms: 855.153914
+  ...
+# Subtest: PG D5 P17b: velora_worker attempting to read or write provisioning_operations → 42501
+ok 20 - PG D5 P17b: velora_worker attempting to read or write provisioning_operations → 42501
+  ---
+  duration_ms: 819.310778
+  ...
+# Subtest: PG D5 P17c: the API role can run the operation state machine but cannot erase the evidence
+ok 21 - PG D5 P17c: the API role can run the operation state machine but cannot erase the evidence
+  ---
+  duration_ms: 879.980606
+  ...
+# Subtest: PG D5 P18: the audit trail's new account reference does not weaken append-only
+ok 22 - PG D5 P18: the audit trail's new account reference does not weaken append-only
+  ---
+  duration_ms: 917.058677
+  ...
+# Subtest: PG D5 P19: sync_position_state is a mutable workflow table with an unerasable history (0029)
+ok 23 - PG D5 P19: sync_position_state is a mutable workflow table with an unerasable history (0029)
+  ---
+  duration_ms: 972.7858
+  ...
+1..23
+# tests 23
+# suites 0
+# pass 23
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 20634.37661

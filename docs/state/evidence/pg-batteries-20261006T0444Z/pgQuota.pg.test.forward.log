@@ -1,0 +1,30 @@
+TAP version 13
+# Subtest: PG: D3 quota — normal create works, second create → EXACT 429 contract
+ok 1 - PG: D3 quota — normal create works, second create → EXACT 429 contract
+  ---
+  duration_ms: 1114.170315
+  ...
+# Subtest: PG: D3 CONCURRENT — free plan (max 1): 8 creates across TWO service instances → exactly one success
+ok 2 - PG: D3 CONCURRENT — free plan (max 1): 8 creates across TWO service instances → exactly one success
+  ---
+  duration_ms: 851.361997
+  ...
+# Subtest: PG: D3 CONCURRENT — pro plan (unlimited): all 8 succeed, no guard interference
+ok 3 - PG: D3 CONCURRENT — pro plan (unlimited): all 8 succeed, no guard interference
+  ---
+  duration_ms: 713.474678
+  ...
+# Subtest: PG: D3 DB failure surfaces as failure — never a false success or false quota verdict
+ok 4 - PG: D3 DB failure surfaces as failure — never a false success or false quota verdict
+  ---
+  duration_ms: 3.159414
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3041.573414

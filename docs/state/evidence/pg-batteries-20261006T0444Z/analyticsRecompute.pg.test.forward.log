@@ -1,0 +1,75 @@
+TAP version 13
+# Subtest: PG: one day's figures are exact and satisfy 0016's scales and signs
+ok 1 - PG: one day's figures are exact and satisfy 0016's scales and signs
+  ---
+  duration_ms: 368.605827
+  ...
+# Subtest: PG: the day bucket follows the ACCOUNT timezone, and the basis is recorded per row
+ok 2 - PG: the day bucket follows the ACCOUNT timezone, and the basis is recorded per row
+  ---
+  duration_ms: 283.488227
+  ...
+# Subtest: PG: two runs are byte-identical, and the upsert converges on one row per key
+ok 3 - PG: two runs are byte-identical, and the upsert converges on one row per key
+  ---
+  duration_ms: 306.405124
+  ...
+# Subtest: PG: an open trade has no attributable result and is excluded, while the partition stays exact
+ok 4 - PG: an open trade has no attributable result and is excluded, while the partition stays exact
+  ---
+  duration_ms: 289.097219
+  ...
+# Subtest: PG: convergence — a deleted trade removes the derived row it justified
+ok 5 - PG: convergence — a deleted trade removes the derived row it justified
+  ---
+  duration_ms: 321.355993
+  ...
+# Subtest: PG: an unusable stored timezone degrades one basis to UTC instead of failing the job
+ok 6 - PG: an unusable stored timezone degrades one basis to UTC instead of failing the job
+  ---
+  duration_ms: 301.878357
+  ...
+# Subtest: PG: a window beyond the cap fails loudly and writes NOTHING
+ok 7 - PG: a window beyond the cap fails loudly and writes NOTHING
+  ---
+  duration_ms: 315.403944
+  ...
+# Subtest: PG: the writer is confined to the user it was asked about
+ok 8 - PG: the writer is confined to the user it was asked about
+  ---
+  duration_ms: 304.062121
+  ...
+# Subtest: PG: the account summary aggregates the full history and carries peak/trough
+ok 9 - PG: the account summary aggregates the full history and carries peak/trough
+  ---
+  duration_ms: 395.905894
+  ...
+# Subtest: PG: a deleted trade brings its user BACK into the due set, and the run removes the stale row
+ok 10 - PG: a deleted trade brings its user BACK into the due set, and the run removes the stale row
+  ---
+  duration_ms: 342.573851
+  ...
+# Subtest: PG: an edited trade re-enters the due set, and a quarantined ledger is caught without a bump
+ok 11 - PG: an edited trade re-enters the due set, and a quarantined ledger is caught without a bump
+  ---
+  duration_ms: 438.712367
+  ...
+# Subtest: PG: an orphaned account summary is due; a merely stale one for an inactive account is not
+ok 12 - PG: an orphaned account summary is due; a merely stale one for an inactive account is not
+  ---
+  duration_ms: 404.15441
+  ...
+# Subtest: PG: the tick's window is the documented default and the due set is bounded
+ok 13 - PG: the tick's window is the documented default and the due set is bounded
+  ---
+  duration_ms: 433.186616
+  ...
+1..13
+# tests 13
+# suites 0
+# pass 13
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 4880.636854

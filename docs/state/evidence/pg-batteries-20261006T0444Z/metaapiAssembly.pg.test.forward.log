@@ -1,0 +1,56 @@
+TAP version 13
+# Subtest: MetaAPI position assembly
+    # Subtest: cross-batch completion: IN in batch 1, OUT in batch 2 → ONE position trade
+    ok 1 - cross-batch completion: IN in batch 1, OUT in batch 2 → ONE position trade
+      ---
+      duration_ms: 46.658293
+      ...
+    # Subtest: scaled-in + partial close through the real SQL path: VWAP both sides, Σ-IN volume
+    ok 2 - scaled-in + partial close through the real SQL path: VWAP both sides, Σ-IN volume
+      ---
+      duration_ms: 26.868955
+      ...
+    # Subtest: terminal skips are durable: close_before_open and unknown_direction
+    ok 3 - terminal skips are durable: close_before_open and unknown_direction
+      ---
+      duration_ms: 32.597005
+      ...
+    # Subtest: a LATER fill re-opens an aggregated position and re-assessment converges (no duplicate)
+    ok 4 - a LATER fill re-opens an aggregated position and re-assessment converges (no duplicate)
+      ---
+      duration_ms: 24.681637
+      ...
+    # Subtest: a lone OUT fill is repairable (missing_open_fill), never a half-trade
+    ok 5 - a lone OUT fill is repairable (missing_open_fill), never a half-trade
+      ---
+      duration_ms: 8.803017
+      ...
+    # Subtest: keyless and balance deals are ledgered as evidence but never assessed
+    ok 6 - keyless and balance deals are ledgered as evidence but never assessed
+      ---
+      duration_ms: 11.586656
+      ...
+    # Subtest: self-healing: ledgered fills with NO state row (pre-0029 data) are assessed on the next sync
+    ok 7 - self-healing: ledgered fills with NO state row (pre-0029 data) are assessed on the next sync
+      ---
+      duration_ms: 13.899015
+      ...
+    # Subtest: concurrent imports of the same position converge to exactly one trade
+    ok 8 - concurrent imports of the same position converge to exactly one trade
+      ---
+      duration_ms: 26.756253
+      ...
+    1..8
+ok 1 - MetaAPI position assembly
+  ---
+  duration_ms: 1828.527512
+  ...
+1..1
+# tests 9
+# suites 0
+# pass 9
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2280.390058

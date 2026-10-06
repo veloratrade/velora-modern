@@ -1,0 +1,20 @@
+TAP version 13
+# Subtest: PG FX: the ingested rate set round-trips exactly and the job is idempotent
+ok 1 - PG FX: the ingested rate set round-trips exactly and the job is idempotent
+  ---
+  duration_ms: 306.069826
+  ...
+# Subtest: PG FX: the schema's constraints are the ingestion's real guard rails
+ok 2 - PG FX: the schema's constraints are the ingestion's real guard rails
+  ---
+  duration_ms: 328.892774
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 950.471145

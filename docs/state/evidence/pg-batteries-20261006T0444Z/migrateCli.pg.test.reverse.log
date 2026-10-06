@@ -1,0 +1,41 @@
+TAP version 13
+# Subtest: deploy safety on real PostgreSQL
+    # Subtest: the historical false-success invocation now really migrates
+    ok 1 - the historical false-success invocation now really migrates
+      ---
+      duration_ms: 1292.833677
+      ...
+    # Subtest: reported head matches the database and every migration on disk is applied
+    ok 2 - reported head matches the database and every migration on disk is applied
+      ---
+      duration_ms: 768.028967
+      ...
+    # Subtest: MIGRATION_DATABASE_URL wins deterministically over DATABASE_URL
+    ok 3 - MIGRATION_DATABASE_URL wins deterministically over DATABASE_URL
+      ---
+      duration_ms: 858.740428
+      ...
+    # Subtest: re-running is idempotent and still reports the head
+    ok 4 - re-running is idempotent and still reports the head
+      ---
+      duration_ms: 1052.656966
+      ...
+    # Subtest: an unreachable database leaves no false success and no partial schema
+    ok 5 - an unreachable database leaves no false success and no partial schema
+      ---
+      duration_ms: 325.898582
+      ...
+    1..5
+ok 1 - deploy safety on real PostgreSQL
+  ---
+  duration_ms: 4300.496059
+  ...
+1..1
+# tests 6
+# suites 0
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 4573.686483

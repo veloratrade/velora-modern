@@ -1,0 +1,70 @@
+TAP version 13
+# Subtest: PG-AI: 0028's seed statements are idempotent and carry Legacy's default posture
+ok 1 - PG-AI: 0028's seed statements are idempotent and carry Legacy's default posture
+  ---
+  duration_ms: 666.139409
+  ...
+# Subtest: PG-AI: the closed vocabularies refuse a provider, feature, route or flag nobody declared
+ok 2 - PG-AI: the closed vocabularies refuse a provider, feature, route or flag nobody declared
+  ---
+  duration_ms: 632.703771
+  ...
+# Subtest: PG-AI: one entry per provider per feature, so a chain is an order and not a multiset
+ok 3 - PG-AI: one entry per provider per feature, so a chain is an order and not a multiset
+  ---
+  duration_ms: 576.660631
+  ...
+# Subtest: PG-AI: a disabled entry leaves the chain, and reorder is atomic
+ok 4 - PG-AI: a disabled entry leaves the chain, and reorder is atomic
+  ---
+  duration_ms: 579.189251
+  ...
+# Subtest: PG-AI: the quota reservation is atomic — twenty racers, five units, five winners
+ok 5 - PG-AI: the quota reservation is atomic — twenty racers, five units, five winners
+  ---
+  duration_ms: 620.999081
+  ...
+# Subtest: PG-AI: a rolled-over window resets the counter instead of refusing forever
+ok 6 - PG-AI: a rolled-over window resets the counter instead of refusing forever
+  ---
+  duration_ms: 666.239982
+  ...
+# Subtest: PG-AI: the encrypted envelope survives bytea and the nonce cannot be reused
+ok 7 - PG-AI: the encrypted envelope survives bytea and the nonce cannot be reused
+  ---
+  duration_ms: 597.800858
+  ...
+# Subtest: PG-AI: credential metadata derives `verified` from the status and bumps the version on replacement
+ok 8 - PG-AI: credential metadata derives `verified` from the status and bumps the version on replacement
+  ---
+  duration_ms: 616.248733
+  ...
+# Subtest: PG-AI: the ledger takes the phase-7 vocabulary and refuses a malformed chain column
+ok 9 - PG-AI: the ledger takes the phase-7 vocabulary and refuses a malformed chain column
+  ---
+  duration_ms: 653.775833
+  ...
+# Subtest: PG-AI: feedback refuses a correction that changes nothing
+ok 10 - PG-AI: feedback refuses a correction that changes nothing
+  ---
+  duration_ms: 679.514121
+  ...
+# Subtest: PG-AI: the usage drilldown reads the ONE ledger and totals it correctly
+ok 11 - PG-AI: the usage drilldown reads the ONE ledger and totals it correctly
+  ---
+  duration_ms: 678.984551
+  ...
+# Subtest: PG-AI: settings hold the admin route and refuse anything outside the allowlist
+ok 12 - PG-AI: settings hold the admin route and refuse anything outside the allowlist
+  ---
+  duration_ms: 686.690715
+  ...
+1..12
+# tests 12
+# suites 0
+# pass 12
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 7931.193377

@@ -1,0 +1,80 @@
+TAP version 13
+# Subtest: 0026 — the support tables, functions, indexes and constraints exist after migration
+ok 1 - 0026 — the support tables, functions, indexes and constraints exist after migration
+  ---
+  duration_ms: 1331.584269
+  ...
+# Subtest: 0026 — the migration is idempotent: re-running it leaves the schema intact and the data alone
+ok 2 - 0026 — the migration is idempotent: re-running it leaves the schema intact and the data alone
+  ---
+  duration_ms: 1235.294081
+  ...
+# Subtest: create — a ticket opens for the admin, with one unread message for them and nothing unread for the user
+ok 3 - create — a ticket opens for the admin, with one unread message for them and nothing unread for the user
+  ---
+  duration_ms: 1143.76976
+  ...
+# Subtest: append — a user message hands the ticket to the admin and raises ONLY the admin's counter
+ok 4 - append — a user message hands the ticket to the admin and raises ONLY the admin's counter
+  ---
+  duration_ms: 1220.724069
+  ...
+# Subtest: append — the first-reply sentinel is stamped ONCE, by the first admin TEXT reply only
+ok 5 - append — the first-reply sentinel is stamped ONCE, by the first admin TEXT reply only
+  ---
+  duration_ms: 1228.325573
+  ...
+# Subtest: append — AN INTERNAL NOTE MOVES NOTHING: not status, not waiting_for, not a counter, not the sentinel
+ok 6 - append — AN INTERNAL NOTE MOVES NOTHING: not status, not waiting_for, not a counter, not the sentinel
+  ---
+  duration_ms: 1079.919489
+  ...
+# Subtest: append — a closed or archived ticket refuses the message and inserts NOTHING (require_live)
+ok 7 - append — a closed or archived ticket refuses the message and inserts NOTHING (require_live)
+  ---
+  duration_ms: 1197.837433
+  ...
+# Subtest: transition — compare-and-set: a stale `from` returns no row instead of overwriting
+ok 8 - transition — compare-and-set: a stale `from` returns no row instead of overwriting
+  ---
+  duration_ms: 1109.934442
+  ...
+# Subtest: transition — the API turns a lost compare-and-set into a 409, never a silent success
+ok 9 - transition — the API turns a lost compare-and-set into a 409, never a silent success
+  ---
+  duration_ms: 1203.373105
+  ...
+# Subtest: CONCURRENCY — two simultaneous user replies both count: no lost increment, no torn state
+ok 10 - CONCURRENCY — two simultaneous user replies both count: no lost increment, no torn state
+  ---
+  duration_ms: 1156.847795
+  ...
+# Subtest: CONCURRENCY — a reply racing a close cannot land in a closed ticket
+ok 11 - CONCURRENCY — a reply racing a close cannot land in a closed ticket
+  ---
+  duration_ms: 1178.783683
+  ...
+# Subtest: CONSTRAINTS — the two axes cannot disagree, and a message must have a coherent author
+ok 12 - CONSTRAINTS — the two axes cannot disagree, and a message must have a coherent author
+  ---
+  duration_ms: 1374.587422
+  ...
+# Subtest: INTEGRITY — deleting a user takes their tickets; a deleted ADMIN's replies survive, unattributed
+ok 13 - INTEGRITY — deleting a user takes their tickets; a deleted ADMIN's replies survive, unattributed
+  ---
+  duration_ms: 1618.752187
+  ...
+# Subtest: PgSupportStore — the adapter's own queries behave: scoping, ILIKE escaping, counters, read markers
+ok 14 - PgSupportStore — the adapter's own queries behave: scoping, ILIKE escaping, counters, read markers
+  ---
+  duration_ms: 1196.080766
+  ...
+1..14
+# tests 14
+# suites 0
+# pass 14
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 17627.782664

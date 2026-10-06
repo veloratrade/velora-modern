@@ -1,0 +1,55 @@
+TAP version 13
+# Subtest: 0025 — a complete CLOSED trade is accepted (the guards do not reject valid history)
+ok 1 - 0025 — a complete CLOSED trade is accepted (the guards do not reject valid history)
+  ---
+  duration_ms: 271.396171
+  ...
+# Subtest: 0025 — an OPEN trade with no exit, no PnL and no close instant is accepted (the state Modern adds over Legacy)
+ok 2 - 0025 — an OPEN trade with no exit, no PnL and no close instant is accepted (the state Modern adds over Legacy)
+  ---
+  duration_ms: 248.894123
+  ...
+# Subtest: 0025 — entry price, exit price, contract size, stop loss and take profit must be positive
+ok 3 - 0025 — entry price, exit price, contract size, stop loss and take profit must be positive
+  ---
+  duration_ms: 270.70565
+  ...
+# Subtest: 0025 — a stop loss / take profit is either absent or positive, never zero
+ok 4 - 0025 — a stop loss / take profit is either absent or positive, never zero
+  ---
+  duration_ms: 268.586576
+  ...
+# Subtest: 0025 — a close instant before the open instant is refused; equal instants are allowed
+ok 5 - 0025 — a close instant before the open instant is refused; equal instants are allowed
+  ---
+  duration_ms: 271.311808
+  ...
+# Subtest: 0025 — a CLOSED trade must carry exit price, realized PnL and a close instant together
+ok 6 - 0025 — a CLOSED trade must carry exit price, realized PnL and a close instant together
+  ---
+  duration_ms: 285.69724
+  ...
+# Subtest: 0025 — a partial exit must have a positive price and volume (Legacy's trade_exits guard, migrated)
+ok 7 - 0025 — a partial exit must have a positive price and volume (Legacy's trade_exits guard, migrated)
+  ---
+  duration_ms: 254.990763
+  ...
+# Subtest: 0025 — the migration is idempotent: re-applying its statements over existing data is a no-op
+ok 8 - 0025 — the migration is idempotent: re-applying its statements over existing data is a no-op
+  ---
+  duration_ms: 365.128451
+  ...
+# Subtest: 0025 — applied to a database holding a stale unresolved row the migration FAILS LOUDLY (never repairs, never ignores)
+ok 9 - 0025 — applied to a database holding a stale unresolved row the migration FAILS LOUDLY (never repairs, never ignores)
+  ---
+  duration_ms: 476.752254
+  ...
+1..9
+# tests 9
+# suites 0
+# pass 9
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2951.283165

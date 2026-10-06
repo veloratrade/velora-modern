@@ -1,0 +1,40 @@
+TAP version 13
+# Subtest: PG: a live key resolves to its owner, scopes and stored limit
+ok 1 - PG: a live key resolves to its owner, scopes and stored limit
+  ---
+  duration_ms: 414.754141
+  ...
+# Subtest: PG: revoked and unknown keys are indistinguishable (both null)
+ok 2 - PG: revoked and unknown keys are indistinguishable (both null)
+  ---
+  duration_ms: 375.464578
+  ...
+# Subtest: PG: `last_used_at` is throttled bookkeeping, never an authorization input
+ok 3 - PG: `last_used_at` is throttled bookkeeping, never an authorization input
+  ---
+  duration_ms: 337.463991
+  ...
+# Subtest: PG: the guard authorizes the stored scopes and refuses everything else
+ok 4 - PG: the guard authorizes the stored scopes and refuses everything else
+  ---
+  duration_ms: 363.001021
+  ...
+# Subtest: PG: the per-key window is enforced by the shared store (limit and Retry-After)
+ok 5 - PG: the per-key window is enforced by the shared store (limit and Retry-After)
+  ---
+  duration_ms: 371.952971
+  ...
+# Subtest: PG: the guard's bookkeeping cannot turn a valid request into a failure
+ok 6 - PG: the guard's bookkeeping cannot turn a valid request into a failure
+  ---
+  duration_ms: 369.769768
+  ...
+1..6
+# tests 6
+# suites 0
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2547.536276

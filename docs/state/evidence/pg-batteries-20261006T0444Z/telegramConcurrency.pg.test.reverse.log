@@ -1,0 +1,56 @@
+TAP version 13
+# Subtest: LINK RACE: two Telegram identities consume one token at the same instant — exactly one SUCCESS, one REJECTED
+ok 1 - LINK RACE: two Telegram identities consume one token at the same instant — exactly one SUCCESS, one REJECTED
+  ---
+  duration_ms: 363.30463
+  ...
+# Subtest: LINK RACE (lock-forced): two spenders WAIT on the same row lock and still produce one link
+ok 2 - LINK RACE (lock-forced): two spenders WAIT on the same row lock and still produce one link
+  ---
+  duration_ms: 892.590743
+  ...
+# Subtest: LINK RACE: the SAME Telegram identity sends the same token twice — one link, one audit row, no duplicate
+ok 3 - LINK RACE: the SAME Telegram identity sends the same token twice — one link, one audit row, no duplicate
+  ---
+  duration_ms: 312.560329
+  ...
+# Subtest: LINK RACE: an EXPIRED token loses to the clock even under concurrency (no last-moment spend)
+ok 4 - LINK RACE: an EXPIRED token loses to the clock even under concurrency (no last-moment spend)
+  ---
+  duration_ms: 363.680848
+  ...
+# Subtest: UPDATE RACE: the same update_id is claimed once — the replay is ignored
+ok 5 - UPDATE RACE: the same update_id is claimed once — the replay is ignored
+  ---
+  duration_ms: 265.151733
+  ...
+# Subtest: DRAFT RACE: two confirmation presses on one draft — exactly one claim wins
+ok 6 - DRAFT RACE: two confirmation presses on one draft — exactly one claim wins
+  ---
+  duration_ms: 245.761023
+  ...
+# Subtest: CHANNEL RACE: one trade is enqueued to a channel once, even when two publishers try
+ok 7 - CHANNEL RACE: one trade is enqueued to a channel once, even when two publishers try
+  ---
+  duration_ms: 323.680941
+  ...
+# Subtest: AUDIT UNDER RACE: the trail has no gap and no duplicate when the same action is attempted twice
+ok 8 - AUDIT UNDER RACE: the trail has no gap and no duplicate when the same action is attempted twice
+  ---
+  duration_ms: 348.567598
+  ...
+# REAL-PG EVIDENCE: PostgreSQL 17.11 (Debian 17.11-0+deb13u1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+# Subtest: EVIDENCE: the battery ran against the engine named in the record
+ok 9 - EVIDENCE: the battery ran against the engine named in the record
+  ---
+  duration_ms: 618.668638
+  ...
+1..9
+# tests 9
+# suites 0
+# pass 9
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 4092.106165

@@ -1,0 +1,41 @@
+TAP version 13
+# Subtest: C-34 real PostgreSQL: transactional audit + append-only
+    # Subtest: role change + audit row commit together
+    ok 1 - role change + audit row commit together
+      ---
+      duration_ms: 6.974761
+      ...
+    # Subtest: a failing audit write ROLLS BACK the role change (real BEGIN/ROLLBACK)
+    ok 2 - a failing audit write ROLLS BACK the role change (real BEGIN/ROLLBACK)
+      ---
+      duration_ms: 4.863039
+      ...
+    # Subtest: a failing audit write ROLLS BACK the status change
+    ok 3 - a failing audit write ROLLS BACK the status change
+      ---
+      duration_ms: 3.173325
+      ...
+    # Subtest: a failing audit write ROLLS BACK the ownership claim
+    ok 4 - a failing audit write ROLLS BACK the ownership claim
+      ---
+      duration_ms: 4.387473
+      ...
+    # Subtest: a successful claim commits claim + audit row together
+    ok 5 - a successful claim commits claim + audit row together
+      ---
+      duration_ms: 4.462109
+      ...
+    1..5
+ok 1 - C-34 real PostgreSQL: transactional audit + append-only
+  ---
+  duration_ms: 681.190699
+  ...
+1..1
+# tests 6
+# suites 0
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1091.366624
