@@ -850,3 +850,11 @@ then a browser QA run. After that: phase 8 (integrations/worker/email), phase 9
 - **Verification:** pre-push secret-scan PASS (0 findings) → push → `git ls-remote` confirms `refs/heads/main = be4732d` (= `refs/heads/integration/reconcile-lineages`). main now contains the full lineage: PR #8 governance campaign, both source lineages (AC-27 merge), AC-28..AC-38 campaign, AC-39 sync record.
 - **State sync (same change):** `current-state.json` (`current_verified.modern_sha` → `be4732d`, `branch_work.pushed=true`, `pushed_at`, heads/notes) + `CURRENT_STATE.md` State row.
 - **Not done:** no tags pushed (MG-OBS-2 unchanged); Legacy repo untouched (READ ONLY).
+
+## AC-41 — 2026-10-06 · remote-branch inventory review ("pushed but not mained") + full Persian report
+
+- **Owner request:** inventory every remote branch whose content is not on `main`, then a complete report.
+- **Method:** per-branch `rev-list --count` + `git cherry` patch-equivalence + file-level diff (3-dot and 2-dot) + GitHub API PR states; all against `origin/main` @ `6477df5` (fetched fresh).
+- **Findings:** 18/23 branches fully in main by ancestry; the 3 promotion/retention branches (PRs #2/#3/#4) are in main via squash-merge commits (`df27a2a`, `c904344`, `41761ae`) — their residual tip-vs-main diffs are later deliberate main-side changes (e.g. retention cron weekly→daily; Actions disabled per owner cost policy makes it moot); `integration/reconcile-lineages` = main. **One branch has genuinely unmerged content: `feature/phase-6f-frontend-parity` (12 commits, 217 files, 2026-09-22, pre-restructure repo-root `web/`)** — audited page-by-page: SUPERSEDED by `feat/web-full-frontend` (PR #7, `apps/web`, 110/110) + AC-32; all 17 surfaces covered, incl. trades/new (createTrade on the trades page) and accounts/connect (full modern 3-step detectServer→credentials→connectMetaApi flow). Sole salvage: 69 icon/flag assets → **candidate owner decision OD-11** (icon UI wanted or archive the branch). No work is lost; no open PRs exist.
+- **Deliverable:** `docs/reports/REMOTE-BRANCH-INVENTORY-FA.md` (Persian, full tables) — register row MG-FRONTEND-SURFACES evidence updated with the supersession audit.
+- **No branch deletions performed** — cleanup of the 22 merged branches is offered as an owner decision.

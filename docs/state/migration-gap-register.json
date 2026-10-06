@@ -677,7 +677,8 @@
         "apps/web/src/features/legal/TermsDocument.tsx",
         "apps/web/src/app/checkout/CheckoutForm.tsx",
         "apps/web/src/app/blog/posts.ts",
-        "apps/web/src/i18n/contentSurfaces.test.ts"
+        "apps/web/src/i18n/contentSurfaces.test.ts",
+        "docs/reports/REMOTE-BRANCH-INVENTORY-FA.md (2026-10-06): the unmerged remote branch feature/phase-6f-frontend-parity (217 files) audited page-by-page — SUPERSEDED, not missing: all 17 surfaces incl. trades/new and accounts/connect have equal-or-superior equivalents in apps/web on main (feat/web-full-frontend PR #7 + AC-32). Only salvage candidate: 69 legacy-style icon/flag assets — raised as candidate owner decision OD-11 (icon UI wanted or not)."
       ],
       "decisions": [
         "OD-AC-R8"
