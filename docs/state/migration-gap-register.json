@@ -565,14 +565,15 @@
         "ops/backup/restoreDrillCore.mjs",
         "ops/backup/tests/restoreDrill.test.ts",
         "ops/backup/evidence/restore-drill-staging-20261004T095454Z.json",
-        "docs/evidence/BACKUP-RESTORE-LOCAL-DRILL-2026-10-03.md"
+        "docs/evidence/BACKUP-RESTORE-LOCAL-DRILL-2026-10-03.md",
+        "ops/backup/evidence/restore-drill-staging-20261006T170536Z.json (drill re-run at HEAD 0030 with data-loaded source: backup 31,853 B sha256 5bd21bcb…, pg_restore 406 ms, parity PASS 56 tables / 49 numeric columns, smoke 11/11, ADR-012 gate correctly REJECT — RESTORE_VERIFIED)"
       ],
       "decisions": [
         "OD-AC-RPORTO"
       ],
       "closure_criteria": "One real backup + one restore drill, evidence captured",
-      "closure_note": "PARTIAL 2026-10-04 (Phase 4). A REAL backup was produced by the project's own producer (db-backup-staging-20261004095454-bb023e0cab03, 32 926 bytes, sha256 b289558f...), restored with pg_restore into a disposable database (343 ms), and verified: parity PASS across 44 tables and 49 numeric columns (table set, row counts, exact decimal SUMs), schema_migrations head 0025, and the application smoke 11/11 (S1a..S9) against the RESTORED copy. Integrity is recorded as storage_status=NONE and the ADR-012 gate still REJECTS the record (release_tag absent, storage not verified) — the drill uploads nothing and claims nothing. REMAINING for closure: (1) an offsite upload through ops/backup/upload_backup.py to veloratrade/velora-backups with a re-hash of the STORED bytes (needs a storage credential); (2) the same drill against staging/production data; (3) RPO/RTO targets (owner decision).",
-      "last_updated": "2026-10-04",
+      "closure_note": "PARTIAL 2026-10-04 (Phase 4). A REAL backup was produced by the project's own producer (db-backup-staging-20261004095454-bb023e0cab03, 32 926 bytes, sha256 b289558f...), restored with pg_restore into a disposable database (343 ms), and verified: parity PASS across 44 tables and 49 numeric columns (table set, row counts, exact decimal SUMs), schema_migrations head 0025, and the application smoke 11/11 (S1a..S9) against the RESTORED copy. Integrity is recorded as storage_status=NONE and the ADR-012 gate still REJECTS the record (release_tag absent, storage not verified) — the drill uploads nothing and claims nothing. REMAINING for closure: (1) an offsite upload through ops/backup/upload_backup.py to veloratrade/velora-backups with a re-hash of the STORED bytes (needs a storage credential); (2) the same drill against staging/production data; (3) RPO/RTO targets (owner decision). REFRESHED 2026-10-06 (AC-38): the same drill re-run at migrations HEAD 0030 against a data-loaded source (rehearsal fixture: 4 users / 3 accounts / 5 trades / 2 exits): real producer backup (31,853 bytes, sha256 5bd21bcb4880…), pg_restore into disposable _drill target in 406 ms, parity PASS across 56 tables and 49 numeric columns, application smoke 11/11 against the RESTORED copy, ADR-012 gate verdict REJECT recorded (release_tag absent, storage_status NONE — fail-closed semantics intact). Remaining for closure unchanged: offsite upload w/ stored-bytes re-hash (storage credential), staging/production drill, RPO/RTO targets (owner).",
+      "last_updated": "2026-10-06",
       "related": [],
       "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=PARTIAL/CURRENT_RUNTIME_VERIFIED, domain=PARTIAL/RECORDED_RUNTIME."
     },
