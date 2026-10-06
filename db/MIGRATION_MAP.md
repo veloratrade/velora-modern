@@ -67,3 +67,55 @@ disappear quietly.
 
 Run: `REHEARSAL_DATABASE_URL=… SOURCE_COMMIT_SHA=$(git rev-parse HEAD) npx tsx tools/load_rehearsal.ts`
 (target database name must end in `_rehearsal`).
+
+---
+
+## Legacy table inventory reconciliation (AC-31 · 2026-10-05)
+
+The audit-era claim ("8+ legacy tables without modern target") is re-audited against
+the integrated tree (migrations 0001–0029). Legacy schema source of record:
+`_database/database_corrected.sql` + `api/database/migrations/*.sql` — **45 tables**
+(file-level duplicates deduplicated; recount documented in AC-31). Status of every one:
+
+| Legacy table | Modern target | Status |
+|---|---|---|
+| `users` | `users` (0001, 0020 locale provenance) | MAPPED — except the subscription-lifecycle columns (`subscription_status`, `plan_started_at/expires_at/updated_at`): recorded, not loaded (Stripe-object `subscriptions` 0017 has an incompatible vocabulary) — **OD-AC-SUBMAP** |
+| `trading_accounts`, `trades`, `trade_exits`, `trade_tags`, `tags` | same names | MAPPED (field-level rows above; trades carry ADR-004 dual-time evidence columns) |
+| `trade_events` | `trade_events` (0007 ledger) | MAPPED — semantics differ by design (Legacy: rows for history; Modern: append-only ledger + version + tombstone, ADR-002) |
+| `trade_screenshots` | `trade_attachments` (0014) | MAPPED via StoragePort (ADR-010; bytes to object storage, row + checksum in PG) |
+| `metaapi_fills` | `sync_fills` (0012) | MAPPED — append-only evidence ledger, now byte-immutable under roles.sql |
+| `sync_jobs` | **no table — replaced by design** | pg-boss queues + `sync_reservations` (0019) + `sync_position_state` (0029); a job row per sync would duplicate what the reservation/state pair already proves |
+| `metaapi_operations` | **no table — replaced by design** | operation evidence = `sync_fills` + `trade_events` (TRADE_IMPORTED with deterministic uid) + `webhook_events`; a separate operations log would be a second journal for the same facts |
+| `webhook_events` | `webhook_events` (0011) | MAPPED (+ `UNIQUE (source, event_id)`, ADR-008) |
+| `rate_limits`, `password_resets`, `email_verifications`, `user_sessions`, `user_devices`, `email_preferences`, `user_analytics_daily` | same names | MAPPED |
+| `auth_events` | `auth_events` (0024) | MAPPED (anti-enumeration NULL-user semantics preserved) |
+| `support_conversations`, `support_messages` | `support_tickets`, `support_messages` (0026) | MAPPED (renamed by design; two Legacy defects not reproduced — see field-level rows) |
+| `support_message_translations` | **no target — dropped by design** | phase-5 record: never created empty; translation of support messages is an AI-assist concern, not a stored translation pair |
+| `admin_audit_logs` | `audit_log` (0009, extended 0027) | MAPPED — one append-only trail for admin actions, served by `GET /api/v1/admin/audit-logs` (+`?targetUserId=`) |
+| `ai_feature_flags` | `ai_feature_flags` (0028) | MAPPED |
+| `ai_feature_providers` | `ai_feature_routes` (0028) | MAPPED — same columns/semantics, Modern naming (phase-7 map) |
+| `ai_provider_credentials` | `ai_provider_credentials` (0028) | MAPPED (envelope-encrypted) |
+| `ai_provider_quotas` | `ai_provider_quotas` (0028) | MAPPED |
+| `ai_global_settings` | `ai_settings` (0028) | MAPPED |
+| `ai_feedback` | `ai_feedback` (0028) | MAPPED |
+| `ai_requests`, `ai_provider_logs`, `ai_audit_logs`, `ai_extractions` | **ONE ledger**: `ai_coaching_logs` (0023, extended 0028) | MAPPED-BY-DESIGN — four attempt tables collapse into one ledger (`route`, `fallback_index`, `latency_ms`, `input_hash`, wider `feature` vocabulary); a second journal for the same fact was refused (phase-7 map) |
+| `ai_analysis`, `ai_reports` | the ledger's `insight` + `window_from/window_to` + `feature='analysis'|'report'` | MAPPED-BY-DESIGN (phase-7 map) |
+| `ai_jobs` | **not migrated — recorded** (phase-7 map) | Legacy's three user AI routes are synchronous with a deadline; the async path belongs with the worker (phase 8) |
+| `content_translation_cache`, `content_translation_jobs` | **no target** | cache-only content localization capability (Legacy `POST /api/v1/content-translations/lookup` + worker ingestion) — absent end-to-end; owned by the content-translation decision (see MG-I18N-COVERAGE note: Modern serves fa/en natively per-surface, so the cache exists to translate CONTENT, not chrome) |
+| `email_notifications` | **no target** | MG-EMAIL-TYPES: delivery/typing of the remaining transactional emails |
+| `integration_health` | **no target** | phase 8 (admin integrations block, AC-16 inventory) |
+| `notifications` | **no target** | in-app notifications capability (audit §4.2 n/a — Legacy table + bell UI; Modern has no notification surface) |
+| `system_logs` | **no target** | phase 8/9 (admin log viewer block) |
+| `user_achievements` | **no target (storage)** | the achievements ENGINE is ported (domain, AC-26) with Legacy repository semantics + catalog; a persistence home + surface is phase 9 |
+| `trade_features` | **no target** | Legacy ML feature-engineering cache for `ml_model_predictions` (developer/E-A seam); Modern's developer capability (0016) does not consume precomputed features — LEGACY_ONLY unless the developer seam is re-scoped |
+
+**Result:** of the 45 legacy tables, **33 have modern targets** (27 direct/renamed
+mappings + 6 collapse-to-one-ledger by design), **3 are replaced or dropped by
+design** (no table needed: `sync_jobs`, `metaapi_operations`,
+`support_message_translations`), and **9 remain without targets** (`ai_jobs`
+[recorded, phase 8 worker], `content_translation_cache` + `content_translation_jobs`,
+`email_notifications`, `integration_health`, `notifications`, `system_logs`,
+`user_achievements`, `trade_features`) — each owned by a named capability/phase/
+decision, none silently dropped. The users-subscription columns remain the only
+column-level gap (OD-AC-SUBMAP).
+The users-subscription columns remain the only column-level gap (OD-AC-SUBMAP).
