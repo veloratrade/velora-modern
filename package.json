@@ -12,7 +12,8 @@
     "test": "node tools/run-tests.mjs",
     "test:migrations": "tsx --test db/tests/migrations.test.ts",
     "secret-scan": "bash tools/secret-scan.sh",
-    "migrate:dev": "tsx db/migrate.ts"
+    "migrate:dev": "tsx db/migrate.ts",
+    "ops:verify": "tsx tools/ops-verify.mjs"
   },
   "engines": {
     "node": ">=20 <23"

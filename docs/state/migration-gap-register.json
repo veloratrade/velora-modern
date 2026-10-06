@@ -885,20 +885,28 @@
     {
       "id": "MG-OPS-TOOLING",
       "section": "B",
-      "title": "Legacy ops probe/monitoring toolset has no modern counterpart",
-      "status": "OPEN",
+      "title": "Legacy ops probe/monitoring toolset — modern counterpart delivered (ops:verify CLI, read-only, test-pinned)",
+      "status": "CLOSED",
       "priority": "P3",
-      "verification_state": "STATIC",
+      "verification_state": "TESTED",
       "audit_refs": [
         "§17.1"
       ],
       "evidence": [
-        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md"
+        "docs/audits/2026-09-25-FINAL-MIGRATION-RECONCILIATION-AUDIT.md",
+        "ops/verify/README.md (capability mapping: 6 legacy probe templates → modern CLI)",
+        "ops/verify/verifyEnvironment.ts (read-only core: SELECT/catalog only)",
+        "tools/ops-verify.mjs + npm run ops:verify (--json/--check, exit 1 on drift, exit 2 on failure, DSN masked, driver errors logged as code only)",
+        "db/tests/opsVerify.test.ts AC36-01..06: clean verdict / missing-ledger drift / phantom-ledger drift / orphaned-FK drift with attribution / runtime SELECT-only spy / static write-DDL keyword scan — 6/6 pass",
+        "Full battery 1,343/1,343 pass, tsc -b clean (5 projects), secret-scan 0"
       ],
-      "decisions": [],
+      "decisions": [
+        "OD-AC-CADENCE"
+      ],
       "closure_criteria": "Modern equivalent or owner-dropped",
       "related": [],
-      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC."
+      "reconciled_2026_10_05": "2026-10-05 lineage union: feat/telegram-journal-client (AC-9..AC-18) + feat/mg-domain-legacy-only-achievements (AC-19..AC-26); status takes the more advanced lineage, evidence is the union. Original states: telegram=OPEN/STATIC, domain=OPEN/STATIC.",
+      "closure_note": "Legacy probe capability decomposed (audit §17.1): (1) session-status report already covered by tools/agent-context.mjs (ADR-017); (2) backup probe already ported and extended in ops/backup/ (audit §17.2); (3) CI cost guard moot — GitHub Actions disabled per owner cost policy; (4) the remaining gap, the velora-mgmt read-only environment probe (inspect/verify templates), is now tools/ops-verify.mjs: server identity, migration ledger diff vs db/migrations files, per-table row counts, connection-user privilege audit (report-only), FK orphan scan. Read-only by construction and pinned two ways (runtime spy: every statement SELECT; static scan: no write/DDL keywords). No HTTP surface, no one-use FTP upload, no token gate needed — the modern deployment reality. Mutating legacy ops (migrate) remain the separately gated CLIs + ADR-012 backup gate. Per-domain recompute probes (PnL etc.) intentionally land with MG-DATA-MIGRATION, which reuses this core's primitives. Owner sign-off requested."
     },
     {
       "id": "MG-DATA-MIGRATION",

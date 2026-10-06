@@ -63,7 +63,8 @@ export function syncCronFieldRangesAreValid(value: string): boolean {
     // expand each comma part, each side of a range, each step base
     const parts = field.split(",");
     return parts.every((part) => {
-      const [base, step] = part.split("/");
+      const [baseRaw, step] = part.split("/");
+      const base = baseRaw ?? ""; // split always yields index 0; guard for noUncheckedIndexedAccess
       const stepNum = step === undefined ? 1 : Number.parseInt(step, 10);
       if (!Number.isInteger(stepNum) || stepNum < 1) return false;
       if (base === "*") return true; // "*/n" — every n within the field range
