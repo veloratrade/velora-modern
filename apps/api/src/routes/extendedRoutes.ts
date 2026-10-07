@@ -36,6 +36,7 @@ import { handleTenancyRoutes } from "../tenancy/tenancyRoutes.js";
 import { handleDeveloperRoutes } from "../developer/developerRoutes.js";
 import { handleTelegramRoutes } from "../telegram/telegramRoutes.js";
 import { handleSupportRoutes } from "../support/supportRoutes.js";
+import { handleIntegrationRoutes } from "../integrations/integrationRoutes.js";
 
 /**
  * Registration order is significant only for readability: each handler matches
@@ -65,6 +66,7 @@ const ROUTE_HANDLERS: readonly ExtendedRouteHandler[] = [
   handleAiRoutes,
   handleAiAdminRoutes,
   handleSupportAiRoutes,
+  handleIntegrationRoutes,
   handlePortfolioRoutes,
   handleEaRoutes,
   handleTenancyRoutes,

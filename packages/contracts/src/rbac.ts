@@ -110,6 +110,14 @@ export const PERMISSIONS = [
   "aiManage",
   /** Write the AI route/secrets/relay, and probe a provider. SUPER-ADMIN ONLY. */
   "aiRouteManage",
+
+  // --- Phase 8 (integrations). Legacy Role.php P_INTEGRATIONS_VIEW (admin+SA)
+  // and P_INTEGRATIONS_MANAGE (SA only). Read = inventory/status, Write =
+  // put/delete/test (secret-bearing, upstream calls).
+  /** View integration inventory and per-integration safe status (never secrets). */
+  "integrations.view",
+  /** Change, clear or test an integration (secret-bearing/upstream). SUPER-ADMIN ONLY. */
+  "integrations.manage",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -141,6 +149,9 @@ export const ROLE_PERMISSIONS: Readonly<Record<AppRole, readonly Permission[]>> 
     // Phase 7 — Legacy grants P_AI_MANAGE to `admin` (Role.php), and withholds
     // P_AI_ROUTE_MANAGE for super_admin only.
     "aiManage",
+    // Phase 8 — Legacy grants P_INTEGRATIONS_VIEW to admin (Role.php:107), and
+    // P_INTEGRATIONS_MANAGE to super_admin only (Role.php:130).
+    "integrations.view",
   ],
   super_admin: [
     "rbac.self.view",
@@ -165,6 +176,9 @@ export const ROLE_PERMISSIONS: Readonly<Record<AppRole, readonly Permission[]>> 
     // six SA-exclusive permissions).
     "aiManage",
     "aiRouteManage",
+    // Phase 8 — P_INTEGRATIONS_VIEW and P_INTEGRATIONS_MANAGE (SA only for manage)
+    "integrations.view",
+    "integrations.manage",
   ],
 };
 

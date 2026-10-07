@@ -113,6 +113,8 @@ import { AiManager } from "./ai/aiManager.js";
 import { AiAnalysisService } from "./ai/aiAnalysisService.js";
 import { PgAiLedger } from "./ai/aiLedger.js";
 import { AiAdminService } from "./ai/aiAdminService.js";
+import { PgIntegrationStore } from "./integrations/integrationStore.js";
+import { IntegrationService } from "./integrations/integrationService.js";
 import { TesseractProvider, findTesseractBinary } from "./ai/tesseractProvider.js";
 import type { AiCatalogProvider } from "./ai/aiCatalog.js";
 import { AdminConsoleService } from "./admin/adminConsoleService.js";
@@ -320,6 +322,8 @@ async function main(): Promise<void> {
     aiAdmin?: import("./ai/aiAdminRoutes.js").AiAdminCapability;
     /** Phase 7 — the support console's AI assists. */
     supportAi?: import("./support/supportAiRoutes.js").SupportAiCapability;
+    /** Phase 8 — admin-managed integrations (MetaAPI, Email) + relay alias. */
+    integrations?: import("./integrations/integrationRoutes.js").IntegrationsCapability;
     portfolio?: import("./portfolio/portfolioRoutes.js").PortfolioStore;
     ea?: import("./ea/eaRoutes.js").EaStore;
     eaSync?: import("./ea/eaRoutes.js").SyncTriggerPort;
@@ -698,6 +702,18 @@ async function main(): Promise<void> {
         tesseract: findTesseractBinary() !== null,
         masterKey: aiMasterKey !== null,
       }));
+      // Phase 8 — admin-managed integrations. The envelope is the same as AI's
+      // (credentialCrypto), the precedence is the same (admin → env → default),
+      // and the relay alias reuses the rows AI already owns (ai_platform_secrets).
+      {
+        const integrationStore = new PgIntegrationStore(pool);
+        const integrationMasterKey = resolveCredentialKey(process.env).key;
+        const integrationEnv = (key: string): string | undefined => process.env[key];
+        capabilities.integrations = {
+          integrations: new IntegrationService({ store: integrationStore, masterKey: integrationMasterKey, env: integrationEnv }),
+        };
+        console.log(JSON.stringify({ level: "info", event: "integrations.composed", masterKey: integrationMasterKey !== null }));
+      }
     }
     capabilities.portfolio = new PgPortfolioStore(q);
     capabilities.ea = new PgEaStore(q);
