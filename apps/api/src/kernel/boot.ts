@@ -68,7 +68,7 @@ export function assertBootable(env: Record<string, string | undefined>): BootCon
 
   // 1. Environment identity + origin binding (ADR-013).
   const eo = validateEnvironmentOrigin(env.APP_ENV, env.APP_ORIGIN, canonical);
-  const eoFindings: BootFinding[] = eo.findings.map((f) => ({
+  const eoFindings: BootFinding[] = eo.findings.map((f: { code: string; severity: BootFinding["severity"]; message: string }) => ({
     code: f.code,
     severity: f.severity,
     message: f.message,
@@ -83,7 +83,7 @@ export function assertBootable(env: Record<string, string | undefined>): BootCon
   const security = validateSecurityBoot(env, environment);
   const allFindings: BootFinding[] = [
     ...eoFindings,
-    ...security.findings.map((f) => ({ code: f.code, severity: f.severity, message: f.message })),
+    ...security.findings.map((f: { code: string; severity: BootFinding["severity"]; message: string }) => ({ code: f.code, severity: f.severity, message: f.message })),
   ];
 
   // 3. Port (non-security, but invalid values still fail startup deterministically).

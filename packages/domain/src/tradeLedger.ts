@@ -97,7 +97,7 @@ const ALLOWED_ACTORS: Record<LedgerEventType, readonly MutationActor[]> = {
 };
 
 export function assertOwnership(type: LedgerEventType, actor: MutationActor): void {
-  if (!ALLOWED_ACTORS[type].includes(actor)) {
+  if (!ALLOWED_ACTORS[type]?.includes(actor)) {
     throw new OwnershipPolicyError(`actor '${actor}' may not emit '${type}' (ADR-002 ownership matrix)`);
   }
 }

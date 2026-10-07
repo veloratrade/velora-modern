@@ -210,8 +210,8 @@ test("an unknown account is ACCEPTED and recorded (Legacy parity, account_id nul
   assert.equal(outcome.result, "accepted");
   assert.equal(outcome.status, 200);
   if (outcome.result === "accepted") {
-    assert.equal(outcome.body["account_id"], null);
-    assert.equal(outcome.body["sync"], "unknown-account");
+    assert.equal((outcome as any).body["account_id"], null);
+    assert.equal((outcome as any).body["sync"], "unknown-account");
   }
   assert.equal(outcome.pending.length, 0);
   assert.equal(outcome.requests.length, 0);
@@ -226,7 +226,7 @@ test("a known account is marked pending and a sync is requested", async () => {
   assert.equal(outcome.requests.length, 1);
   assert.equal(outcome.requests[0]?.accountId, "7");
   assert.equal(outcome.requests[0]?.from, "2026-01-01T00:00:00.000Z", "the window starts at the durable cursor");
-  if (outcome.result === "accepted") assert.equal(outcome.body["sync"], "requested");
+  if (outcome.result === "accepted") assert.equal((outcome as any).body["sync"], "requested");
 });
 
 test("when dispatch is unavailable the event is still recorded and reported deferred", async () => {
@@ -236,7 +236,7 @@ test("when dispatch is unavailable the event is still recorded and reported defe
   });
   // Recorded (accepted) — a lost queue delays convergence, it does not lose it.
   assert.equal(outcome.result, "accepted");
-  if (outcome.result === "accepted") assert.equal(outcome.body["sync"], "deferred");
+  if (outcome.result === "accepted") assert.equal((outcome as any).body["sync"], "deferred");
   assert.deepEqual(outcome.pending, ["7"]);
 });
 
@@ -282,7 +282,7 @@ test("the recorded event is marked processed", async () => {
   });
   assert.equal(outcome.result, "accepted");
   if (outcome.result === "accepted") {
-    const id = String(outcome.body["event_id"]);
+    const id = String((outcome as any).body["event_id"]);
     const record = await ctx.store.findById("1");
     assert.equal(record?.eventId, id);
     assert.notEqual(record?.processedAt, null);
@@ -293,6 +293,6 @@ test("the response keeps the Legacy field names so an existing caller still pars
   const outcome = await handle(payloadBody());
   if (outcome.result !== "accepted") throw new Error("expected accepted");
   for (const key of ["account_id", "inserted", "skipped", "fills"]) {
-    assert.ok(key in outcome.body, `missing Legacy field ${key}`);
+    assert.ok(key in (outcome as any).body, `missing Legacy field ${key}`);
   }
 });

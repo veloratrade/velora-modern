@@ -135,11 +135,11 @@ test("SEC-01: the map states the rule that keeps it from drifting", () => {
 
 test("SEC-01: the permission vocabulary has no orphans and no unknown grants", () => {
   for (const p of PERMISSIONS) {
-    const holders = APP_ROLES.filter((r) => ROLE_PERMISSIONS[r].includes(p));
+    const holders = APP_ROLES.filter((r: (typeof APP_ROLES)[number]) => ROLE_PERMISSIONS[r]?.includes(p as never) ?? false);
     assert.ok(holders.length > 0, `${p} is declared but granted to no role`);
   }
   for (const role of APP_ROLES) {
-    for (const p of ROLE_PERMISSIONS[role]) {
+    for (const p of (ROLE_PERMISSIONS[role] ?? [] as readonly string[])) {
       assert.ok((PERMISSIONS as readonly string[]).includes(p), `${role} is granted unknown permission ${p}`);
     }
   }

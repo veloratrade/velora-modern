@@ -1121,7 +1121,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
       status: 200,
       body: ok({
         roles: APP_ROLES,
-        permissions: Object.fromEntries(APP_ROLES.map((r) => [r, permissionsFor(r)])),
+        permissions: Object.fromEntries(APP_ROLES.map((r: AppRole) => [r, permissionsFor(r)])),
       }),
     };
   }

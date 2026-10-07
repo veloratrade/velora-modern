@@ -550,7 +550,7 @@ export class TelegramBot {
     const photos = message.photo ?? [];
     // Telegram sends several renditions; the largest is the most readable and is
     // the one a chart screenshot needs.
-    const largest = photos.reduce((best, candidate) => ((candidate.file_size ?? 0) >= (best.file_size ?? 0) ? candidate : best), photos[0]!);
+    const largest = photos.reduce((best: NonNullable<typeof message.photo>[number], candidate: NonNullable<typeof message.photo>[number]) => ((candidate.file_size ?? 0) >= (best.file_size ?? 0) ? candidate : best), photos[0]!);
     // BEFORE the download and the vision call: same reasoning as voice.
     if (!(await this.withinJournalBudget(chatId, tgId, locale))) return "rejected";
 

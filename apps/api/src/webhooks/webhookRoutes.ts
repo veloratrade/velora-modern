@@ -15,7 +15,7 @@
 // production-accessible write path guarded only by the secret. Recorded as a
 // deliberate non-port in the migration report.
 import { fail, ok } from "@velora/contracts";
-import type { MetaApiWebhookService } from "./metaApiWebhookService.js";
+import type { MetaApiWebhookService, WebhookFailureCode } from "./metaApiWebhookService.js";
 import type { ExtendedRouteContext, RouteResult } from "../routes/types.js";
 
 const WEBHOOK_PATH = "/api/v1/webhooks/metaapi";
@@ -51,7 +51,9 @@ export async function handleWebhookRoutes(ctx: ExtendedRouteContext): Promise<Ro
   const outcome = await service.handle({ rawBody: raw, headers: ctx.req.headers });
 
   if (outcome.result === "rejected" || outcome.result === "quarantined") {
-    return { status: outcome.status, body: fail(outcome.code, outcome.message, ctx.requestId) };
+    const err = outcome as Extract<typeof outcome, { readonly code: WebhookFailureCode }>;
+    return { status: err.status, body: fail(err.code, err.message, ctx.requestId) };
   }
-  return { status: outcome.status, body: ok(outcome.body) };
+  const okOutcome = outcome as Extract<typeof outcome, { readonly body: Record<string, unknown> }>;
+  return { status: okOutcome.status, body: ok(okOutcome.body) };
 }
