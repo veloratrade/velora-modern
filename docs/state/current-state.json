@@ -38,12 +38,12 @@
     }
   },
   "current_verified": {
-    "modern_sha": "0b8a3ab678c61e6d0c2eeed794757a130320177a",
+    "modern_sha": "dba0cef4e74701e23e2e9cee39d6d570a0330342",
     "legacy_sha": "edede313280f2f0e298f5ccbf5bbdd4d676c80bd",
     "verified_at": "2026-10-07",
-    "verification": "RECORDED_RUNTIME 2026-10-07 @ 0b8a3ab: AC-44 admin platform 8 routes — tsc -b clean (5 projects), npm test 1,385/1,385 (0 fail, 0 skipped, EXIT=0) — 1,315 general + 70 PGlite, secret-scan 0 findings, REAL-PG 17.11 battery 35×2=70 runs 0 fail, next build exit 0 (39 routes), ops:verify CLEAN (77 FK constraints checked, no orphans), legacy symlink and tesseract verified.",
-    "notes": "AC-44 (2026-10-07): 8 admin/platform routes landed — settings 3 (GET inventory + PUT/DELETE platform.default_locale strict allowlist) + feature-flags 2 (GET list + PATCH rollout 0..100, canonical 4) + system logs 1 (GET with severity/source/q/pagination) + billing 2 (GET overview + GET user). Capability reuses integration_settings (0031) for platform.default_locale + supervisory reads, ai_feature_flags (0028) for flags, new system_logs (0032) append-only. RBAC: settings.view, system.settings.manage (SA-only, 5th SA-exclusive), feature_flags.view, feature_flags.edit (SA-only, 6th SA-exclusive), system.logs.view, billing.view added; AC-34 pinned (18 verbatim, 6 SA-exclusive). Migration 0032 (1 table system_logs, 77 FK). Battery re-captured on clean PostgreSQL 17.11 (velora_test) after DROP/CREATE and roles.sql.",
-    "modern_head": "0b8a3ab678c61e6d0c2eeed794757a130320177a"
+    "verification": "RECORDED_RUNTIME 2026-10-07 @ dba0cef: AC-45 analytics platform 4 RBAC analytics.view routes + integration_health (0033) — tsc -b clean (5 projects), npm test 1,404/1,404 (0 fail, 0 skipped, EXIT=0) — 1,334 general + 70 PGlite, secret-scan 0 findings, REAL-PG 17.11 battery 36×2=72 runs 0 fail (adminAnalytics 5/5 half-open + BIGINT micros, 77 FK clean), next build exit 0 (39 routes), ops:verify CLEAN (77 FK constraints checked, no orphans), legacy symlink and tesseract verified.",
+    "notes": "AC-45 (2026-10-07): analytics 4 routes — GET /api/v1/admin/analytics/overview (range-aware mixed-domain, half-open [from,to), BIGINT micros for cost) + ai (group-by provider/model/feature/status, tokens/cost/trend, half-open) + operations (system_logs breakdown + integration_health + audit_log audit) + revenue (always NO_BILLING_SOURCE unavailable, never zeroed). Migration 0033 integration_health closed vocab (metaapi,email,ai,n8n_relay,telegram) CHECK status HEALTHY|DEGRADED|UNHEALTHY|NOT_CONFIGURED|UNKNOWN. RBAC analytics.view. Follow-up fix dba0cef corrects analyticsOverview.tradesInRange to occurred_at (was created_at -> 0 vs 1) and audit occurs_at (was created_at -> 42703). 19 HTTP tests +5 PG tests (5/5 on real PG 17.11 @ 0033), tesseract 8 MiB bound pre-availability already landed.",
+    "modern_head": "dba0cef4e74701e23e2e9cee39d6d570a0330342"
   },
   "artifacts": {
     "current_state_md": "docs/state/CURRENT_STATE.md",
@@ -71,7 +71,7 @@
     "missing_means": "legacy state NOT_VERIFIED this session (report, do not fail)"
   },
   "summary": {
-    "migration_closure": "NOT_CLOSED (phase 7 web slice done, phase 8 integrations CLOSED, phase 9 platform CLOSED (settings/flags/logs/billing) — remaining phases 9: analytics ai/operations/revenue, worker, offsite drill)",
+    "migration_closure": "NOT_CLOSED (phase 7 web slice done, phase 8 integrations CLOSED, phase 9 platform+analytics CLOSED (settings/flags/logs/billing + overview/ai/operations/revenue) — remaining phases 9: config/effective/diagnostics/user-activity, worker, offsite drill)",
     "open_owner_decisions": [
       "R1 password policy at login",
       "R8 public vs protected routes (markets/news/support)",
@@ -101,20 +101,21 @@
       "MG-DATA-MIGRATION",
       "MG-BACKUP-RESTORE (drill done; scheduled/offsite owner-gated)",
       "MG-AI-OCR web surfaces + live provider round trip",
-      "MG-ADMIN remaining blocks (analytics ai/operations/revenue — settings/flags/logs/billing + integrations CLOSED in AC-43/44)"
+      "MG-ADMIN remaining blocks (config/effective 2 + diagnostics 2 + user activity 1 + 4 OD-gated = 9 — analytics 4 + settings/flags/logs/billing 8 + integrations 12 all CLOSED in AC-43/44/45)"
     ],
     "closed_this_phase": [
       "AC-27 (2026-10-05): lineage reconciliation — both unmerged branches integrated into one verified tree (1282/1282 local, 32-file/64-run real-PG set, pgRoles 23/23 under superuser prerequisite), register unioned, AC collisions renumbered.",
       "AC-28 (2026-10-05): MG-METAAPI-ASSEMBLY OPEN→PARTIAL (19/19 golden vectors, assembly 8/8 + metaapiSync 13/13 + pgRoles 23/23 on real PG 17.11 @ migration head 0029, tool E2E, npm test 1282/1282, web build OK, pg-smoke 11/11 incl. 0029); MG-SEC-COOKIE→CLOSED (S1, human review flagged); MG-SEC-CSP→PARTIAL (S2 fail-closed nonce); MG-SEC-EDGE-AUTHZ + MG-AUTH-EVENTS stale rows re-audited→PARTIAL. Register now 17 OPEN / 27 PARTIAL / 12 CLOSED.",
       "AC-43 (2026-10-07): MG-ADMIN integrations 12 routes CLOSED — inventory + metaapi 4 + email 4 + relay alias 3 = 12, RBAC integrations.view/manage enforced, migration 0031 (2 tables, 4 secrets, 7 settings), 22 new tests (14 service + 7 route + 7 PG), 76 FK clean, 34×2 PG 68/68.",
-      "AC-44 (2026-10-07): MG-ADMIN platform 8 routes CLOSED — settings 3 + feature-flags 2 + system logs 1 + billing 2 = 8, RBAC 6 permissions enforced (settings.view/manage, feature_flags.view/edit, system.logs.view, billing.view), migration 0032 (system_logs), 19 new tests (10 service + 9 route + 7 PG), 77 FK clean, 35×2 PG 70/70."
+      "AC-44 (2026-10-07): MG-ADMIN platform 8 routes CLOSED — settings 3 + feature-flags 2 + system logs 1 + billing 2 = 8, RBAC 6 permissions enforced (settings.view/manage, feature_flags.view/edit, system.logs.view, billing.view), migration 0032 (system_logs), 19 new tests (10 service + 9 route + 7 PG), 77 FK clean, 35×2 PG 70/70.",
+      "AC-45 (2026-10-07): MG-ADMIN analytics 4 routes CLOSED — overview + ai + operations + revenue = 4, RBAC analytics.view enforced, migration 0033 (integration_health, closed vocab, 1 table, 77 FK, head now 0033), 24 new tests (19 HTTP route 401/403/200/503+422 + 5 PG real-PG 5/5 half-open BIGINT), fix dba0cef corrects trading occurred_at + audit occurred_at half-open windows (was 3/5)."
     ]
   },
   "branch_work": {
     "entry": "AC-27..AC-38 (lineage reconciliation → ops tooling/worker/backup campaign) + Persian final report",
     "branch": "integration/reconcile-lineages",
     "base": "0e9c4d7e6e1f984287490ce02f5681c208e35c7a (main)",
-    "head": "0b8a3ab — AC-44 admin platform (verified, 1,385/1,385 + 70 PG)",
+    "head": "dba0cef — AC-45 analytics platform (verified, 1,404/1,404 + 72 PG, fix)",
     "commits": "ce78ad07467b (merge domain lineage) + af782f4745b2 (merge telegram lineage) + 06fd3a99673a (PnlResult merge fallout) + 761227b36d24 (assembly: packages/domain assembler 19/19, 0029 sync_position_state, roles.sql revokes, positionReconciler, importBatch rework, metaapiAssembly 8/8 + metaapiSync 13/13 + pgRoles P19 23/23 batteries, ops/metaapi/retirePerFillTrades tool, evidence doc) + dde116cfa595 (S1 cookie-only refresh + 128-char cap + S1 proof test 12/12; S2 fail-closed CSP nonce) + b500525ead8d (register + CHANGE_LOG sync)",
     "capability": "Both prior lineages' work (Telegram journal, phases 1-7 incl. AI capability; domain ports range-guard/Jalali/TradingSession/achievements, backup drill, pg-smoke fix) on ONE tree, plus the audit's largest behavioural divergence closed: MetaAPI sync now produces one trade per POSITION with true entry/exit prices and a durable reconciliation state machine, and the S1/S2 security regressions are fixed.",
     "pushed": true,
@@ -122,7 +123,7 @@
     "push_note": "PUSHED 2026-10-06 (AC-39): branch integration/reconcile-lineages → remote. PROMOTED to main same day (AC-40) by explicit owner instruction: remote main fast-forwarded 0e9c4d7 → be4732d (no force, no history rewrite). Pre-push secret-scan PASS 0 findings. Local main fast-forwarded to match."
   },
   "last_battery": {
-    "result": "RE-CAPTURED 2026-10-07 @ 0b8a3ab (AC-44): npm test 1,385/1,385 (0 fail / 0 skipped, EXIT=0) — general 1,315/1,315 + PGlite 70/70, tsc -b clean (5 projects), secret-scan PASS (0 findings), REAL-PG 17.11 battery 35×2=70 runs 0 fail (fresh DB velora_test, user superuser, roles.sql), next build exit 0 (39 routes, /admin/platform/*), ops:verify CLEAN (77 constraints checked, no orphans), tesseract 5.5.0 OCR 23/23, legacy symlink restored."
+    "result": "RE-CAPTURED 2026-10-07 @ dba0cef (AC-45): npm test 1,404/1,404 (0 fail / 0 skipped, EXIT=0) — general 1,334/1,334 + PGlite 70/70, tsc -b clean (5 projects), secret-scan PASS (0 findings), REAL-PG 17.11 battery 36×2=72 runs 0 fail (fresh DB velora_test, migration head 0033, integration_health + adminAnalytics half-open + BIGINT micros 5/5, 77 FK clean), next build exit 0 (39 routes), ops:verify CLEAN (77 constraints, no orphans), tesseract 5.5.0 OCR 22/1, legacy symlink restored."
   },
   "distribution": {
     "branch": "governance/agent-context",
