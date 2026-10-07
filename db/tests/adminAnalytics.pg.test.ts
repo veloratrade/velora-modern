@@ -155,7 +155,7 @@ test("OPERATIONS ANALYTICS — system logs breakdown and admin audit count", { s
     await db.pool.query(`INSERT INTO system_logs (severity, source, message, created_at) VALUES ('ERROR','api','e1','2026-09-10T10:00:00Z')`);
     await db.pool.query(`INSERT INTO system_logs (severity, source, message, created_at) VALUES ('WARN','worker','w1','2026-09-11T10:00:00Z')`);
     await db.pool.query(`INSERT INTO system_logs (severity, source, message, created_at) VALUES ('ERROR','worker','e2','2026-09-12T10:00:00Z')`);
-    await db.pool.query(`INSERT INTO audit_log (action, actor_user_id, target_user_id, before_state, after_state, created_at) VALUES ('USER_STATUS_CHANGED', $1, $1, 'a','b','2026-09-11T10:00:00Z')`, [user]);
+    await db.pool.query(`INSERT INTO audit_log (action, actor_user_id, target_user_id, before_state, after_state, occurred_at) VALUES ('USER_STATUS_CHANGED', $1, $1, 'a','b','2026-09-11T10:00:00Z')`, [user]);
     await db.pool.query(`INSERT INTO integration_health (integration, status, checked_at) VALUES ('ai','DEGRADED', now()) ON CONFLICT (integration) DO UPDATE SET status='DEGRADED'`);
 
     const store = new PgAdminConsoleStore(q(db.pool), 33);

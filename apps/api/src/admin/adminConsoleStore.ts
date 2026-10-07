@@ -576,7 +576,7 @@ export class PgAdminConsoleStore implements AdminConsoleStore {
     const [trading] = await this.q(
       `SELECT
          (SELECT count(*)::int FROM trades WHERE deleted_at IS NULL) AS total_trades,
-         (SELECT count(*)::int FROM trades WHERE deleted_at IS NULL AND created_at >= $1 AND created_at < $2) AS in_range,
+         (SELECT count(*)::int FROM trades WHERE deleted_at IS NULL AND occurred_at >= $1 AND occurred_at < $2) AS in_range,
          (SELECT count(*)::int FROM trading_accounts) AS accounts`,
       [from, to],
     );
@@ -687,7 +687,7 @@ export class PgAdminConsoleStore implements AdminConsoleStore {
       [],
     );
     const [failures] = await this.q(`SELECT count(*)::int AS n FROM integration_health WHERE status NOT IN ('HEALTHY','OK')`, []);
-    const [audit] = await this.q(`SELECT count(*)::int AS n FROM audit_log WHERE created_at >= $1 AND created_at < $2`, [from, to]);
+    const [audit] = await this.q(`SELECT count(*)::int AS n FROM audit_log WHERE occurred_at >= $1 AND occurred_at < $2`, [from, to]);
     return {
       systemLogs: {
         total: num(sysTotal?.["n"] ?? 0),
