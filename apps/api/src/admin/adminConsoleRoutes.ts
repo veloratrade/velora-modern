@@ -16,6 +16,10 @@
 //   GET  /api/v1/admin/users/{id}/devices              users.view
 //   GET  /api/v1/admin/users/{id}/accounts             users.view
 //   GET  /api/v1/admin/users/{id}/trades               users.view
+//   GET  /api/v1/admin/users/{id}/activity             users.view   (session-derived)
+//   GET  /api/v1/admin/config/effective                settings.view (supervisory, secret-free)
+//   GET  /api/v1/admin/system/diagnostics             system.health.view (detailed)
+//   POST /api/v1/admin/system/diagnostics/refresh     system.health.view (rate-limited 5/120s)
 //   POST /api/v1/admin/users/{id}/session-revocations  users.manage_status  {sessionId?}
 //   POST /api/v1/admin/users/{id}/email-verification   users.verify_email
 //
@@ -56,11 +60,15 @@ const SECURITY_SIGNUPS = "/api/v1/admin/security/signups";
 const SECURITY_LOGINS = "/api/v1/admin/security/logins";
 const PLATFORM_TRADES = "/api/v1/admin/trades";
 const PLATFORM_ACCOUNTS = "/api/v1/admin/trading-accounts";
+const CONFIG_EFFECTIVE = "/api/v1/admin/config/effective";
+const SYSTEM_DIAGNOSTICS = "/api/v1/admin/system/diagnostics";
+const SYSTEM_DIAGNOSTICS_REFRESH = "/api/v1/admin/system/diagnostics/refresh";
 
 const USER_SESSIONS = /^\/api\/v1\/admin\/users\/([^/]+)\/sessions$/;
 const USER_DEVICES = /^\/api\/v1\/admin\/users\/([^/]+)\/devices$/;
 const USER_ACCOUNTS = /^\/api\/v1\/admin\/users\/([^/]+)\/accounts$/;
 const USER_TRADES = /^\/api\/v1\/admin\/users\/([^/]+)\/trades$/;
+const USER_ACTIVITY = /^\/api\/v1\/admin\/users\/([^/]+)\/activity$/;
 const USER_SESSION_REVOCATIONS = /^\/api\/v1\/admin\/users\/([^/]+)\/session-revocations$/;
 const USER_EMAIL_VERIFICATION = /^\/api\/v1\/admin\/users\/([^/]+)\/email-verification$/;
 
@@ -73,6 +81,8 @@ const READ_ROUTES: ReadonlyArray<{ readonly path: string; readonly permission: P
   { path: ANALYTICS_OPERATIONS, permission: "analytics.view" },
   { path: ANALYTICS_REVENUE, permission: "analytics.view" },
   { path: SYSTEM_HEALTH, permission: "system.health.view" },
+  { path: CONFIG_EFFECTIVE, permission: "settings.view" },
+  { path: SYSTEM_DIAGNOSTICS, permission: "system.health.view" },
   { path: SECURITY_SIGNUPS, permission: "audit.view" },
   { path: SECURITY_LOGINS, permission: "audit.view" },
   { path: PLATFORM_TRADES, permission: "users.view" },
@@ -111,8 +121,10 @@ export async function handleAdminConsoleRoutes(ctx: ExtendedRouteContext): Promi
   const devicesMatch = USER_DEVICES.exec(ctx.path);
   const accountsMatch = USER_ACCOUNTS.exec(ctx.path);
   const tradesMatch = USER_TRADES.exec(ctx.path);
+  const activityMatch = USER_ACTIVITY.exec(ctx.path);
   const revokeMatch = USER_SESSION_REVOCATIONS.exec(ctx.path);
   const verifyMatch = USER_EMAIL_VERIFICATION.exec(ctx.path);
+  const isRefresh = ctx.path === SYSTEM_DIAGNOSTICS_REFRESH;
 
   // Not ours → hand the request back to the dispatcher (which falls through to
   // the kernel's 404). This check runs BEFORE the capability check so an absent
@@ -123,8 +135,10 @@ export async function handleAdminConsoleRoutes(ctx: ExtendedRouteContext): Promi
     devicesMatch !== null ||
     accountsMatch !== null ||
     tradesMatch !== null ||
+    activityMatch !== null ||
     revokeMatch !== null ||
-    verifyMatch !== null;
+    verifyMatch !== null ||
+    isRefresh;
   if (!owns) return null;
 
   if (capability === null) return capabilityAbsent(ctx, "adminConsole");
@@ -138,11 +152,15 @@ export async function handleAdminConsoleRoutes(ctx: ExtendedRouteContext): Promi
 
   const permission: Permission | null = readRoute !== null
     ? readRoute.permission
-    : sessionsMatch !== null || devicesMatch !== null || accountsMatch !== null || tradesMatch !== null
+    : sessionsMatch !== null || devicesMatch !== null || accountsMatch !== null || tradesMatch !== null || activityMatch !== null
       ? "users.view"
       : revokeMatch !== null
         ? "users.manage_status"
-        : "users.verify_email";
+        : verifyMatch !== null
+          ? "users.verify_email"
+          : isRefresh
+            ? "system.health.view"
+            : null;
   if (permission === null) return null;
   if (!canAct(authority, permission)) return forbidden(ctx);
 
@@ -180,6 +198,12 @@ export async function handleAdminConsoleRoutes(ctx: ExtendedRouteContext): Promi
       }
       if (ctx.path === SYSTEM_HEALTH) {
         return { status: 200, body: ok(await svc.health()) };
+      }
+      if (ctx.path === CONFIG_EFFECTIVE) {
+        return { status: 200, body: ok(await svc.effectiveConfig()) };
+      }
+      if (ctx.path === SYSTEM_DIAGNOSTICS) {
+        return { status: 200, body: ok(await svc.diagnostics()) };
       }
       if (ctx.path === SECURITY_SIGNUPS || ctx.path === SECURITY_LOGINS) {
         const feed = ctx.path === SECURITY_SIGNUPS ? "signup" : "login";
@@ -225,6 +249,10 @@ export async function handleAdminConsoleRoutes(ctx: ExtendedRouteContext): Promi
         const id = decodeURIComponent(tradesMatch[1] ?? "");
         return { status: 200, body: ok(await svc.userTrades(id, ctx.url.searchParams)) };
       }
+      if (activityMatch !== null) {
+        const id = decodeURIComponent(activityMatch[1] ?? "");
+        return { status: 200, body: ok(await svc.userActivity(id, ctx.url.searchParams)) };
+      }
     }
 
     if (ctx.method === "POST" && revokeMatch !== null) {
@@ -250,6 +278,12 @@ export async function handleAdminConsoleRoutes(ctx: ExtendedRouteContext): Promi
       const id = decodeURIComponent(verifyMatch[1] ?? "");
       const result = await users.verifyEmail(id, actor);
       return { status: 200, body: ok({ user: result.user, changed: result.changed }) };
+    }
+
+    if (ctx.method === "POST" && isRefresh) {
+      // No body required; rate-limited inside the service (5 per 120s per actor)
+      const result = await svc.refreshDiagnostics(claims.sub);
+      return { status: 200, body: ok(result) };
     }
   } catch (err: unknown) {
     if (err instanceof AuthError) return consoleError(ctx, err);

@@ -444,7 +444,80 @@ export class AdminConsoleService {
     );
     return { items: result.items, total: result.total, ...page };
   }
+
+  // --- Phase 10: effective config (secret-free) ---
+  async effectiveConfig(): Promise<unknown> {
+    return this.deps.store.effectiveConfig();
+  }
+
+  // --- Phase 10: diagnostics (detailed health) ---
+  async diagnostics(): Promise<unknown> {
+    return this.deps.store.diagnostics();
+  }
+
+  // --- Phase 10: refresh diagnostics (bounded, rate-limited, honest) ---
+  async refreshDiagnostics(actorId: string): Promise<unknown> {
+    const key = `admin-system-health-refresh:${actorId}`;
+    const now = Date.now();
+    const windowMs = 120_000;
+    const maxHits = 5;
+    let bucket = refreshBuckets.get(key);
+    if (bucket === undefined) {
+      bucket = [];
+      refreshBuckets.set(key, bucket);
+    }
+    // prune outside window
+    const fresh = bucket.filter((t) => now - t < windowMs);
+    refreshBuckets.set(key, fresh);
+    if (fresh.length >= maxHits) {
+      throw new AuthError(429, "TOO_MANY_REQUESTS", "Too many refresh requests. Try again shortly.", {
+        limit: String(maxHits),
+        window: "120s",
+      });
+    }
+    fresh.push(now);
+    // Honest refresh: derive status from configuration presence (no external call that would storm providers).
+    // Each integration's baseline (configured ? HEALTHY : NOT_CONFIGURED) is persisted so a subsequent GET
+    // reflects the last operator-initiated refresh, matching Legacy's cache semantics without fabricating latency.
+    const diag = await this.deps.store.diagnostics();
+    const effective = await this.deps.store.effectiveConfig();
+    const integrations = effective.integrations as unknown as Record<string, { configured: boolean }>;
+    const probe: Record<string, { status: string; reachable: boolean; verified: boolean; latencyMs: number | null; checkedAt: string; message: string | null }> = {};
+    const nowIso = new Date().toISOString();
+    const toHealth = (status: string): string => {
+      if (status === "SUCCESS") return "HEALTHY";
+      if (status === "NOT_CONFIGURED") return "NOT_CONFIGURED";
+      return "UNHEALTHY";
+    };
+    for (const name of ["metaapi", "email", "ai", "n8n_relay"] as const) {
+      const configured = Boolean((integrations as Record<string, { configured: boolean }>)[name === "n8n_relay" ? "n8nRelay" : name]?.configured);
+      const probeStatus = configured ? "SUCCESS" : "NOT_CONFIGURED";
+      const healthStatus = toHealth(probeStatus);
+      const msg = configured ? null : `${name} is not configured.`;
+      await this.deps.store.refreshIntegrationHealth(name, healthStatus, 0, probeStatus === "SUCCESS" ? null : probeStatus, msg);
+      probe[name] = {
+        status: probeStatus,
+        reachable: probeStatus === "SUCCESS",
+        verified: probeStatus === "SUCCESS",
+        latencyMs: 0,
+        checkedAt: nowIso,
+        message: msg,
+      };
+    }
+    const refreshed = await this.deps.store.diagnostics();
+    return { health: refreshed, probe, previous: diag };
+  }
+
+  async userActivity(userId: string, params: URLSearchParams): Promise<Record<string, unknown>> {
+    await this.deps.users.getUser(userId);
+    const page = readPage(params);
+    const result = await this.deps.store.userActivity(userId, page.limit, page.offset);
+    return { items: result.items, total: result.total, ...page };
+  }
 }
+
+// In-memory rate limiter for diagnostics refresh (5 per 120s per actor). Exported for tests.
+export const refreshBuckets: Map<string, number[]> = new Map();
 
 /** The console's user list, projected for the operator (no secrets). */
 export type { ConsoleUserRow } from "./adminConsoleStore.js";

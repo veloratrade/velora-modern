@@ -279,6 +279,58 @@ export interface RevenueUnavailable {
   readonly metrics: Record<string, { readonly available: false; readonly reason: "NO_BILLING_SOURCE" }>;
 }
 
+// --- Phase 10: effective config (secret-free supervisory inventory) ----------
+export interface EffectiveConfig {
+  readonly providers: readonly {
+    readonly provider: string;
+    readonly status: string | null;
+    readonly verified: boolean | null;
+    readonly lastCheckedAt: string | null;
+    readonly errorCode: string | null;
+  }[];
+  readonly features: readonly {
+    readonly feature: string;
+    readonly enabled: boolean;
+    readonly rollout: number;
+  }[];
+  readonly globalRoute: {
+    readonly configured: string | null;
+    readonly effective: string;
+    readonly source: string;
+  };
+  readonly integrations: {
+    readonly metaapi: { readonly configured: boolean; readonly hasSecret: boolean };
+    readonly email: { readonly configured: boolean; readonly driver: string | null };
+    readonly ai: { readonly configured: boolean };
+    readonly n8nRelay: { readonly configured: boolean; readonly hasUrl: boolean; readonly hasToken: boolean };
+  };
+  readonly precedence: Readonly<Record<string, string>>;
+}
+
+export interface DiagnosticsComponent {
+  readonly component: string;
+  readonly status: "HEALTHY" | "DEGRADED" | "UNHEALTHY" | "NOT_CONFIGURED" | "NOT_APPLICABLE" | "UNKNOWN";
+  readonly configured?: boolean;
+  readonly latencyMs?: number | null;
+  readonly lastCheckedAt?: string | null;
+  readonly errorCode?: string | null;
+  readonly message?: string | null;
+  readonly checkedAt: string;
+}
+
+export interface DiagnosticsSnapshot {
+  readonly checkedAt: string;
+  readonly components: readonly DiagnosticsComponent[];
+}
+
+export interface ActivityRow {
+  readonly event: string;
+  readonly time: string;
+  readonly ip: string | null;
+  readonly userAgent: string | null;
+  readonly result: string;
+}
+
 // ---------------------------------------------------------------------------
 // Store port
 // ---------------------------------------------------------------------------
@@ -292,6 +344,16 @@ export interface AdminConsoleStore {
   operationsAnalytics(from: Date, to: Date): Promise<OperationsAnalytics>;
   revenueAnalytics(): Promise<RevenueUnavailable>;
   health(): Promise<HealthFacts>;
+  effectiveConfig(): Promise<EffectiveConfig>;
+  diagnostics(): Promise<DiagnosticsSnapshot>;
+  refreshIntegrationHealth(
+    integration: string,
+    status: string,
+    latencyMs: number | null,
+    errorCode: string | null,
+    message: string | null,
+  ): Promise<void>;
+  userActivity(userId: string, limit: number, offset: number): Promise<Page<ActivityRow>>;
   securityFeed(
     eventType: "signup" | "login",
     filter: SecurityFeedFilter,
@@ -744,6 +806,224 @@ export class PgAdminConsoleStore implements AdminConsoleStore {
     };
   }
 
+  async effectiveConfig(): Promise<EffectiveConfig> {
+    const providers = await this.q(
+      `SELECT provider, status, verified, last_checked_at, error_code FROM ai_provider_credentials ORDER BY provider`,
+      [],
+    );
+    const flags = await this.q(
+      `SELECT feature_name, enabled, rollout_percentage FROM ai_feature_flags ORDER BY feature_name`,
+      [],
+    );
+    const [routeRow] = await this.q(`SELECT setting_value FROM ai_settings WHERE setting_key = 'ai_route_default' LIMIT 1`, []);
+    const configuredRoute = routeRow?.["setting_value"] === null || routeRow?.["setting_value"] === undefined ? null : String(routeRow["setting_value"]);
+    const effective = configuredRoute ?? "direct";
+    const source = configuredRoute !== null ? "database" : "default";
+    const [metaSecret] = await this.q(`SELECT 1 AS present FROM integration_platform_secrets WHERE secret_key = 'METAAPI_TOKEN' LIMIT 1`, []);
+    const [mailDriverRow] = await this.q(`SELECT setting_value FROM integration_settings WHERE setting_key = 'MAIL_DRIVER' LIMIT 1`, []);
+    const mailDriver = mailDriverRow?.["setting_value"] === null || mailDriverRow?.["setting_value"] === undefined ? null : String(mailDriverRow["setting_value"]);
+    const mailConfigured = mailDriver !== null && mailDriver !== "log" && mailDriver !== "";
+    const aiConfigured = providers.some((p) => String(p["status"]) === "VALID");
+    const [relayUrl] = await this.q(`SELECT 1 AS present FROM ai_platform_secrets WHERE secret_key = 'GEMINI_RELAY_URL' LIMIT 1`, []);
+    const [relayToken] = await this.q(`SELECT 1 AS present FROM ai_platform_secrets WHERE secret_key = 'GEMINI_RELAY_TOKEN' LIMIT 1`, []);
+    const n8nHasUrl = relayUrl !== undefined;
+    const n8nHasToken = relayToken !== undefined;
+    const n8nConfigured = n8nHasUrl && n8nHasToken;
+    return {
+      providers: providers.map((r) => ({
+        provider: String(r["provider"]),
+        status: r["status"] === null ? null : String(r["status"]),
+        verified: r["verified"] === null || r["verified"] === undefined ? null : Boolean(r["verified"]),
+        lastCheckedAt: isoOrNull(r["last_checked_at"]),
+        errorCode: r["error_code"] === null ? null : String(r["error_code"]),
+      })),
+      features: flags.map((r) => ({
+        feature: String(r["feature_name"]),
+        enabled: Boolean(r["enabled"]),
+        rollout: Number(r["rollout_percentage"] ?? 0),
+      })),
+      globalRoute: { configured: configuredRoute, effective, source },
+      integrations: {
+        metaapi: { configured: metaSecret !== undefined, hasSecret: metaSecret !== undefined },
+        email: { configured: mailConfigured, driver: mailDriver },
+        ai: { configured: aiConfigured },
+        n8nRelay: { configured: n8nConfigured, hasUrl: n8nHasUrl, hasToken: n8nHasToken },
+      },
+      precedence: {
+        provider_enabled: "ai_feature_routes(db) > AI_ENABLED_PROVIDERS(env). Feature with no DB rows uses env-default chain (source=env-default).",
+        feature_chain: "enabled + priority ASC + capability rows from ai_feature_routes; otherwise legacy env-default chain.",
+        model: "chain row model > provider env model > ProviderCatalog default.",
+        route: "chain row route override > ai_route_default(DB) > direct.",
+        credential: "ai_platform_secrets / integration_platform_secrets (encrypted at rest in PostgreSQL), never returned as plaintext.",
+        quota: "ai_provider_quotas (internal budget; quota_limit seeded default 1500). Not provider-reported.",
+      },
+    };
+  }
+
+  async diagnostics(): Promise<DiagnosticsSnapshot> {
+    const checkedAt = new Date().toISOString();
+    const started = process.hrtime.bigint();
+    let dbError: string | null = null;
+    try {
+      await this.q("SELECT 1", []);
+    } catch (e: unknown) {
+      dbError = e instanceof Error ? e.message : String(e);
+    }
+    const latencyMs = Number(process.hrtime.bigint() - started) / 1_000_000;
+    const dbStatus = dbError !== null ? "UNHEALTHY" : latencyMs > 500 ? "DEGRADED" : "HEALTHY";
+    const components: DiagnosticsComponent[] = [];
+    components.push({
+      component: "api",
+      status: "HEALTHY",
+      message: "API responding",
+      checkedAt,
+    });
+    components.push({
+      component: "database",
+      status: dbStatus as DiagnosticsComponent["status"],
+      latencyMs: Math.round(latencyMs * 100) / 100,
+      message: dbError !== null ? `Database query failed: ${dbError.slice(0, 200)}` : latencyMs > 500 ? "Database latency high" : "Database reachable",
+      checkedAt,
+    });
+    components.push({
+      component: "redis",
+      status: "NOT_APPLICABLE",
+      message: "No Redis in this architecture (DB-backed fenced queues)",
+      checkedAt,
+    });
+    // Workers: count pending from ai_coaching logs? No dedicated queue table => report NOT_APPLICABLE with reason
+    try {
+      const [pending] = await this.q(`SELECT count(*)::int AS n FROM ai_coaching_logs WHERE outcome = 'pending'`, []);
+      const [failed] = await this.q(`SELECT count(*)::int AS n FROM ai_coaching_logs WHERE outcome = 'failed'`, []);
+      const p = num(pending?.["n"] ?? 0);
+      const f = num(failed?.["n"] ?? 0);
+      const status = f > 0 ? "DEGRADED" : "HEALTHY";
+      components.push({
+        component: "workers",
+        status,
+        message: f > 0 ? "Worker jobs have failures" : "Workers queue drained",
+        latencyMs: null,
+        checkedAt,
+      });
+      void p;
+    } catch {
+      components.push({
+        component: "workers",
+        status: "NOT_APPLICABLE",
+        message: "No dedicated worker queue table (DB-backed, phase 8 pending)",
+        checkedAt,
+      });
+    }
+    const integrations: { name: string; check: () => Promise<{ configured: boolean; detail?: string }> }[] = [];
+    integrations.push({
+      name: "metaapi",
+      check: async () => {
+        const [row] = await this.q(`SELECT 1 AS present FROM integration_platform_secrets WHERE secret_key='METAAPI_TOKEN' LIMIT 1`, []);
+        return { configured: row !== undefined };
+      },
+    });
+    integrations.push({
+      name: "n8n_relay",
+      check: async () => {
+        const [u] = await this.q(`SELECT 1 AS present FROM ai_platform_secrets WHERE secret_key='GEMINI_RELAY_URL' LIMIT 1`, []);
+        const [t] = await this.q(`SELECT 1 AS present FROM ai_platform_secrets WHERE secret_key='GEMINI_RELAY_TOKEN' LIMIT 1`, []);
+        return { configured: u !== undefined && t !== undefined };
+      },
+    });
+    integrations.push({
+      name: "ai",
+      check: async () => {
+        const [row] = await this.q(`SELECT 1 AS present FROM ai_provider_credentials WHERE status='VALID' LIMIT 1`, []);
+        return { configured: row !== undefined };
+      },
+    });
+    integrations.push({
+      name: "email",
+      check: async () => {
+        const [row] = await this.q(`SELECT setting_value FROM integration_settings WHERE setting_key='MAIL_DRIVER' LIMIT 1`, []);
+        const driver = row?.["setting_value"] === null || row?.["setting_value"] === undefined ? null : String(row["setting_value"]);
+        const configured = driver !== null && driver !== "log" && driver !== "";
+        return { configured, detail: driver ?? "log" };
+      },
+    });
+    for (const integ of integrations) {
+      let configured = false;
+      let detail: string | undefined;
+      try {
+        const res = await integ.check();
+        configured = res.configured;
+        detail = res.detail;
+      } catch {
+        configured = false;
+      }
+      let baseline: DiagnosticsComponent["status"] = configured ? "HEALTHY" : "NOT_CONFIGURED";
+      let lastCheckedAt: string | null = null;
+      let latency: number | null = null;
+      let errorCode: string | null = null;
+      let diag: string | null = null;
+      try {
+        const [row] = await this.q(`SELECT status, latency_ms, error_code, message, checked_at FROM integration_health WHERE integration=$1 LIMIT 1`, [integ.name]);
+        if (row !== undefined) {
+          baseline = String(row["status"]) as DiagnosticsComponent["status"];
+          latency = row["latency_ms"] === null ? null : Number(row["latency_ms"]);
+          errorCode = row["error_code"] === null ? null : String(row["error_code"]);
+          diag = row["message"] === null ? null : String(row["message"]);
+          lastCheckedAt = isoOrNull(row["checked_at"]);
+        }
+      } catch {
+        // table absent => keep baseline
+      }
+      components.push({
+        component: integ.name,
+        status: baseline,
+        configured,
+        latencyMs: latency,
+        lastCheckedAt,
+        errorCode,
+        message: diag ?? (configured ? "Configured" : "Not configured"),
+        checkedAt,
+      });
+      void detail;
+    }
+    return { checkedAt, components };
+  }
+
+  async refreshIntegrationHealth(
+    integration: string,
+    status: string,
+    latencyMs: number | null,
+    errorCode: string | null,
+    message: string | null,
+  ): Promise<void> {
+    await this.q(
+      `INSERT INTO integration_health (integration, status, latency_ms, error_code, message, checked_at)
+       VALUES ($1,$2,$3,$4,$5, now())
+       ON CONFLICT (integration) DO UPDATE SET status=EXCLUDED.status, latency_ms=EXCLUDED.latency_ms, error_code=EXCLUDED.error_code, message=EXCLUDED.message, checked_at=now()`,
+      [integration, status, latencyMs, errorCode, message],
+    );
+  }
+
+  async userActivity(userId: string, limit: number, offset: number): Promise<Page<ActivityRow>> {
+    const rows = await this.q(
+      `SELECT id, ip_address, user_agent, created_at, revoked_at
+         FROM user_sessions WHERE user_id = $1::bigint
+        ORDER BY id DESC LIMIT $2 OFFSET $3`,
+      [userId, limit, offset],
+    );
+    const [count] = await this.q(`SELECT count(*)::int AS n FROM user_sessions WHERE user_id=$1::bigint`, [userId]);
+    const items: ActivityRow[] = rows.map((r) => {
+      const revoked = r["revoked_at"] !== null && r["revoked_at"] !== undefined;
+      return {
+        event: revoked ? "session.revoked" : "session.created",
+        time: iso(revoked ? r["revoked_at"] : r["created_at"]),
+        ip: r["ip_address"] === null ? null : String(r["ip_address"]),
+        userAgent: r["user_agent"] === null ? null : String(r["user_agent"]),
+        result: revoked ? "revoked" : "active",
+      };
+    });
+    return { items, total: num(count?.["n"] ?? 0) };
+  }
+
   async securityFeed(
     eventType: "signup" | "login",
     filter: SecurityFeedFilter,
@@ -1087,6 +1367,53 @@ export class MemoryAdminConsoleStore implements AdminConsoleStore {
         nodeVersion: process.version,
       }
     );
+  }
+
+  async effectiveConfig(): Promise<EffectiveConfig> {
+    return {
+      providers: [],
+      features: [],
+      globalRoute: { configured: null, effective: "direct", source: "default" },
+      integrations: {
+        metaapi: { configured: false, hasSecret: false },
+        email: { configured: false, driver: null },
+        ai: { configured: false },
+        n8nRelay: { configured: false, hasUrl: false, hasToken: false },
+      },
+      precedence: {
+        provider_enabled: "ai_feature_routes(db) > env-default",
+        feature_chain: "enabled + priority ASC",
+        model: "chain row model > provider default",
+        route: "chain row route > ai_route_default > direct",
+        credential: "encrypted at rest in PostgreSQL, never plaintext over HTTP",
+        quota: "internal budget 1500",
+      },
+    };
+  }
+
+  async diagnostics(): Promise<DiagnosticsSnapshot> {
+    const checkedAt = new Date().toISOString();
+    return {
+      checkedAt,
+      components: [
+        { component: "api", status: "HEALTHY", message: "API responding", checkedAt },
+        { component: "database", status: "HEALTHY", latencyMs: 0, message: "Database reachable", checkedAt },
+        { component: "redis", status: "NOT_APPLICABLE", message: "No Redis in this architecture", checkedAt },
+        { component: "workers", status: "NOT_APPLICABLE", message: "No dedicated worker queue", checkedAt },
+        { component: "metaapi", status: "NOT_CONFIGURED", configured: false, message: "Not configured", checkedAt },
+        { component: "n8n_relay", status: "NOT_CONFIGURED", configured: false, message: "Not configured", checkedAt },
+        { component: "ai", status: "NOT_CONFIGURED", configured: false, message: "Not configured", checkedAt },
+        { component: "email", status: "NOT_CONFIGURED", configured: false, message: "Not configured", checkedAt },
+      ],
+    };
+  }
+
+  async refreshIntegrationHealth(): Promise<void> {
+    return;
+  }
+
+  async userActivity(): Promise<Page<ActivityRow>> {
+    return { items: [], total: 0 };
   }
 
   async securityFeed(): Promise<Page<ConsoleSecurityEventRow>> {
