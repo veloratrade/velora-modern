@@ -182,6 +182,31 @@ export class AdminConsoleService {
     };
   }
 
+  async analyticsOverview(range: ResolvedRange): Promise<unknown> {
+    return {
+      range: { from: range.from.toISOString(), to: range.to.toISOString(), preset: range.preset },
+      ...(await this.deps.store.analyticsOverview(range.from, range.to)),
+    };
+  }
+
+  async aiAnalytics(range: ResolvedRange): Promise<unknown> {
+    return {
+      range: { from: range.from.toISOString(), to: range.to.toISOString(), preset: range.preset },
+      ...(await this.deps.store.aiAnalytics(range.from, range.to)),
+    };
+  }
+
+  async operationsAnalytics(range: ResolvedRange): Promise<unknown> {
+    return {
+      range: { from: range.from.toISOString(), to: range.to.toISOString(), preset: range.preset },
+      ...(await this.deps.store.operationsAnalytics(range.from, range.to)),
+    };
+  }
+
+  async revenueAnalytics(): Promise<unknown> {
+    return this.deps.store.revenueAnalytics();
+  }
+
   /**
    * The health report.
    *

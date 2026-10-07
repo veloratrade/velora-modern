@@ -40,6 +40,24 @@ const num = (v: unknown): number => Number(v ?? 0);
 /** Money and any other NUMERIC: the driver returns an exact string; keep it. */
 const dec = (v: unknown): string => (v === null || v === undefined ? "0" : String(v));
 
+function revenueUnavailable(): RevenueUnavailable {
+  const unavailable = (): { readonly available: false; readonly reason: "NO_BILLING_SOURCE" } => ({ available: false, reason: "NO_BILLING_SOURCE" });
+  return {
+    available: false,
+    reason: "NO_BILLING_SOURCE",
+    note: "No authoritative billing source is configured. Financial metrics are unavailable, not zero.",
+    metrics: {
+      revenue: unavailable(),
+      mrr: unavailable(),
+      arr: unavailable(),
+      churn: unavailable(),
+      ltv: unavailable(),
+      paymentVolume: unavailable(),
+      refunds: unavailable(),
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Shapes
 // ---------------------------------------------------------------------------
@@ -216,6 +234,51 @@ export interface Page<T> {
   readonly total: number;
 }
 
+export interface AnalyticsOverview {
+  readonly users: { readonly total: number; readonly active: number; readonly suspended: number; readonly newInRange: number };
+  readonly trading: { readonly totalTrades: number; readonly tradesInRange: number; readonly tradingAccounts: number };
+  readonly ai: { readonly totalRequests: number; readonly requestsInRange: number; readonly failedInRange: number };
+  readonly operations: { readonly systemErrors: number; readonly integrationFailures: number };
+  readonly revenue: RevenueUnavailable;
+}
+
+export interface AiAnalytics {
+  readonly total: number;
+  readonly inRange: number;
+  readonly byStatus: readonly { readonly key: string; readonly count: number }[];
+  readonly byProvider: readonly { readonly key: string; readonly count: number }[];
+  readonly byFeature: readonly { readonly key: string; readonly count: number }[];
+  readonly byModel: readonly { readonly key: string; readonly count: number }[];
+  readonly tokensUsed: number;
+  readonly cost: string;
+  readonly trend: readonly { readonly day: string; readonly count: number }[];
+}
+
+export interface OperationsAnalytics {
+  readonly systemLogs: {
+    readonly total: number;
+    readonly errors: number;
+    readonly bySeverity: readonly { readonly key: string; readonly count: number }[];
+    readonly bySource: readonly { readonly key: string; readonly count: number }[];
+  };
+  readonly integrations: readonly {
+    readonly integration: string;
+    readonly status: string;
+    readonly latencyMs: number | null;
+    readonly errorCode: string | null;
+    readonly checkedAt: string;
+  }[];
+  readonly integrationFailures: number;
+  readonly adminAudit: { readonly eventsInRange: number };
+}
+
+export interface RevenueUnavailable {
+  readonly available: false;
+  readonly reason: "NO_BILLING_SOURCE";
+  readonly note: string;
+  readonly metrics: Record<string, { readonly available: false; readonly reason: "NO_BILLING_SOURCE" }>;
+}
+
 // ---------------------------------------------------------------------------
 // Store port
 // ---------------------------------------------------------------------------
@@ -224,6 +287,10 @@ export interface AdminConsoleStore {
   overview(): Promise<OverviewSnapshot>;
   usersAnalytics(from: Date, to: Date): Promise<UsersAnalytics>;
   tradingAnalytics(from: Date, to: Date): Promise<TradingAnalytics>;
+  analyticsOverview(from: Date, to: Date): Promise<AnalyticsOverview>;
+  aiAnalytics(from: Date, to: Date): Promise<AiAnalytics>;
+  operationsAnalytics(from: Date, to: Date): Promise<OperationsAnalytics>;
+  revenueAnalytics(): Promise<RevenueUnavailable>;
   health(): Promise<HealthFacts>;
   securityFeed(
     eventType: "signup" | "login",
@@ -495,6 +562,153 @@ export class PgAdminConsoleStore implements AdminConsoleStore {
         count: num(r["n"]),
       })),
     };
+  }
+
+  async analyticsOverview(from: Date, to: Date): Promise<AnalyticsOverview> {
+    const [users] = await this.q(
+      `SELECT
+         (SELECT count(*)::int FROM users) AS total,
+         (SELECT count(*)::int FROM users WHERE status = 'active') AS active,
+         (SELECT count(*)::int FROM users WHERE status = 'suspended') AS suspended,
+         (SELECT count(*)::int FROM users WHERE created_at >= $1 AND created_at < $2) AS new_in_range`,
+      [from, to],
+    );
+    const [trading] = await this.q(
+      `SELECT
+         (SELECT count(*)::int FROM trades WHERE deleted_at IS NULL) AS total_trades,
+         (SELECT count(*)::int FROM trades WHERE deleted_at IS NULL AND created_at >= $1 AND created_at < $2) AS in_range,
+         (SELECT count(*)::int FROM trading_accounts) AS accounts`,
+      [from, to],
+    );
+    const [ai] = await this.q(
+      `SELECT
+         (SELECT count(*)::int FROM ai_coaching_logs) AS total,
+         (SELECT count(*)::int FROM ai_coaching_logs WHERE created_at >= $1 AND created_at < $2) AS in_range,
+         (SELECT count(*)::int FROM ai_coaching_logs WHERE outcome <> 'success' AND created_at >= $1 AND created_at < $2) AS failed`,
+      [from, to],
+    );
+    const [ops] = await this.q(
+      `SELECT
+         (SELECT count(*)::int FROM system_logs WHERE severity = 'ERROR' AND created_at >= $1 AND created_at < $2) AS errors,
+         (SELECT count(*)::int FROM integration_health WHERE status NOT IN ('HEALTHY','OK')) AS failures`,
+      [from, to],
+    );
+    const u = users ?? {};
+    const tr = trading ?? {};
+    const a = ai ?? {};
+    const o = ops ?? {};
+    return {
+      users: {
+        total: num(u["total"]),
+        active: num(u["active"]),
+        suspended: num(u["suspended"]),
+        newInRange: num(u["new_in_range"]),
+      },
+      trading: {
+        totalTrades: num(tr["total_trades"]),
+        tradesInRange: num(tr["in_range"]),
+        tradingAccounts: num(tr["accounts"]),
+      },
+      ai: {
+        totalRequests: num(a["total"]),
+        requestsInRange: num(a["in_range"]),
+        failedInRange: num(a["failed"]),
+      },
+      operations: {
+        systemErrors: num(o["errors"]),
+        integrationFailures: num(o["failures"]),
+      },
+      revenue: revenueUnavailable(),
+    };
+  }
+
+  async aiAnalytics(from: Date, to: Date): Promise<AiAnalytics> {
+    const [totals] = await this.q(`SELECT count(*)::int AS total FROM ai_coaching_logs`, []);
+    const [inRange] = await this.q(
+      `SELECT count(*)::int AS n FROM ai_coaching_logs WHERE created_at >= $1 AND created_at < $2`,
+      [from, to],
+    );
+    const byStatus = await this.q(
+      `SELECT outcome AS key, count(*)::int AS n FROM ai_coaching_logs WHERE created_at >= $1 AND created_at < $2 GROUP BY outcome ORDER BY n DESC, key`,
+      [from, to],
+    );
+    const byProvider = await this.q(
+      `SELECT provider AS key, count(*)::int AS n FROM ai_coaching_logs WHERE created_at >= $1 AND created_at < $2 GROUP BY provider ORDER BY n DESC, key`,
+      [from, to],
+    );
+    const byFeature = await this.q(
+      `SELECT feature AS key, count(*)::int AS n FROM ai_coaching_logs WHERE created_at >= $1 AND created_at < $2 GROUP BY feature ORDER BY n DESC, key`,
+      [from, to],
+    );
+    const byModel = await this.q(
+      `SELECT model AS key, count(*)::int AS n FROM ai_coaching_logs WHERE created_at >= $1 AND created_at < $2 GROUP BY model ORDER BY n DESC, key`,
+      [from, to],
+    );
+    const [costRow] = await this.q(
+      `SELECT COALESCE(sum(cost_micro_usd), 0)::bigint AS cost,
+              COALESCE(sum(tokens_in), 0)::int + COALESCE(sum(tokens_out), 0)::int AS tokens
+         FROM ai_coaching_logs WHERE created_at >= $1 AND created_at < $2`,
+      [from, to],
+    );
+    const trend = await this.q(
+      `SELECT to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
+              count(*)::int AS n
+         FROM ai_coaching_logs WHERE created_at >= $1 AND created_at < $2
+        GROUP BY 1 ORDER BY 1`,
+      [from, to],
+    );
+    const c = costRow ?? {};
+    return {
+      total: num(totals?.["total"] ?? 0),
+      inRange: num(inRange?.["n"] ?? 0),
+      byStatus: byStatus.map((r) => ({ key: String(r["key"]), count: num(r["n"]) })),
+      byProvider: byProvider.map((r) => ({ key: String(r["key"]), count: num(r["n"]) })),
+      byFeature: byFeature.map((r) => ({ key: String(r["key"]), count: num(r["n"]) })),
+      byModel: byModel.map((r) => ({ key: String(r["key"]), count: num(r["n"]) })),
+      tokensUsed: num(c["tokens"] ?? 0),
+      cost: (Number(c["cost"] ?? 0) / 1_000_000).toFixed(4),
+      trend: trend.map((r) => ({ day: String(r["day"]), count: num(r["n"]) })),
+    };
+  }
+
+  async operationsAnalytics(from: Date, to: Date): Promise<OperationsAnalytics> {
+    const [sysTotal] = await this.q(`SELECT count(*)::int AS n FROM system_logs WHERE created_at >= $1 AND created_at < $2`, [from, to]);
+    const [sysErrors] = await this.q(`SELECT count(*)::int AS n FROM system_logs WHERE severity = 'ERROR' AND created_at >= $1 AND created_at < $2`, [from, to]);
+    const bySeverity = await this.q(
+      `SELECT severity AS key, count(*)::int AS n FROM system_logs WHERE created_at >= $1 AND created_at < $2 GROUP BY severity ORDER BY n DESC, key`,
+      [from, to],
+    );
+    const bySource = await this.q(
+      `SELECT source AS key, count(*)::int AS n FROM system_logs WHERE created_at >= $1 AND created_at < $2 GROUP BY source ORDER BY n DESC, key`,
+      [from, to],
+    );
+    const integrations = await this.q(
+      `SELECT integration, status, latency_ms, error_code, checked_at FROM integration_health ORDER BY integration`,
+      [],
+    );
+    const [failures] = await this.q(`SELECT count(*)::int AS n FROM integration_health WHERE status NOT IN ('HEALTHY','OK')`, []);
+    const [audit] = await this.q(`SELECT count(*)::int AS n FROM audit_log WHERE created_at >= $1 AND created_at < $2`, [from, to]);
+    return {
+      systemLogs: {
+        total: num(sysTotal?.["n"] ?? 0),
+        errors: num(sysErrors?.["n"] ?? 0),
+        bySeverity: bySeverity.map((r) => ({ key: String(r["key"]), count: num(r["n"]) })),
+        bySource: bySource.map((r) => ({ key: String(r["key"]), count: num(r["n"]) })),
+      },
+      integrations: integrations.map((r) => ({
+        integration: String(r["integration"]),
+        status: String(r["status"]),
+        latencyMs: r["latency_ms"] === null ? null : Number(r["latency_ms"]),
+        errorCode: r["error_code"] === null ? null : String(r["error_code"]),
+        checkedAt: iso(r["checked_at"]),
+      })),
+      integrationFailures: num(failures?.["n"] ?? 0),
+      adminAudit: { eventsInRange: num(audit?.["n"] ?? 0) },
+    };
+  }
+
+  async revenueAnalytics(): Promise<RevenueUnavailable> {
+    return revenueUnavailable();
   }
 
   async health(): Promise<HealthFacts> {
@@ -819,6 +1033,43 @@ export class MemoryAdminConsoleStore implements AdminConsoleStore {
         pnlTrend: [],
       }
     );
+  }
+
+  async analyticsOverview(): Promise<AnalyticsOverview> {
+    return {
+      users: { total: 0, active: 0, suspended: 0, newInRange: 0 },
+      trading: { totalTrades: 0, tradesInRange: 0, tradingAccounts: 0 },
+      ai: { totalRequests: 0, requestsInRange: 0, failedInRange: 0 },
+      operations: { systemErrors: 0, integrationFailures: 0 },
+      revenue: revenueUnavailable(),
+    };
+  }
+
+  async aiAnalytics(): Promise<AiAnalytics> {
+    return {
+      total: 0,
+      inRange: 0,
+      byStatus: [],
+      byProvider: [],
+      byFeature: [],
+      byModel: [],
+      tokensUsed: 0,
+      cost: "0.0000",
+      trend: [],
+    };
+  }
+
+  async operationsAnalytics(): Promise<OperationsAnalytics> {
+    return {
+      systemLogs: { total: 0, errors: 0, bySeverity: [], bySource: [] },
+      integrations: [],
+      integrationFailures: 0,
+      adminAudit: { eventsInRange: 0 },
+    };
+  }
+
+  async revenueAnalytics(): Promise<RevenueUnavailable> {
+    return revenueUnavailable();
   }
 
   async health(): Promise<HealthFacts> {

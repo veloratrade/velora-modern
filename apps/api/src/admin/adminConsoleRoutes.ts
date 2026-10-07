@@ -47,6 +47,10 @@ import type { ExtendedRouteContext, RouteResult } from "../routes/types.js";
 const OVERVIEW = "/api/v1/admin/overview";
 const ANALYTICS_USERS = "/api/v1/admin/analytics/users";
 const ANALYTICS_TRADING = "/api/v1/admin/analytics/trading";
+const ANALYTICS_OVERVIEW = "/api/v1/admin/analytics/overview";
+const ANALYTICS_AI = "/api/v1/admin/analytics/ai";
+const ANALYTICS_OPERATIONS = "/api/v1/admin/analytics/operations";
+const ANALYTICS_REVENUE = "/api/v1/admin/analytics/revenue";
 const SYSTEM_HEALTH = "/api/v1/admin/system/health";
 const SECURITY_SIGNUPS = "/api/v1/admin/security/signups";
 const SECURITY_LOGINS = "/api/v1/admin/security/logins";
@@ -64,6 +68,10 @@ const READ_ROUTES: ReadonlyArray<{ readonly path: string; readonly permission: P
   { path: OVERVIEW, permission: "overview.view" },
   { path: ANALYTICS_USERS, permission: "analytics.view" },
   { path: ANALYTICS_TRADING, permission: "analytics.view" },
+  { path: ANALYTICS_OVERVIEW, permission: "analytics.view" },
+  { path: ANALYTICS_AI, permission: "analytics.view" },
+  { path: ANALYTICS_OPERATIONS, permission: "analytics.view" },
+  { path: ANALYTICS_REVENUE, permission: "analytics.view" },
   { path: SYSTEM_HEALTH, permission: "system.health.view" },
   { path: SECURITY_SIGNUPS, permission: "audit.view" },
   { path: SECURITY_LOGINS, permission: "audit.view" },
@@ -157,6 +165,18 @@ export async function handleAdminConsoleRoutes(ctx: ExtendedRouteContext): Promi
       }
       if (ctx.path === ANALYTICS_TRADING) {
         return { status: 200, body: ok(await svc.tradingAnalytics(svc.resolveRange(ctx.url.searchParams))) };
+      }
+      if (ctx.path === ANALYTICS_OVERVIEW) {
+        return { status: 200, body: ok(await svc.analyticsOverview(svc.resolveRange(ctx.url.searchParams))) };
+      }
+      if (ctx.path === ANALYTICS_AI) {
+        return { status: 200, body: ok(await svc.aiAnalytics(svc.resolveRange(ctx.url.searchParams))) };
+      }
+      if (ctx.path === ANALYTICS_OPERATIONS) {
+        return { status: 200, body: ok(await svc.operationsAnalytics(svc.resolveRange(ctx.url.searchParams))) };
+      }
+      if (ctx.path === ANALYTICS_REVENUE) {
+        return { status: 200, body: ok(await svc.revenueAnalytics()) };
       }
       if (ctx.path === SYSTEM_HEALTH) {
         return { status: 200, body: ok(await svc.health()) };

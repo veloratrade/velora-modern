@@ -101,10 +101,10 @@ export class TesseractProvider {
    * world-readable on disk by the OCR fallback.
    */
   async ocr(image: Buffer, timeoutMs = this.#timeoutMs): Promise<OcrResult> {
-    if (this.#binary === null) throw failed("OCR_UNAVAILABLE", "tesseract", false);
     if (image.length === 0 || image.length > TESSERACT_MAX_IMAGE_BYTES) {
       throw new AiFailure("PAYLOAD_TOO_LARGE", "refused", "tesseract", false, "image outside the OCR size bound");
     }
+    if (this.#binary === null) throw failed("OCR_UNAVAILABLE", "tesseract", false);
 
     const started = Date.now();
     const dir = mkdtempSync(join(tmpdir(), "velora-ocr-"));
