@@ -115,6 +115,8 @@ import { PgAiLedger } from "./ai/aiLedger.js";
 import { AiAdminService } from "./ai/aiAdminService.js";
 import { PgIntegrationStore } from "./integrations/integrationStore.js";
 import { IntegrationService } from "./integrations/integrationService.js";
+import { PgAdminPlatformStore } from "./adminPlatform/adminPlatformStore.js";
+import { AdminPlatformService } from "./adminPlatform/adminPlatformService.js";
 import { TesseractProvider, findTesseractBinary } from "./ai/tesseractProvider.js";
 import type { AiCatalogProvider } from "./ai/aiCatalog.js";
 import { AdminConsoleService } from "./admin/adminConsoleService.js";
@@ -324,6 +326,8 @@ async function main(): Promise<void> {
     supportAi?: import("./support/supportAiRoutes.js").SupportAiCapability;
     /** Phase 8 — admin-managed integrations (MetaAPI, Email) + relay alias. */
     integrations?: import("./integrations/integrationRoutes.js").IntegrationsCapability;
+    /** Phase 9 — admin platform control plane (settings, flags, logs, billing). */
+    adminPlatform?: import("./adminPlatform/adminPlatformRoutes.js").AdminPlatformCapability;
     portfolio?: import("./portfolio/portfolioRoutes.js").PortfolioStore;
     ea?: import("./ea/eaRoutes.js").EaStore;
     eaSync?: import("./ea/eaRoutes.js").SyncTriggerPort;
@@ -713,6 +717,18 @@ async function main(): Promise<void> {
           integrations: new IntegrationService({ store: integrationStore, masterKey: integrationMasterKey, env: integrationEnv }),
         };
         console.log(JSON.stringify({ level: "info", event: "integrations.composed", masterKey: integrationMasterKey !== null }));
+      }
+      // Phase 9 — admin platform (settings, feature flags, system logs, billing).
+      // Reuses ai_feature_flags (0028) and integration_settings (0031); only
+      // system_logs is new (0032). Billing is read-only over existing tables.
+      {
+        const platformStore = new PgAdminPlatformStore(pool);
+        const platformEnv = (key: string): string | undefined => process.env[key];
+        capabilities.adminPlatform = {
+          platform: new AdminPlatformService({ store: platformStore, env: platformEnv }),
+          store: platformStore,
+        };
+        console.log(JSON.stringify({ level: "info", event: "adminPlatform.composed" }));
       }
     }
     capabilities.portfolio = new PgPortfolioStore(q);

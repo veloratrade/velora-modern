@@ -118,6 +118,23 @@ export const PERMISSIONS = [
   "integrations.view",
   /** Change, clear or test an integration (secret-bearing/upstream). SUPER-ADMIN ONLY. */
   "integrations.manage",
+
+  // --- Phase 9 (admin platform). Legacy Role.php P_SETTINGS_VIEW (admin+SA),
+  // P_SETTINGS_MANAGE as system.settings.manage (SA only), P_FEATURE_FLAGS_VIEW
+  // (admin+SA), P_FEATURE_FLAGS_EDIT (SA only), P_SYSTEM_LOGS_VIEW (admin+SA),
+  // P_BILLING_VIEW (admin+SA). Each guards a REAL admin route landed in 0032.
+  /** Read platform settings (supervisory inventory, never secrets). */
+  "settings.view",
+  /** Change platform settings (strict allowlist, audited). SUPER-ADMIN ONLY. */
+  "system.settings.manage",
+  /** Read feature flags (closed vocabulary, server-authoritative). */
+  "feature_flags.view",
+  /** Change feature flag enabled/rollout (server-authoritative switches). SUPER-ADMIN ONLY. */
+  "feature_flags.edit",
+  /** Read system logs (append-only, redacted). */
+  "system.logs.view",
+  /** Read billing/subscription observability (honest, provider unavailable). */
+  "billing.view",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -152,6 +169,12 @@ export const ROLE_PERMISSIONS: Readonly<Record<AppRole, readonly Permission[]>> 
     // Phase 8 — Legacy grants P_INTEGRATIONS_VIEW to admin (Role.php:107), and
     // P_INTEGRATIONS_MANAGE to super_admin only (Role.php:130).
     "integrations.view",
+    // Phase 9 — Legacy grants P_SETTINGS_VIEW, P_FEATURE_FLAGS_VIEW,
+    // P_SYSTEM_LOGS_VIEW and P_BILLING_VIEW to admin (Role.php).
+    "settings.view",
+    "feature_flags.view",
+    "system.logs.view",
+    "billing.view",
   ],
   super_admin: [
     "rbac.self.view",
@@ -179,6 +202,13 @@ export const ROLE_PERMISSIONS: Readonly<Record<AppRole, readonly Permission[]>> 
     // Phase 8 — P_INTEGRATIONS_VIEW and P_INTEGRATIONS_MANAGE (SA only for manage)
     "integrations.view",
     "integrations.manage",
+    // Phase 9 — admin grants plus the two SA-exclusive: system.settings.manage, feature_flags.edit
+    "settings.view",
+    "system.settings.manage",
+    "feature_flags.view",
+    "feature_flags.edit",
+    "system.logs.view",
+    "billing.view",
   ],
 };
 

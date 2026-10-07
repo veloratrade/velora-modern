@@ -191,6 +191,7 @@ test("owner authority: a permission that does not exist yet still resolves for t
 //     enforcement points) and stay unported
 test("AC-34: the ten verbatim legacy permissions exist in Modern", () => {
   // Phase 8 added integrations.view/manage as the 11th/12th verbatim names.
+  // Phase 9 adds the remaining platform verbatim names (settings, feature_flags, logs, billing) → 18.
   const verbatim = [
     "overview.view",
     "users.view",
@@ -204,6 +205,12 @@ test("AC-34: the ten verbatim legacy permissions exist in Modern", () => {
     "aiRouteManage",
     "integrations.view",
     "integrations.manage",
+    "settings.view",
+    "system.settings.manage",
+    "feature_flags.view",
+    "feature_flags.edit",
+    "system.logs.view",
+    "billing.view",
   ] as const;
   for (const name of verbatim) {
     assert.ok((PERMISSIONS as readonly string[]).includes(name), `missing verbatim: ${name}`);
@@ -231,47 +238,42 @@ test("AC-34: communication.view/reply live on as support.tickets.* (Phase 5 rena
 test("AC-34: exactly the four landed SA-exclusive (phase 8: integrations.manage) legacy permissions exist, SA-only", () => {
   // Legacy SA-exclusive six (Role.php): users.change_role, audit.view_sensitive,
   // system.settings.manage, feature_flags.edit, integrations.manage, aiRouteManage.
-  // Phase 8 landed integrations.manage, so 4 of 6 are now present.
-  const landedSA = ["users.change_role", "audit.view_sensitive", "aiRouteManage", "integrations.manage"] as const;
-  const unlandedSA = [
-    "system.settings.manage",
-    "feature_flags.edit",
-  ] as const;
+  // Phase 9 lands the remaining two (system.settings.manage, feature_flags.edit), so 6 of 6 are now present.
+  const landedSA = ["users.change_role", "audit.view_sensitive", "aiRouteManage", "integrations.manage", "system.settings.manage", "feature_flags.edit"] as const;
   for (const p of landedSA) {
     assert.ok((PERMISSIONS as readonly string[]).includes(p), `${p} should be landed`);
     assert.ok(!ROLE_PERMISSIONS.admin.includes(p), `${p} must stay super_admin-only`);
     assert.ok(ROLE_PERMISSIONS.super_admin.includes(p));
   }
-  for (const p of unlandedSA) {
-    assert.ok(!(PERMISSIONS as readonly string[]).includes(p), `${p} has no operation — must not be declared`);
-  }
 });
 
 test("AC-34: dead-in-legacy permissions stay unported (settings.* had zero enforcement points)", () => {
   // Role.php declared P_SETTINGS_VIEW + P_SETTINGS_MANAGE as "reserved (Module
-  // K)" and no controller ever referenced them — there is no capability to
-  // migrate. Same for the not-yet-landed segments (integrations landed in
-  // phase 8, so it is no longer listed here):
+  // K)" — phase 9 now implements the strict-allowlist store, so they are no
+  // longer dead. Same for logs/billing/flags (landed in phase 9).
   const unported = [
-    "settings.view",            // dead in legacy
     "users.create",             // OD-gated (admin create-user policy)
     "users.manage_subscription",// OD-AC-SUBMAP
-    "system.logs.view",         // owned by the MG-ADMIN logs segment
-    "billing.view",             // owned by the MG-ADMIN billing segment
-    "feature_flags.view",       // owned by the MG-ADMIN flags segment
   ] as const;
   for (const p of unported) {
     assert.ok(!(PERMISSIONS as readonly string[]).includes(p), `${p} must not be declared yet`);
+  }
+  // the platform permissions landed in phase 9 must now exist
+  for (const p of ["settings.view", "system.settings.manage", "feature_flags.view", "feature_flags.edit", "system.logs.view", "billing.view"] as const) {
+    assert.ok((PERMISSIONS as readonly string[]).includes(p), `${p} must be declared after phase 9`);
   }
 });
 
 test("AC-34: legacy grant parity for every landed permission (no widening)", () => {
   // Legacy Role.php grants, for the landed vocabulary (admin list lines 95-113
-  // minus the unported names; super_admin redeclares everything).
+  // minus the unported names; super_admin redeclares everything). Phase 9 adds
+  // the platform grants (settings, feature_flags, logs, billing) which legacy
+  // also granted to admin (Role.php 105-110).
   const legacyAdmin = new Set([
     "overview.view", "users.view", "users.manage_status" /* suspend+activate */,
     "users.verify_email", "audit.view", "system.health.view", "analytics.view",
     "support.tickets.view", "support.tickets.manage", "aiManage", "integrations.view",
+    "settings.view", "feature_flags.view", "system.logs.view", "billing.view",
   ]);
   const modernAdminOnly = ROLE_PERMISSIONS.admin.filter(
     (p) => !(legacyAdmin.has(p) || p === "rbac.self.view" || p === "admin.panel.access"),
