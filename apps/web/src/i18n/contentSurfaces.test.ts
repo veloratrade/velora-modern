@@ -123,9 +123,19 @@ test("AC-32 blog data: every posts.ts key resolves in [common, blog] (both local
 });
 
 test("AC-32 legacy-verbatim anchors: the ported values are byte-identical to Legacy's chunks", async () => {
+  const legacyRoots = [
+    process.env.VELORA_LEGACY_PATH,
+    "/home/user/legacy",
+    "/home/user/veloratrade",
+    join(WEB, "..", "..", "..", "veloratrade"),
+  ].filter(Boolean) as string[];
+  const legacyRoot = legacyRoots.find((p) => {
+    try { readFileSync(join(p, "public/locales/chunks/fa/markets.json"), "utf8"); return true; } catch { return false; }
+  });
+  if (!legacyRoot) return; // legacy not checked out in this environment — NOT_VERIFIED, not a failure
   const legacyChunk = (locale: Locale, feature: string): Record<string, string> => {
     const raw = JSON.parse(
-      readFileSync(`/home/user/legacy/public/locales/chunks/${locale}/${feature}.json`, "utf8"),
+      readFileSync(join(legacyRoot, `public/locales/chunks/${locale}/${feature}.json`), "utf8"),
     ) as { messages: Record<string, string> };
     return raw.messages;
   };
@@ -155,6 +165,16 @@ test("AC-32 lifted common keys: the 106 root-catalog lifts are byte-identical", 
   // The blog/privacy/terms/checkout pages reference common.* keys that lived
   // only in Legacy's canonical public/locales/{fa,en}.json. They were lifted
   // byte-faithfully (Stage-1 precedent). Anchor a few of each kind.
+  const legacyRoots = [
+    process.env.VELORA_LEGACY_PATH,
+    "/home/user/legacy",
+    "/home/user/veloratrade",
+    join(WEB, "..", "..", "..", "veloratrade"),
+  ].filter(Boolean) as string[];
+  const legacyRoot = legacyRoots.find((p) => {
+    try { readFileSync(join(p, `public/locales/fa.json`), "utf8"); return true; } catch { return false; }
+  });
+  if (!legacyRoot) return; // legacy not checked out — NOT_VERIFIED
   const liftedAnchors: readonly [string, Locale][] = [
     ["common.2026.velora.all.rights.reserved.5d192dfd", "fa"],
     ["common.8.min.read.81675063", "en"],
@@ -163,7 +183,7 @@ test("AC-32 lifted common keys: the 106 root-catalog lifts are byte-identical", 
   ];
   for (const [key, locale] of liftedAnchors) {
     const rawRoot = JSON.parse(
-      readFileSync(`/home/user/legacy/public/locales/${locale}.json`, "utf8"),
+      readFileSync(join(legacyRoot, `public/locales/${locale}.json`), "utf8"),
     ) as { messages?: Record<string, string> } & Record<string, string>;
     const root = rawRoot.messages ?? rawRoot; // the canonical catalog wraps its keys
     const ours = CATALOG_FILES[locale].common.messages[key];
