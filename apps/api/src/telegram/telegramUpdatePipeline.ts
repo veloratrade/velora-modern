@@ -33,6 +33,16 @@ import type { TelegramBot, UpdateOutcome } from "./telegramBot.js";
  * never reinterprets it. `"deferred"` is the only value the pipeline invents,
  * and it means one thing: the claim is held and the work is still ahead of us.
  */
+/**
+ * The three operations the pipeline performs on the bot — the whole surface it
+ * is allowed to touch. See `TelegramUpdatePipelineDeps.bot`.
+ */
+export interface TelegramUpdateConsumer {
+  claim(update: TelegramUpdate): Promise<boolean>;
+  handleUpdate(update: TelegramUpdate): Promise<UpdateOutcome>;
+  processClaimed(update: TelegramUpdate): Promise<UpdateOutcome>;
+}
+
 export type AcceptResult =
   | { readonly status: "accepted"; readonly updateId: string; readonly kind: TelegramUpdateKind; readonly outcome: UpdateOutcome | "deferred" }
   | { readonly status: "duplicate"; readonly updateId: string }
@@ -40,11 +50,31 @@ export type AcceptResult =
   | { readonly status: "wrong_consumer"; readonly mode: TelegramUpdateMode };
 
 export interface TelegramUpdatePipelineDeps {
-  readonly bot: TelegramBot;
+  /**
+   * The consumer of a claimed update.
+   *
+   * A STRUCTURAL interface, not the `TelegramBot` class: the pipeline only ever
+   * claims, dispatches and finishes, and naming exactly that is what lets the
+   * handoff be tested with a deterministic double instead of a composed bot.
+   * `TelegramBot` satisfies it unchanged.
+   */
+  readonly bot: TelegramUpdateConsumer;
   /** The mode THIS process is allowed to consume for. */
   readonly mode: () => TelegramUpdateMode;
   /** Schedules background work. Injectable so tests are deterministic. */
   readonly defer?: ((task: () => Promise<void>) => void) | undefined;
+  /**
+   * MG-TG-3 — hand the CLAIMED update to the durable job queue (pg-boss).
+   *
+   * Absent ⇒ `acceptDeferred` keeps the pre-MG-TG-3 behaviour and finishes the
+   * work in this process. Present and returning `true` ⇒ the API's job is done
+   * the moment the job row exists, and the worker owns the rest.
+   *
+   * Returns `false` when the queue could not durably accept (e.g. a duplicate
+   * the queue already holds); the caller then falls back to the in-process path
+   * so the update is still processed exactly once.
+   */
+  readonly enqueue?: ((update: TelegramUpdate) => Promise<boolean>) | undefined;
   readonly log: (event: Record<string, unknown>) => void;
 }
 
@@ -109,8 +139,36 @@ export class TelegramUpdatePipeline {
       return { status: "malformed", reason: parsed.reason };
     }
     const update = parsed.update;
+    const updateId = String(update.update_id);
     const claimed = await this.deps.bot.claim(update);
-    if (!claimed) return { status: "duplicate", updateId: String(update.update_id) };
+    if (!claimed) return { status: "duplicate", updateId };
+
+    // MG-TG-3 — the queue handoff.
+    //
+    // THE CLAIM PRECEDES THE ENQUEUE, and that order is the safety property:
+    // a Telegram retry that arrives before the job row exists is recognised as
+    // a duplicate here rather than enqueued twice. Once the job row is durable
+    // the API's obligation ends, and a crash costs nothing because the row —
+    // not this process — now owns the update.
+    const enqueue = this.deps.enqueue;
+    if (enqueue !== undefined) {
+      try {
+        if (await enqueue(update)) {
+          this.deps.log({ level: "info", event: "telegram.update_queued", updateId, kind: classifyUpdate(update) });
+          return { status: "accepted", updateId, kind: classifyUpdate(update), outcome: "deferred" };
+        }
+        this.deps.log({ level: "warn", event: "telegram.update_queue_rejected", updateId });
+      } catch (err) {
+        // Degrade, do not lose: the update is already claimed, so finishing it
+        // here is still exactly-once. Only the latency benefit is given up.
+        this.deps.log({
+          level: "error",
+          event: "telegram.update_queue_failed",
+          updateId,
+          error: err instanceof Error ? err.name : "UNKNOWN",
+        });
+      }
+    }
 
     const task = async (): Promise<void> => {
       await this.deps.bot.processClaimed(update).catch((err: unknown) => {

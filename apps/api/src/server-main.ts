@@ -132,6 +132,7 @@ import { PgTelegramStore } from "./telegram/pgTelegramStore.js";
 import { TelegramLinkService } from "./telegram/telegramLinkService.js";
 import { TelegramBot } from "./telegram/telegramBot.js";
 import { TelegramUpdatePipeline } from "./telegram/telegramUpdatePipeline.js";
+import { createPgTelegramUpdateQueue } from "./telegram/telegramUpdateQueue.js";
 import { TelegramPoller } from "./telegram/telegramPoller.js";
 import { JournalApplicationService } from "./journal/journalApplicationService.js";
 import { JournalAnalysisService } from "./journal/journalAnalysisService.js";
@@ -1003,9 +1004,41 @@ async function main(): Promise<void> {
         log: (event) => console.log(JSON.stringify(event)),
       });
 
+      // MG-TG-3 — the durable handoff: API/webhook boundary → pg-boss → worker.
+      //
+      // DEFAULT OFF, and that default is the SAFETY PROPERTY, not timidity.
+      // A job enqueued into a queue nobody consumes is an update that was
+      // claimed and never processed — a silent regression against today's
+      // in-process path, and a worse failure than the latency it removes. The
+      // handoff is therefore enabled only when the deployment states that a
+      // worker is consuming `telegram.update`, which makes "the worker is
+      // deployed" an explicit precondition instead of an assumption.
+      //
+      // With the gate off the pipeline keeps the pre-MG-TG-3 in-process defer
+      // and behaviour is unchanged. With it on and the queue unreachable, the
+      // pipeline logs and falls back to the same in-process path (the update is
+      // already claimed, so it is still processed exactly once).
+      let telegramEnqueue: ((update: import("@velora/contracts").TelegramUpdate) => Promise<boolean>) | undefined;
+      if (
+        (process.env["TELEGRAM_QUEUE_ENABLED"] ?? "").trim() === "true" &&
+        boot.persistence.databaseUrl !== undefined
+      ) {
+        try {
+          const telegramQueue = await createPgTelegramUpdateQueue(boot.persistence.databaseUrl);
+          telegramEnqueue = async (update) => {
+            await telegramQueue.enqueue(update);
+            return true;
+          };
+          console.log(JSON.stringify({ level: "info", event: "telegram.queue_enabled", mode: "pg-boss" }));
+        } catch {
+          console.log(JSON.stringify({ level: "warn", event: "telegram.queue_unavailable" }));
+        }
+      }
+
       const pipeline = new TelegramUpdatePipeline({
         bot,
         mode: () => resolveTelegramConfig(process.env).updateMode,
+        ...(telegramEnqueue !== undefined ? { enqueue: telegramEnqueue } : {}),
         log: (event) => console.log(JSON.stringify(event)),
       });
 

@@ -13,6 +13,7 @@
 //   is Telegram's stable numeric id; `@username` is display-only metadata that can
 //   be changed or removed by its owner at any time, so it is NEVER an identifier.
 import { z } from "zod";
+import type { SafeJobPayload } from "./jobs.js";
 
 /**
  * The connection states a user can observe — in the web UI and in the bot.
@@ -248,4 +249,29 @@ export function parseCallbackData(data: string): { action: CallbackAction; subje
 
 export function buildCallbackData(action: CallbackAction, subject: string): string {
   return `${action}:${subject}`;
+}
+
+// ── Worker handoff (MG-TG-3) ────────────────────────────────────────────
+// Telegram webhook ingress → pg-boss → worker → TelegramBot.
+//
+// WHY A JOB CLASS RATHER THAN A SECOND ARCHITECTURE. The synchronous
+// `claim → defer(setTimeout)` path occupies the API process for a media
+// download plus a model call after the HTTP answer. Moving the same
+// `TelegramUpdate` through the existing `QueuePort`/`pg-boss` boundary reuses
+// the scheduler/worker deployment that already exists (ADR-007/D-13), and it
+// does so without changing product semantics — the same `TelegramBot` and the
+// same `TelegramStore.claimUpdate` still own idempotency.
+//
+// The payload carries the update as a JSON string (a scalar) so the descriptor
+// remains a `SafeJobPayload` — flat scalars only, never a secret, never a
+// nested credential shape (ADR-007 §Security). `kind` is duplicated as a
+// top-level scalar so the handler can observe routing without parsing the
+// JSON, and `updateId` is the `singletonKey` (`telegram.update:<updateId>`) so
+// a redelivered webhook enqueues ONE job, not two, under the `stately` policy.
+export const TELEGRAM_UPDATE_JOB_CLASS = "telegram.update" as const;
+
+export interface TelegramUpdatePayload extends SafeJobPayload {
+  readonly updateId: string;
+  readonly updateJson: string;
+  readonly kind: string;
 }

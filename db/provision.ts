@@ -219,6 +219,11 @@ export const PGBOSS_QUEUES = [
   // reason as the FX pair above.
   "copy.signal-dispatch",
   "copy.signals-tick",
+  // Telegram update processing (MG-TG-3). The handler is only REGISTERED when
+  // the worker can compose the bot, but the queue is created here for the same
+  // reason as the copy-trading pair above: the worker role holds no CREATE
+  // privilege, so a queue that does not exist is a job that cannot be claimed.
+  "telegram.update",
   "velora.dlq",
   "__pgboss__send-it",
 ] as const;

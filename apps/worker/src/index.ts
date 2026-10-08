@@ -35,6 +35,9 @@ import { COPY_TICK_JOB_CLASS, DEFAULT_COPY_CRON, runCopyTick } from "./scheduler
 import { poolAggregateQuery, recomputeUserAnalytics } from "./analytics/dailyRecompute.js";
 import { ANALYTICS_RECOMPUTE_JOB_CLASS, createAnalyticsRecomputeHandler } from "./handlers/analyticsRecomputeHandler.js";
 import { ANALYTICS_TICK_JOB_CLASS, DEFAULT_ANALYTICS_CRON, runAnalyticsTick } from "./scheduler/analyticsScheduler.js";
+import { TELEGRAM_UPDATE_JOB_CLASS } from "@velora/contracts";
+import { createTelegramUpdateHandler } from "./handlers/telegramUpdateHandler.js";
+import { createTelegramUpdateProcessor } from "@velora/api/src/telegram/telegramProcessorFactory.js";
 
 // Explicit registration (B10-c). MetaAPI historical sync is the first — and
 // currently only — authorized production job class.
@@ -86,6 +89,39 @@ if (databaseUrl) {
     ANALYTICS_RECOMPUTE_JOB_CLASS,
     createAnalyticsRecomputeHandler({ q: aggregateQuery, log }),
   );
+
+  // TELEGRAM UPDATE PROCESSING (MG-TG-3, ADR-018).
+  //
+  // ARCHITECTURE: Telegram update → API/webhook boundary → pg-boss → this
+  // worker → the one `TelegramBot`. The producer half is
+  // `apps/api/src/telegram/telegramUpdateQueue.ts`; the consumer half is
+  // `./handlers/telegramUpdateHandler.js`. Neither one re-implements a Telegram
+  // rule — both are seams AROUND the existing bot, so there is still exactly
+  // one Telegram architecture in this repository.
+  //
+  // DEPLOYMENT-GATED, AND THAT IS NOT A CODE SHORTFALL. The processor is the
+  // API's `TelegramBot` composition, which needs `TELEGRAM_BOT_TOKEN` (plus,
+  // for voice/vision and journal analysis, `GEMINI_API_KEY`; for transactional
+  // mail, `RESEND_API_KEY` and `APP_ORIGIN`). Provisioning application secrets
+  // to a second process AMENDS this worker's documented D-2 credential
+  // boundary — an OWNER DECISION this file does not make on the owner's behalf.
+  //
+  // With the token absent, no handler is registered and the queue stays empty
+  // rather than claiming jobs this process cannot execute: the same fail-closed
+  // rule the MetaAPI handler applies to a missing platform token. That is also
+  // why the API's handoff defaults to OFF — a job enqueued with no consumer is
+  // an update that is claimed and never processed, which is strictly worse than
+  // the latency the queue removes.
+  const telegramProcessor = createTelegramUpdateProcessor({ pool, log });
+  if (telegramProcessor === null) {
+    log({ level: "info", event: "telegram.worker_gated", reason: "TELEGRAM_NOT_CONFIGURED" });
+  } else {
+    registry.register(
+      TELEGRAM_UPDATE_JOB_CLASS,
+      createTelegramUpdateHandler({ processor: telegramProcessor, log }),
+    );
+    log({ level: "info", event: "telegram.worker_enabled", jobClass: TELEGRAM_UPDATE_JOB_CLASS });
+  }
 
   // COPY-TRADING DISPATCH (v2.5). Registered ONLY when a transport exists.
   //
