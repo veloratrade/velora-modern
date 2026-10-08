@@ -38,6 +38,7 @@ import { handleTelegramRoutes } from "../telegram/telegramRoutes.js";
 import { handleSupportRoutes } from "../support/supportRoutes.js";
 import { handleIntegrationRoutes } from "../integrations/integrationRoutes.js";
 import { handleAdminPlatformRoutes } from "../adminPlatform/adminPlatformRoutes.js";
+import { handleAchievementsRoutes } from "../achievements/achievementsRoutes.js";
 
 /**
  * Registration order is significant only for readability: each handler matches
@@ -69,6 +70,7 @@ const ROUTE_HANDLERS: readonly ExtendedRouteHandler[] = [
   handleSupportAiRoutes,
   handleIntegrationRoutes,
   handleAdminPlatformRoutes,
+  handleAchievementsRoutes,
   handlePortfolioRoutes,
   handleEaRoutes,
   handleTenancyRoutes,

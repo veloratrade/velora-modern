@@ -164,6 +164,8 @@ export interface ApiConfig {
    * the fail-closed reading of "no authentication configured".
    */
   readonly developerKeys?: import("../developer/developerAuth.js").DeveloperKeyAuth;
+  /** MG-DOMAIN-LEGACY-ONLY — achievements read surface (listForUser). */
+  readonly achievements?: import("@velora/domain").AchievementStore;
 }
 
 /**

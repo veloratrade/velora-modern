@@ -21,7 +21,7 @@
  */
 import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { getMe, type AccountUserView } from "../../../lib/api/resources";
+import { getAchievements, getMe, type AccountUserView, type AchievementView } from "../../../lib/api/resources";
 import { createTranslator } from "../../../i18n/catalog";
 import { fmtDateLong } from "../../../i18n/format";
 import type { Locale } from "../../../contracts/locale";
@@ -40,6 +40,8 @@ export default function ProfilePage() {
 
   const [phase, setPhase] = useState<Phase>("loading");
   const [user, setUser] = useState<AccountUserView | null>(null);
+  const [achPhase, setAchPhase] = useState<Phase>("loading");
+  const [achievements, setAchievements] = useState<AchievementView[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -51,9 +53,23 @@ export default function ProfilePage() {
     }
   }, []);
 
+  const loadAchievements = useCallback(async () => {
+    try {
+      const { achievements: list } = await getAchievements();
+      setAchievements(list);
+      setAchPhase("ready");
+    } catch {
+      setAchPhase("failed");
+    }
+  }, []);
+
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    void loadAchievements();
+  }, [loadAchievements]);
 
   const roleLabel = (role: string): string => {
     switch (role) {
@@ -168,6 +184,33 @@ export default function ProfilePage() {
                 {t("settings.profileManage", null, fa ? "مدیریت حساب و تنظیمات" : "Manage account and settings")}
               </Link>
             </div>
+          </div>
+
+          <div className="card mt-16">
+            <h3 className="label text-gold">{t("profile.achievements.title", null, fa ? "دستاوردها" : "Achievements")}</h3>
+            {achPhase === "loading" ? (
+              <p className="muted-sm mt-12">{t("profile.achievements.loading", null, "")}</p>
+            ) : null}
+            {achPhase === "failed" ? (
+              <p className="text-error mt-12">{t("profile.achievements.loadFailed", null, "")}</p>
+            ) : null}
+            {achPhase === "ready" && achievements.length === 0 ? (
+              <p className="muted-sm mt-12">{t("profile.achievements.empty", null, "")}</p>
+            ) : null}
+            {achPhase === "ready" && achievements.length > 0 ? (
+              <ul className="stack-8 mt-12">
+                {achievements.map((a) => (
+                  <li key={a.key} className="flex-between flex-wrap card-alt">
+                    <div>
+                      <p className="font-800">{t(a.titleKey, null, a.key)}</p>
+                      <p className="muted-xs mt-4">{t(a.descriptionKey, null, "")}</p>
+                      <p className="muted-xs v-latn-num mt-4">{fmtDateLong(locale, a.achievedAt)}</p>
+                    </div>
+                    <span className="badge badge-connected v-latn-num">{a.key}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
         </>
       ) : null}

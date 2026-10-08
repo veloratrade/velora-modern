@@ -31,6 +31,19 @@ export type EmailPreferenceKey =
 
 export type EmailPreferences = Record<EmailPreferenceKey, 0 | 1>;
 
+export interface AchievementView {
+  key: string;
+  titleKey: string;
+  descriptionKey: string;
+  achievedAt: string;
+  unlockedAt: string;
+  metadata: { titleKey: string; descriptionKey: string; unlockedAt: string };
+}
+
+export function getAchievements(): Promise<{ achievements: AchievementView[]; total: number }> {
+  return api.request("/api/v1/achievements");
+}
+
 export function getMe(): Promise<{ user: AccountUserView }> {
   return api.request<{ user: AccountUserView }>("/api/v1/auth/me").then((data) => ({
     // Modern answers numeric ids on this route; the browser session normalizes

@@ -337,7 +337,13 @@ async function main(): Promise<void> {
     developerKeys?: import("./developer/developerAuth.js").DeveloperKeyAuth;
     telegram?: import("./telegram/telegramRoutes.js").TelegramCapability;
     support?: import("./support/supportService.js").SupportService;
+    /** MG-DOMAIN-LEGACY-ONLY — achievements read surface (listForUser). */
+    achievements?: import("@velora/domain").AchievementStore;
   } = {};
+  // Achievements read surface — reuses the same ledger that backs the unlock
+  // triggers (first-trade + email-verified), so no second table or second
+  // source of truth.
+  capabilities.achievements = achievementLedger;
   if (boot.jwtSecret !== undefined) {
     capabilities.auth = new AuthService({
       store: userStore,
