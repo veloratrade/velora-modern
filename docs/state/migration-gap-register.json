@@ -1269,16 +1269,26 @@
     {
       "id": "MG-TG-3",
       "section": "E",
-      "title": "Telegram work runs synchronously in the API process (deferred after the webhook 200); no queue/worker path is used because `apps/worker` is not deployed. A long media download plus a model call therefore occupies an API request slot after the answer",
-      "status": "OPEN",
+      "title": "Telegram QUEUE PATH is code-complete and tested (contract `telegram.update` + API producer + pipeline `enqueue` seam + worker consumer handler + API composition root), but its EXECUTION is deployment-gated: the API handoff defaults OFF (`TELEGRAM_QUEUE_ENABLED`) and the worker registers no handler without `TELEGRAM_BOT_TOKEN`, because a job enqueued with no consumer is an update claimed and never processed. Live worker execution therefore still awaits MG-WORKER-DEPLOY + the D-2 credential-boundary amendment",
+      "status": "PARTIAL",
       "priority": "P3",
-      "verification_state": "STATIC",
+      "verification_state": "RECORDED_RUNTIME",
       "audit_refs": [],
       "evidence": [
-        "apps/api/src/telegram/telegramUpdatePipeline.ts"
+        "packages/contracts/src/telegram.ts",
+        "apps/api/src/telegram/telegramUpdateQueue.ts",
+        "apps/api/src/telegram/telegramUpdateQueue.test.ts",
+        "apps/api/src/telegram/telegramUpdatePipeline.ts",
+        "apps/api/src/telegram/telegramUpdatePipeline.test.ts",
+        "apps/api/src/telegram/telegramProcessorFactory.ts",
+        "apps/api/src/server-main.ts",
+        "apps/worker/src/handlers/telegramUpdateHandler.ts",
+        "apps/worker/src/handlers/telegramUpdateHandler.test.ts",
+        "apps/worker/src/index.ts",
+        "db/provision.ts"
       ],
       "decisions": [],
-      "closure_criteria": "Worker deployed (MG-WORKER-DEPLOY) and the deferred task moved onto the existing queue with the claim row already in place"
+      "closure_criteria": "Worker deployed (MG-WORKER-DEPLOY) AND TELEGRAM_BOT_TOKEN provisioned to the worker process (D-2 credential-boundary amendment — owner decision) AND TELEGRAM_QUEUE_ENABLED=true on the API, then a live Telegram round trip recorded as CURRENT_RUNTIME_VERIFIED"
     },
     {
       "id": "MG-AI-ANONYMIZE",
