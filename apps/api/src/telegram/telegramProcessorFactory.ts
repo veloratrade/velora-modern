@@ -54,7 +54,7 @@ import { LogMailProvider } from "../mail/logMailProvider.js";
 import { ResendMailProvider } from "../mail/resendMailProvider.js";
 import { NotificationService } from "../notifications/notificationService.js";
 import { FirstTradeNotifier } from "../notifications/firstTradeNotifier.js";
-import { PgAchievementStore, PgDeviceRegistry, PgEmailNotificationLog } from "../notifications/pgNotificationStores.js";
+import { PgAchievementStore, PgEmailNotificationLog } from "../notifications/pgNotificationStores.js";
 
 /**
  * The worker's view of "what processing an update produced".
@@ -202,14 +202,4 @@ export function createTelegramUpdateProcessor(deps: TelegramProcessorFactoryDeps
   // Telegram retry into a duplicate). The worker's job is to finish a claimed
   // update, never to claim it a second time.
   return (update: TelegramUpdate) => bot.processClaimed(update);
-}
-
-/**
- * Exported for symmetry with the API composition and for callers that need the
- * device registry (push-device bookkeeping) alongside the processor. The
- * processor above does not send push notifications, so this exists only to keep
- * the worker's dependency list explicit rather than implicit.
- */
-export function pgDeviceRegistry(pool: Pool): PgDeviceRegistry {
-  return new PgDeviceRegistry(pool);
 }

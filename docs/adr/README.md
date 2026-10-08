@@ -21,8 +21,15 @@ the numbering gap is now documented at the directory level; statuses per
 | ADR-013 | `ADR-013-environment-origin-safety.md` | Environment-origin safety | Accepted 2026-09-12 (D-17) |
 | ADR-014 | `ADR-014-metaapi-platform-token.md` | MetaAPI platform token (distinct secret class) | Accepted 2026-09-15 (D-19) |
 | **ADR-015** | — | **never assigned — intentionally unassigned; no ADR-015 exists and no document references one** (audit §16.1; recorded here 2026-09-26). Do not "fill" the number artificially; next ADR takes the next free number. | n/a |
+
+Index refreshed 2026-10-08: ADR-018 was present as a file but missing from this
+table (a documentation-consistency defect under `MG-G12`); it is now listed, and
+ADR-019 takes the next free number. **ADR-020 is the next free number.**
 | ADR-016 | `ADR-016-credential-encryption-key-management.md` | Credential encryption & key management | Accepted 2026-09-15 (D-18) |
 | ADR-017 | `ADR-017-agent-context-system.md` | Agent Context System (persistent project state) | Accepted 2026-09-26 (owner instruction) |
+
+| ADR-018 | `ADR-018-telegram-journal-client.md` | Telegram journal client (external identity + shared journal domain) | Accepted 2026-10-03 (**added to this index 2026-10-08** — the ADR existed but was never listed) |
+| ADR-019 | `ADR-019-telegram-update-job-architecture.md` | Telegram update processing over the job architecture (`telegram.update` → pg-boss → worker) | Accepted 2026-10-08 — implementation complete and tested; **live worker execution deployment-gated** (`MG-WORKER-DEPLOY` + D-2 boundary amendment) |
 
 Note: the **legacy** repository has its own, unrelated `ADR-014` (census-probe
 transport); modern ADR numbering is independent of legacy numbering
