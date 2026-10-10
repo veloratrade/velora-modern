@@ -2,7 +2,7 @@
   "$comment": "VELORA-MODERN machine-readable current project state — twin of docs/state/CURRENT_STATE.md (update both in the same change). Read and verified by tools/agent-context.mjs at every session start (ADR-017).",
   "schema_version": 1,
   "system": "velora-agent-context",
-  "last_updated": "2026-10-08",
+  "last_updated": "2026-10-10",
   "verification_states": [
     "STATIC",
     "RECORDED_RUNTIME",
@@ -38,12 +38,12 @@
     }
   },
   "current_verified": {
-    "modern_sha": "b1f90a761bdb7d295df5eb496e7e18c5b9d82217",
+    "modern_sha": "cc09d54fee11baaf3b5b7fd72cac026fadcd1691",
     "legacy_sha": "edede313280f2f0e298f5ccbf5bbdd4d676c80bd",
-    "verified_at": "2026-10-08",
-    "verification": "RECORDED_RUNTIME 2026-10-08 @ b1f90a7: ADR-019 (Telegram update processing over the job architecture) recorded and the ADR index corrected (ADR-018 existed since 2026-10-03 but was never listed; ADR-020 is the next free number). The dead `pgDeviceRegistry` export added in e041856 was removed from apps/api/src/telegram/telegramProcessorFactory.ts (no behaviour change). Re-verified AFTER the app-path change: tsc -b clean (5 projects), npm test 1,442/1,442 (1,371 general + 71 PGlite, 0 fail 1 skipped), secret-scan 0, PGlite 71/71, next build --webpack 39/39 pages. MG-TG-3 remains PARTIAL: the code path is RECORDED_RUNTIME, live worker execution is deployment-gated (MG-WORKER-DEPLOY + the D-2 credential-boundary amendment).",
-    "notes": "AC-46 (2026-10-07): effectiveConfig GET /api/v1/admin/config/effective (settings.view, secret-free: providers from ai_provider_credentials, features from ai_feature_flags, globalRoute from ai_settings ai_route_default, integrations from integration_platform_secrets + integration_settings + ai_provider_credentials, precedence static) + diagnostics GET /api/v1/admin/system/diagnostics (system.health.view, 8 components: api/database/redis/workers/metaapi/n8n_relay/ai/email, latency + integration_health last probe, NOT_CONFIGURED when absent) + diagnostics/refresh POST (system.health.view, rate-limited 5/120s per actor via in-memory bucket, honest config-derived HEALTHY/NOT_CONFIGURED persisted to integration_health, probe taxonomy NOT_CONFIGURED/SUCCESS) + user activity GET /api/v1/admin/users/{id}/activity (users.view, session-derived event/time/ip/ua/result, half-open paging, 404 for unknown user). Store: PgAdminConsoleStore + Memory double, 8 HTTP tests + 1 PGlite + 4 PG (skipped without DATABASE_URL). RBAC reuse (no new permission). Post-AC-46 2026-10-08: 7284331 strict tsc fixes (noImplicitAny, noUncheckedIndexedAccess, discriminated unions) — 7 files; e18fa7b makes AC-32 legacy-verbatim tests skip when legacy not checked out (was ENOENT 2 failures, now 0).",
-    "modern_head": "b1f90a761bdb7d295df5eb496e7e18c5b9d82217"
+    "verified_at": "2026-10-10",
+    "verification": "RECORDED_RUNTIME 2026-10-10 @ cc09d54: residue sweep — Telegram durable processing-start marker (0035) + transcript privacy (0034) + screenshot ingest 24MiB cap + AI consent/ledger guards + toLocalInputTime + Tesseract fallback + trades timezone UX. Re-verified: tsc -b clean (5 projects: contracts/domain/api/worker/web), secret-scan PASS (0), npm test 1394/1395 general (1 honest OCR binary-absent fail, unconditional) + 73 PGlite, PGlite 73/73, migrations 19/19 (0001→0035), web contentSurfaces parity fixed (intelligence fa latin digits). MG-TG-3 remains PARTIAL: code path RECORDED_RUNTIME (claim+processing_started_at+terminal failed), live worker execution deployment-gated (MG-WORKER-DEPLOY + D-2). See RESIDUE_SWEEP_2026-10-10.md for five dispositions.",
+    "notes": "AC-47 (2026-10-10): cc09d54 — 70 files, migrations 0034 (terminal transcript CHECK) + 0035 (processing_started_at lifecycle) with backfills; adapters clear transcript on terminal + acquire one-shot marker; Bot.processClaimed & worker handler make failed terminal (no replay); screenshot 24MiB route cap proved by 1.1MiB-padding valid test; tesseractProvider comment corrected (unconditional OCR test fails honestly, not skipped); toLocalInputTime + transcriptionLedgerInsight {chars} retained; trades timezone note + seconds step=1. State will be curated in next AC entry after CHANGE_LOG.",
+    "modern_head": "cc09d54fee11baaf3b5b7fd72cac026fadcd1691"
   },
   "artifacts": {
     "current_state_md": "docs/state/CURRENT_STATE.md",
@@ -111,7 +111,8 @@
       "AC-45 (2026-10-07): MG-ADMIN analytics 4 routes CLOSED — overview + ai + operations + revenue = 4, RBAC analytics.view enforced, migration 0033 (integration_health, closed vocab, 1 table, 77 FK, head now 0033), 24 new tests (19 HTTP route 401/403/200/503+422 + 5 PG real-PG 5/5 half-open BIGINT), fix dba0cef corrects trading occurred_at + audit occurred_at half-open windows (was 3/5).",
       "AC-46 (2026-10-07): MG-ADMIN diagnostics 4 routes CLOSED — config/effective (settings.view, secret-free inventory) + diagnostics (system.health.view, 8 components) + diagnostics/refresh (rate-limited 5/120s, honest config-derived probe persisted) + user activity (users.view, session-derived) = 4 HTTP, RBAC reuse 20/24, migration none (reuse 0031-0033 + ai tables), 8 new tests (8 HTTP route 401/403/200/429 + PGlite 1/1) + 4 PG (real-PG skipped, PGlite covers), tsc clean, next build 39 routes, 37×2 PG files (74 runs). MG-API 61→66 counterparts, 15→10 remain (9 admin→4 OD + 4 decisions + MG-AI-OCR + MG-SCHEMA).",
       "Post-AC-46 (2026-10-08): strict tsc fixes 7284331 (noImplicitAny + noUncheckedIndexedAccess, 7 files, 5 projects clean) + web contentSurfaces legacy-skip fix e18fa7b (AC-32 legacy-verbatim tests now NOT_VERIFIED skip when legacy absent, was 2 failures ENOENT, now 0 fail 1342+71=1413) — PGlite 71/71, 37×2 PG, 39 routes, secret-scan 0.",
-      "d05604c (2026-10-08): achievements read surface CLOSED for MG-DOMAIN-LEGACY-ONLY — GET /api/v1/achievements (self-read, PGlite+PG store, 5 HTTP tests 401/503/empty/isolation/DESC) + profile achievements section (fa/en i18n, loading/failed/empty/list, DESC) — domain achievements engine (2 definitions, fail-silent, metadata JSON) now has API+web (was domain-only). Gap remains PARTIAL until Jalali/TradingSession integration is re-audited."
+      "d05604c (2026-10-08): achievements read surface CLOSED for MG-DOMAIN-LEGACY-ONLY — GET /api/v1/achievements (self-read, PGlite+PG store, 5 HTTP tests 401/503/empty/isolation/DESC) + profile achievements section (fa/en i18n, loading/failed/empty/list, DESC) — domain achievements engine (2 definitions, fail-silent, metadata JSON) now has API+web (was domain-only). Gap remains PARTIAL until Jalali/TradingSession integration is re-audited.",
+      "cc09d54 (2026-10-10): RESIDUE SWEEP — 70 files, 0034+0035 migrations, tsc -b 0, secret-scan 0, 1394/1395 general (1 honest OCR binary-absent fail, unconditional) + 73 PGlite (migrations 19/19), Telegram at-most-once + transcript privacy, screenshot 24MiB cap (1.1MiB valid proves), consent local-OCR gate, toLocalInputTime, trades timezone UX; see RESIDUE_SWEEP_2026-10-10.md (five dispositions). Verified baseline advanced to cc09d54."
     ]
   },
   "branch_work": {
@@ -126,7 +127,7 @@
     "push_note": "PUSHED 2026-10-06 (AC-39): branch integration/reconcile-lineages → remote. PROMOTED to main same day (AC-40) by explicit owner instruction: remote main fast-forwarded 0e9c4d7 → be4732d (no force, no history rewrite). Pre-push secret-scan PASS 0 findings. Local main fast-forwarded to match."
   },
   "last_battery": {
-    "result": "RE-CAPTURED 2026-10-08 @ d05604c: npm test 1,418/1,418 (1,347 general + 71 PGlite, 0 fail 1 skipped, EXIT=0) — tsc -b clean (5 projects), secret-scan PASS (0), PGlite 71/71, web build 39 routes, achievements API 5/5 (401/503/empty/isolation/DESC) + profile Achievements card (fa/en) + notificationStores.pg 3/3 (user_achievements UNIQUE)."
+    "result": "RE-CAPTURED 2026-10-10 @ cc09d54: tsc -b clean (5 projects), secret-scan PASS (0), npm test 1394/1395 general (1 honest OCR binary-absent fail, unconditional: aiCapability.test.ts OCR real binary) + 73 PGlite = 1468 total (1467 pass, 1 fail), migrations 19/19 (0001→0035), PGlite 73/73, contentSurfaces 6/6 fixed (intelligence fa latin digits)."
   },
   "distribution": {
     "branch": "governance/agent-context",
