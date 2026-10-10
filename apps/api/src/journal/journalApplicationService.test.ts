@@ -136,18 +136,23 @@ test("progressive enrichment fills one field at a time and keeps the draft open"
 });
 
 test("confirm writes exactly ONE trade through the existing ledger, and the values are the domain's", async () => {
-  const { service, tradeStore, trades } = makeService();
+  const { service, tradeStore, trades, drafts } = makeService();
   const view = await service.openFromText({
     userId: "1",
     telegramUserId: "555",
     chatId: "555",
     sourceMessageId: "104",
     text: COMPLETE_FA,
+    sourceKind: "VOICE",
+    transcript: COMPLETE_FA,
   });
+  assert.equal((await drafts.findDraftById(view.draftId))?.transcript, COMPLETE_FA, "the active voice draft retains its transcript for review");
+  assert.equal(await countTrades(trades, "1"), 0, "transcribed text is not journal content before confirmation");
 
   const result = await service.confirm({ userId: "1", telegramUserId: "555", draftId: view.draftId });
   assert.ok(result.tradeId !== "");
   assert.equal(await countTrades(trades, "1"), 1);
+  assert.equal((await drafts.findDraftById(view.draftId))?.transcript, null, "confirmation clears the transient transcript copy");
 
   const stored = tradeStore.debugRow(result.tradeId)! as unknown as Record<string, unknown>;
   assert.equal(stored["symbol"], "XAUUSD");
@@ -212,6 +217,8 @@ test("a draft the domain refuses is re-opened with the offending field cleared",
     chatId: "555",
     sourceMessageId: "106",
     text: "XAUUSD خرید، ورود 2650، خروج 2660، حجم 0",
+    sourceKind: "VOICE",
+    transcript: "XAUUSD خرید، ورود 2650، خروج 2660، حجم 0",
   });
 
   await assert.rejects(
@@ -233,6 +240,7 @@ test("a draft the domain refuses is re-opened with the offending field cleared",
   assert.deepEqual([...reopened!.missingFields], ["volume"]);
   const record = await drafts.findDraftById(view.draftId);
   assert.equal(record?.state, "NEEDS_DETAIL");
+  assert.equal(record?.transcript, "XAUUSD خرید، ورود 2650، خروج 2660، حجم 0", "a correctable active draft keeps its transcript for review");
 
   // …and it can then be completed and saved.
   const fixed = await service.answer({ userId: "1", telegramUserId: "555", draftId: view.draftId, answer: "0.25" });
@@ -245,13 +253,20 @@ test("a draft the domain refuses is re-opened with the offending field cleared",
 test("cancel discards the draft without writing, and an expired draft stops being actionable", async () => {
   let now = new Date("2026-02-01T09:00:00.000Z");
   const { service, drafts } = makeService({ now: () => now });
-  const view = await service.openFromText({ userId: "1", telegramUserId: "555", chatId: "555", sourceMessageId: "107", text: COMPLETE_FA });
+  const view = await service.openFromText({
+    userId: "1", telegramUserId: "555", chatId: "555", sourceMessageId: "107", text: COMPLETE_FA,
+    sourceKind: "VOICE", transcript: "transient cancel transcript",
+  });
 
   await service.cancel({ userId: "1", telegramUserId: "555", draftId: view.draftId });
   assert.equal((await drafts.findDraftById(view.draftId))?.state, "CANCELLED");
+  assert.equal((await drafts.findDraftById(view.draftId))?.transcript, null, "cancellation discards transient transcript text");
   assert.equal(await service.currentDraft("1", "555"), null);
 
-  const second = await service.openFromText({ userId: "1", telegramUserId: "555", chatId: "555", sourceMessageId: "108", text: COMPLETE_FA });
+  const second = await service.openFromText({
+    userId: "1", telegramUserId: "555", chatId: "555", sourceMessageId: "108", text: COMPLETE_FA,
+    sourceKind: "VOICE", transcript: "transient expiration transcript",
+  });
   now = new Date(now.getTime() + 31 * 60 * 1000); // past the 30-minute TTL
   await assert.rejects(
     () => service.confirm({ userId: "1", telegramUserId: "555", draftId: second.draftId }),
@@ -264,6 +279,7 @@ test("cancel discards the draft without writing, and an expired draft stops bein
   // The sweep marks it EXPIRED so the trail says why it stopped being usable.
   await service.expireStale();
   assert.equal((await drafts.findDraftById(second.draftId))?.state, "EXPIRED");
+  assert.equal((await drafts.findDraftById(second.draftId))?.transcript, null, "expiry discards transient transcript text");
 });
 
 test("the same Telegram message cannot open two drafts", async () => {

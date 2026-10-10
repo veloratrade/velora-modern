@@ -118,7 +118,8 @@ import { IntegrationService } from "./integrations/integrationService.js";
 import { PgAdminPlatformStore } from "./adminPlatform/adminPlatformStore.js";
 import { AdminPlatformService } from "./adminPlatform/adminPlatformService.js";
 import { TesseractProvider, findTesseractBinary } from "./ai/tesseractProvider.js";
-import type { AiCatalogProvider } from "./ai/aiCatalog.js";
+import { isAiFeature, type AiCatalogProvider } from "./ai/aiCatalog.js";
+import { AiManagerMediaInterpreter } from "./ai/aiManagerMediaInterpreter.js";
 import { AdminConsoleService } from "./admin/adminConsoleService.js";
 import { PgPortfolioStore } from "./portfolio/portfolioRoutes.js";
 import { PgEaStore } from "./ea/eaRoutes.js";
@@ -136,7 +137,7 @@ import { createPgTelegramUpdateQueue } from "./telegram/telegramUpdateQueue.js";
 import { TelegramPoller } from "./telegram/telegramPoller.js";
 import { JournalApplicationService } from "./journal/journalApplicationService.js";
 import { JournalAnalysisService } from "./journal/journalAnalysisService.js";
-import { UnconfiguredMediaInterpreter, GeminiMediaInterpreter, type MediaInterpreter } from "./aicoach/mediaInterpreter.js";
+import { UnconfiguredMediaInterpreter, type MediaInterpreter } from "./aicoach/mediaInterpreter.js";
 import { GeminiAiProvider } from "./aicoach/geminiProvider.js";
 import { AiCoachService } from "./aicoach/aiCoachService.js";
 import { PgAiAttemptStore, UnconfiguredAiProvider, AI_PROVIDERS } from "./aicoach/aiProvider.js";
@@ -296,6 +297,9 @@ async function main(): Promise<void> {
   // only the service is — so the route layer cannot reach reveal()/findById()
   // and no secret-disclosure path exists over HTTP.
   let credentialStore: CredentialStore | undefined;
+  // The Telegram bot must use the same AI manager as HTTP media/screenshot work;
+  // a direct Gemini interpreter would bypass consent and image-egress controls.
+  let sharedTelegramMediaInterpreter: MediaInterpreter | null = null;
   const capabilities: {
     auth?: AuthService;
     accounts?: AccountService;
@@ -629,11 +633,13 @@ async function main(): Promise<void> {
         anonymizer: new UnavailableImageAnonymizer(),
         executors: aiExecutors,
       });
+      sharedTelegramMediaInterpreter = new AiManagerMediaInterpreter(aiManager);
       const aiTradeStore = new PgTradeStore(pool);
       capabilities.ai = {
         analysis: new AiAnalysisService({
           manager: aiManager,
           store: aiConfig,
+          localOcr: tesseract,
           trades: {
             findActiveByIdForUser: async (id, userId) => {
               const row = await aiTradeStore.findActiveByIdForUser(id, userId);
@@ -657,6 +663,15 @@ async function main(): Promise<void> {
         consent: aiConsent,
         guard: aiGuard,
         providerConfigured: async () => (await aiRouter.buildDefaultChain(null)).entries.length > 0,
+        providerConfiguredFor: async (feature) => {
+          if (!isAiFeature(feature)) return false;
+          const chain = await aiRouter.resolveChain(feature);
+          // Gemini remains deliberately unusable for screenshots until the
+          // anonymizer dependency is owner-approved and wired. Only local OCR is
+          // a truthful ready-state for image extraction in this composition.
+          if (feature === "screenshot_extraction") return chain.entries.some((entry) => entry.provider === "tesseract");
+          return chain.entries.length > 0;
+        },
       };
       // The support console's assists share the SAME manager (one chain walker,
       // one ledger, one consent rule) and answer to the support module's own
@@ -956,11 +971,10 @@ async function main(): Promise<void> {
         allowedProviders: AI_PROVIDERS,
       });
 
-      // Media interpretation is a SEPARATE capability with its own key decision:
-      // a deployment may enable journal analysis and decline voice/vision, and
-      // the bot degrades to "send it as text" instead of failing.
-      let interpreter: MediaInterpreter = new UnconfiguredMediaInterpreter();
-      if (geminiKey !== "") interpreter = new GeminiMediaInterpreter({ apiKey: geminiKey });
+      // Media goes through the shared manager: consent, feature routing,
+      // fail-closed image anonymization, local OCR fallback and attempt logging
+      // are not reimplemented in the Telegram path.
+      const interpreter: MediaInterpreter = sharedTelegramMediaInterpreter ?? new UnconfiguredMediaInterpreter();
 
       // A DEDICATED TradeService over the same durable ledger.
       //

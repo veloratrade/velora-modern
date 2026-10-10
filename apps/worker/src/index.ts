@@ -9,13 +9,20 @@
 //
 //     DATABASE_URL=postgresql://... METAAPI_PLATFORM_TOKEN=... npm run start:worker
 //
-// CREDENTIAL BOUNDARY (D-2, Boundary-Scoped Option B). This process reads
-// exactly two environment secrets, both listed below and nothing else:
-//     DATABASE_URL            — its own least-privilege role (velora_worker)
-//     METAAPI_PLATFORM_TOKEN  — installation-level platform token
-// It must NEVER receive CREDENTIAL_MASTER_KEY, a broker login, an investor
-// password, or credential ciphertext, and it never imports the credential
-// store. Per-account authority comes from the NON-SECRET `metaapi_account_id`.
+// CREDENTIAL BOUNDARY (D-2, Boundary-Scoped Option B). The currently approved
+// worker scope is DATABASE_URL (least-privilege `velora_worker`) plus
+// METAAPI_PLATFORM_TOKEN (installation-level platform token). This worker must
+// NEVER receive CREDENTIAL_MASTER_KEY, a broker login, an investor password,
+// per-user credential ciphertext, or decrypted per-user credentials. Per-account
+// MetaAPI authority comes from the NON-SECRET `metaapi_account_id`.
+//
+// The Telegram consumer below is code-ready but its handoff is not enabled by
+// default. Its processor can read additional Telegram/AI/mail environment
+// secrets only after the owner explicitly amends D-2 and approves the exact
+// per-process allowlist. AI secrets use an environment-only resolver; the worker
+// cannot decrypt the API's encrypted `ai_platform_secrets` table (all worker
+// privileges on that table are revoked in `db/roles.sql`). No deployment or
+// credential provisioning is implied by this code.
 import { Pool } from "pg";
 import { WorkerRunner } from "./runner.js";
 import { createPgBossQueue } from "./queue/pgBossAdapter.js";

@@ -4,6 +4,7 @@
 //   POST /api/v1/ai/weekly-report    a report over a period of the caller's OWN
 //                                    trades (5/hour)
 //   POST /api/v1/ai/feedback         a correction of an AI answer (20/hour)
+//   POST /api/v1/trades/extract-screenshot  bounded image OCR/extraction
 //   GET  /api/v1/ai/attempts         the caller's own analyses/reports
 //   GET  /api/v1/ai/status           what this deployment can actually do
 //
@@ -28,6 +29,7 @@ import type { AiConfigStore } from "./aiConfigStore.js";
 import type { AiAnalysisService, AiOperationOutcome } from "./aiAnalysisService.js";
 import { MAX_TRADES_ANALYSIS, MAX_TRADES_REPORT } from "./aiAnalysisService.js";
 import { AI_FLAGS, FEATURE_FLAG, type AiFeature } from "./aiCatalog.js";
+import { decodeScreenshotImages, MAX_SCREENSHOT_REQUEST_BYTES, ScreenshotInputError, type DecodedScreenshot } from "./screenshotExtraction.js";
 import type { AiFailure } from "./aiErrors.js";
 
 export const AI_ANALYZE_TRADES = "/api/v1/ai/analyze-trades";
@@ -35,8 +37,9 @@ export const AI_WEEKLY_REPORT = "/api/v1/ai/weekly-report";
 export const AI_FEEDBACK = "/api/v1/ai/feedback";
 export const AI_ATTEMPTS = "/api/v1/ai/attempts";
 export const AI_STATUS = "/api/v1/ai/status";
+export const SCREENSHOT_EXTRACT = "/api/v1/trades/extract-screenshot";
 
-const OWNED_PATHS = new Set([AI_ANALYZE_TRADES, AI_WEEKLY_REPORT, AI_FEEDBACK, AI_ATTEMPTS, AI_STATUS]);
+const OWNED_PATHS = new Set([AI_ANALYZE_TRADES, AI_WEEKLY_REPORT, AI_FEEDBACK, AI_ATTEMPTS, AI_STATUS, SCREENSHOT_EXTRACT]);
 
 /** One row of the caller's own ledger, shaped for a list. */
 export interface AttemptView {
@@ -68,6 +71,8 @@ export interface AiCapability {
   readonly consent: { consentState(userId: string): Promise<{ consented: boolean; consentedAt: string | null }> };
   /** True when at least one provider can actually be called right now. */
   readonly providerConfigured: () => Promise<boolean>;
+  /** Feature-specific readiness (e.g. screenshot extraction may require local OCR). */
+  readonly providerConfiguredFor?: (feature: AiFeature) => Promise<boolean>;
   readonly guard: {
     isEnabled(flag: string, userId: string | null): Promise<boolean>;
     checkMultiple(flags: readonly string[], userId: string | null): Promise<Record<string, boolean>>;
@@ -92,15 +97,23 @@ export async function handleAiRoutes(ctx: ExtendedRouteContext): Promise<RouteRe
     if (ctx.method !== "GET") return methodNotAllowed(ctx);
     const consent = await capability.consent.consentState(userId);
     const flags = await capability.guard.checkMultiple(AI_FLAGS, userId);
+    const features = await Promise.all(Object.entries(FEATURE_FLAG).map(async ([feature, flag]) => {
+      const aiFeature = feature as AiFeature;
+      const providerConfigured = capability.providerConfiguredFor === undefined
+        ? await capability.providerConfigured()
+        : await capability.providerConfiguredFor(aiFeature);
+      const enabled = flags[flag] === true;
+      return { feature, flag, enabled, providerConfigured, available: enabled && providerConfigured };
+    }));
     return {
       status: 200,
       body: ok({
         consent,
         providerConfigured: await capability.providerConfigured(),
         flags,
-        // The features a caller can actually use, so a UI can say "switched off"
-        // instead of rendering a button that can only fail.
-        features: Object.entries(FEATURE_FLAG).map(([feature, flag]) => ({ feature, flag, enabled: flags[flag] === true })),
+        // Feature-level readiness distinguishes a disabled flag from a local
+        // capability that is not installed in this deployment.
+        features,
       }),
     };
   }
@@ -123,7 +136,23 @@ export async function handleAiRoutes(ctx: ExtendedRouteContext): Promise<RouteRe
   }
 
   if (ctx.method !== "POST") return methodNotAllowed(ctx);
-  const body = await ctx.readBody(ctx.req);
+  const body = ctx.path === SCREENSHOT_EXTRACT
+    ? await ctx.readBody(ctx.req, MAX_SCREENSHOT_REQUEST_BYTES)
+    : await ctx.readBody(ctx.req);
+
+  if (ctx.path === SCREENSHOT_EXTRACT) {
+    let images: DecodedScreenshot[];
+    try {
+      images = decodeScreenshotImages(body["images"]);
+    } catch (err) {
+      if (!(err instanceof ScreenshotInputError)) throw err;
+      return {
+        status: 422,
+        body: fail("AI_INVALID_SCREENSHOT", "Screenshot validation failed.", ctx.requestId, { [err.field]: err.reason }),
+      };
+    }
+    return respond(ctx, await capability.analysis.extractScreenshots({ userId, images }), { maxIds: 0 });
+  }
 
   if (ctx.path === AI_ANALYZE_TRADES) {
     const ids = readTradeIds(body, ctx);
@@ -242,8 +271,11 @@ function refusalStatus(code: string): number {
   switch (code) {
     case "FEATURE_DISABLED":
     case "CONSENT_REQUIRED":
-    case "IMAGE_NOT_ANONYMIZED":
       return 403;
+    case "IMAGE_NOT_ANONYMIZED":
+    case "PROVIDER_NOT_CONFIGURED":
+    case "NO_PROVIDER_AVAILABLE":
+      return 503;
     case "QUOTA_EXHAUSTED":
       return 429;
     case "PAYLOAD_TOO_LARGE":

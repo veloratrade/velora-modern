@@ -392,7 +392,7 @@ test("INTERNAL NOTES: an admin cannot write one (fail-closed), and a super_admin
   });
 });
 
-test("THROTTLE: a ticket is not an amplification channel — the write route is rate limited per user", async () => {
+test("THROTTLE: a ticket is not an amplification channel — the write route is rate limited per resolved client IP", async () => {
   await withServer(async ({ base }, { alice }) => {
     let sawLimit = false;
     let opened = 0;

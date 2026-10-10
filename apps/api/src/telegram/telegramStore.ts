@@ -42,6 +42,11 @@ export interface TelegramTokenRecord {
 export type TelegramDraftState = "AWAITING_CONFIRMATION" | "NEEDS_DETAIL" | "CONFIRMING" | "CONFIRMED" | "CANCELLED" | "EXPIRED";
 export type TelegramDraftKind = "TEXT" | "VOICE" | "PHOTO";
 
+/** Terminal voice drafts keep their confirmed trade notes, never the transient transcript copy. */
+export function isTerminalTelegramDraftState(state: TelegramDraftState): boolean {
+  return state === "CONFIRMED" || state === "CANCELLED" || state === "EXPIRED";
+}
+
 export interface TelegramDraftRecord {
   readonly id: string;
   readonly userId: string;
@@ -95,6 +100,9 @@ export interface TelegramStore {
     readonly kind: string;
     readonly at: Date;
   }): Promise<boolean>;
+  /** Atomically start a claimed update once; false means processed or already started and must be treated as a no-op. */
+  beginUpdateProcessing(updateId: string, at: Date): Promise<boolean>;
+  /** Finish only a started, still-unprocessed update; repeated calls cannot rewrite a terminal outcome. */
   finishUpdate(updateId: string, outcome: "handled" | "ignored" | "rejected" | "failed", errorCode: string | null, at: Date): Promise<void>;
 
   // ── Identities ────────────────────────────────────────────────────────────

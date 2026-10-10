@@ -12,7 +12,7 @@
 //     Legacy's AdminOverviewService answered;
 //   * USERS: searchable, paginated list → a per-user detail with identity,
 //     actions (activate/suspend, verify e-mail), sessions (revoke one/all),
-//     devices, accounts, trades and the audit history;
+//     login-attempt history, devices, accounts, trades and the audit history;
 //   * the SUPPORT QUEUE (Phase 5's admin API): list by status, thread, reply,
 //     internal note, close/reopen/archive;
 //   * the AUDIT LOG with filters, the SECURITY feeds (signups/logins), SYSTEM
@@ -48,6 +48,7 @@ import {
   getSupportQueueTicket,
   getUserAccounts,
   getUserDevices,
+  getUserLoginHistory,
   getUserSessions,
   getUserTrades,
   listAdminUsers,
@@ -63,6 +64,8 @@ import {
   verifyUserEmail,
   type AdminAccountRow,
   type AdminAuditRow,
+  type AdminAuthEventRow,
+  type AdminAuthHistoryView,
   type AdminHealthView,
   type AdminOverviewView,
   type AdminSecurityRow,
@@ -135,6 +138,19 @@ const PLAN_LABEL: Readonly<Record<string, string>> = {
   free: "admin.plan.free",
   pro: "admin.plan.pro",
 };
+const AUTH_EVENT_LABEL: Readonly<Record<string, string>> = {
+  login: "admin.user360.authType.login",
+  signup: "admin.user360.authType.signup",
+};
+const AUTH_RESULT_LABEL: Readonly<Record<string, string>> = {
+  success: "admin.user360.authResult.success",
+  failure: "admin.user360.authResult.failure",
+};
+const AUTH_REASON_LABEL: Readonly<Record<string, string>> = {
+  INVALID_CREDENTIALS: "admin.user360.authReason.invalidCredentials",
+  ACCOUNT_INACTIVE: "admin.user360.authReason.accountInactive",
+  EMAIL_NOT_VERIFIED: "admin.user360.authReason.emailNotVerified",
+};
 /** Ticket states and message senders are ENUMS, not copy. The queue used to print
  *  the raw value ("open", "admin"), which leaks an English token into the Persian
  *  console while the filter right above it speaks Persian. These maps reuse the
@@ -155,6 +171,11 @@ const SENDER_LABEL: Readonly<Record<string, string>> = {
 function enumLabel(t: T, map: Readonly<Record<string, string>>, value: string): string {
   const key = map[value];
   return key === undefined ? value : t(key);
+}
+
+function authEventField(event: AdminAuthEventRow, field: "ipAddress" | "userAgent", t: T): string {
+  if (!Object.prototype.hasOwnProperty.call(event, field)) return t("admin.user360.notAvailable");
+  return event[field] ?? "—";
 }
 
 const RANGES = ["today", "7d", "30d", "90d", "all"] as const;
@@ -721,6 +742,10 @@ function UserDetail({
   const [accounts, setAccounts] = useState<AdminAccountRow[]>([]);
   const [trades, setTrades] = useState<AdminTradeRow[]>([]);
   const [audit, setAudit] = useState<AdminAuditRow[]>([]);
+  const [loginHistory, setLoginHistory] = useState<AdminAuthHistoryView | null>(null);
+  const [loginHistoryPage, setLoginHistoryPage] = useState(1);
+  const [loginHistoryError, setLoginHistoryError] = useState<string | null>(null);
+  const [loginHistoryLoading, setLoginHistoryLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -752,6 +777,24 @@ function UserDetail({
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadLoginHistory = useCallback(async (): Promise<void> => {
+    setLoginHistoryLoading(true);
+    setLoginHistoryError(null);
+    try {
+      const history = await getUserLoginHistory(user.id, { page: loginHistoryPage, perPage: 10 });
+      setLoginHistory(history);
+    } catch (err) {
+      setLoginHistory(null);
+      setLoginHistoryError(errorText(err));
+    } finally {
+      setLoginHistoryLoading(false);
+    }
+  }, [errorText, loginHistoryPage, user.id]);
+
+  useEffect(() => {
+    void loadLoginHistory();
+  }, [loadLoginHistory]);
 
   const act = useCallback(
     async (fn: () => Promise<unknown>, message: string): Promise<void> => {
@@ -930,6 +973,52 @@ function UserDetail({
                 </tbody>
               </table>
               </div>
+            )}
+
+            <h4 className="label mt-12">{t("admin.user360.loginHistory")}</h4>
+            {loginHistoryLoading ? (
+              <p className="muted-sm mt-8" role="status">{t("admin.user360.loading")}</p>
+            ) : loginHistoryError !== null ? (
+              <div className="mt-8"><ErrorNote text={loginHistoryError} /></div>
+            ) : loginHistory === null || loginHistory.events.length === 0 ? (
+              <p className="muted-sm mt-8" id="adm-login-history-empty">{t("admin.user360.loginHistoryEmpty")}</p>
+            ) : (
+              <>
+                <div className="overflow-auto mt-8">
+                  <table className="table" id="adm-login-history-table">
+                    <thead>
+                      <tr>
+                        <th>{t("admin.security.event")}</th>
+                        <th>{t("admin.security.result")}</th>
+                        <th>{t("admin.user360.authReason")}</th>
+                        <th>{t("admin.security.time")}</th>
+                        <th>{t("admin.user360.ip")}</th>
+                        <th>{t("admin.user360.userAgent")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {loginHistory.events.map((event) => (
+                        <tr key={event.id}>
+                          <td>{enumLabel(t, AUTH_EVENT_LABEL, event.eventType)}</td>
+                          <td><span className={`badge${event.result === "failure" ? " badge-error" : ""}`}>{enumLabel(t, AUTH_RESULT_LABEL, event.result)}</span></td>
+                          <td>{event.reason === null ? "—" : enumLabel(t, AUTH_REASON_LABEL, event.reason)}</td>
+                          <td className="ts-mixed">{fmtDateLong(locale, event.createdAt)}</td>
+                          <td className="v-latn-num">{authEventField(event, "ipAddress", t)}</td>
+                          <td className="v-latn-num">{authEventField(event, "userAgent", t)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex-between mt-8">
+                  <span className="muted-sm">{t("admin.user360.loginEventsShown", { count: fmtNumber(locale, loginHistory.pagination.total) })}</span>
+                  <span className="flex-gap-8">
+                    <button className="btn-ghost btn-sm" type="button" disabled={loginHistoryLoading || loginHistory.pagination.page <= 1} onClick={() => setLoginHistoryPage((page) => Math.max(1, page - 1))}>{t("admin.previous")}</button>
+                    <span className="muted-sm v-latn-num">{fmtNumber(locale, loginHistory.pagination.page)}</span>
+                    <button className="btn-ghost btn-sm" type="button" disabled={loginHistoryLoading || !loginHistory.pagination.hasMore} onClick={() => setLoginHistoryPage((page) => page + 1)}>{t("admin.next")}</button>
+                  </span>
+                </div>
+              </>
             )}
 
             <h4 className="label mt-12">{t("admin.user360.knownDevices")}</h4>

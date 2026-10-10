@@ -77,8 +77,9 @@ export const RATE_LIMIT_DEFAULTS = {
   // Legacy ALSO throttled POST /accounts/{id}/sync at 20/300. That route now
   // EXISTS in Modern (TRD-06: the user-triggered sync the accounts page needs),
   // so the key landed WITH it — and the queue it feeds is the same one the tick
-  // and the webhook ingress feed, which is why the limit is per user and the
-  // work is deduplicated by the job key rather than by the response.
+  // and webhook ingress feed. Legacy's limit is a product-level per-user value;
+  // Modern's dispatch limiter currently buckets by resolved client IP. The
+  // enqueue work is also deduplicated by job key rather than by the response.
   "accounts:sync": { limit: 20, windowSec: 300 },
   "accounts:metaapi-connect": { limit: 5, windowSec: 900 },
   "accounts:detect-server": { limit: 20, windowSec: 900 },
@@ -93,14 +94,14 @@ export const RATE_LIMIT_DEFAULTS = {
   // Legacy also throttled its two admin USER MUTATIONS (`admin-user-action`,
   // 30/300, in Admin/UserManagementController::setStatus + setRole). Modern has
   // exactly those two operations (PATCH .../role and .../status), so the same
-  // number covers the same surface; the limit is per caller, keyed like every
-  // other bucket here (see throttleKeyFor's caller for the discriminator).
+  // number covers the same surface. Legacy keyed these by user; Modern's
+  // dispatch limiter buckets by resolved client IP (see FixedWindowRateLimiter).
   // --- Phase 7: AI -----------------------------------------------------------
   // Legacy's own numbers, carried over verbatim from AIController: analyze-trades
-  // 10/hour, weekly-report 5/hour, feedback 20/hour, each keyed per USER
-  // (`ai-analyze-user-{id}`). They are per-user limits on operations whose work
-  // leaves the building and costs money, so the numbers are the product's, not
-  // an invention here.
+  // 10/hour, weekly-report 5/hour, feedback 20/hour. Legacy keyed these per user;
+  // Modern's dispatch-level buckets are per resolved client IP, before auth.
+  // AiFeatureGuard / the atomic provider quota remain user/provider-scoped where
+  // their contracts define that scope. The historical numbers are not invented.
   "ai:analyze": { limit: 10, windowSec: 3600 },
   "ai:report": { limit: 5, windowSec: 3600 },
   "ai:feedback": { limit: 20, windowSec: 3600 },
@@ -111,6 +112,9 @@ export const RATE_LIMIT_DEFAULTS = {
   // surfaces owned by a later phase. Each lands WITH its route, so no key here
   // ever describes a route that does not exist.
   "admin:user-action": { limit: 30, windowSec: 300 },
+  // Legacy ScreenshotExtractController: 8/300 per user. Modern's outer
+  // dispatch limiter applies the same bound per resolved client IP; AI separately
+  // checks per-user consent/rollout and an atomic provider-wide budget.
   "trades:extract-screenshot": { limit: 8, windowSec: 300 },
   // --- Telegram client (ADR-018) --------------------------------------------
   // MODERN-ONLY VALUES: these have no PHP lineage, because the Telegram client
@@ -118,9 +122,9 @@ export const RATE_LIMIT_DEFAULTS = {
   // (the bucket discriminator is the Telegram user id, not an IP — a bot has no
   // meaningful client IP). See docs/telegram/SECURITY.md §rate limiting.
   //
-  // "trades:extract-screenshot" above is REUSED for the Telegram image path: it
-  // is the same product operation (screenshot → candidate fields), and inventing
-  // a second key for it would let the two limits drift apart.
+  // Telegram photos use `telegram:journal`, checked before the Bot API download;
+  // they do NOT share `trades:extract-screenshot`. The Telegram limiter is keyed
+  // by Telegram identity, while the HTTP dispatcher bucket is keyed by client IP.
   "telegram:link-start": { limit: 5, windowSec: 3600 },
   "telegram:update": { limit: 60, windowSec: 60 },
   "telegram:journal": { limit: 20, windowSec: 3600 },

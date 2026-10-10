@@ -9,7 +9,7 @@
 //   2. chain resolution         — an empty chain is a refusal, not an exception
 //   3. per entry, in order:
 //        deadline               — the caller's budget, not the provider's
-//        consent                — external providers only; local OCR is exempt
+//        consent                — external providers only; only screenshot extraction may fall through to local OCR
 //        quota reservation      — ONE atomic statement, before any egress
 //        image anonymization    — FAIL CLOSED: no redaction, no external egress
 //        call                   — through the injected executor
@@ -165,15 +165,19 @@ export class AiManager {
       const external = !PROVIDERS[entry.provider].local;
 
       // 3b. CONSENT, before any egress. Legacy exempts the local provider: OCR on
-      //     this machine is not a third-party disclosure. For an external provider
-      //     a missing consent STOPS the walk — trying the next external provider
-      //     would be the same disclosure with a different logo.
+      //     this machine is not a third-party disclosure. For the screenshot
+      //     feature only, a consent refusal may continue to a local OCR entry,
+      //     matching ScreenshotExtractController's explicit Tesseract fallback.
+      //     Every other feature stops on consent; no external provider is tried.
       if (external) {
         const consent = await this.deps.consent.consentState(request.userId);
         if (!consent.consented) {
-          const summary = await this.record(request, entry, "refused", "CONSENT_REQUIRED", null, 0, null);
-          attempts.push(summary);
-          return { status: "refused", code: "CONSENT_REQUIRED", attempts };
+          attempts.push(await this.record(request, entry, "refused", "CONSENT_REQUIRED", null, 0, null));
+          last = new AiFailure("CONSENT_REQUIRED", "refused", entry.provider, false);
+          if (request.feature !== "screenshot_extraction") {
+            return { status: "refused", code: "CONSENT_REQUIRED", attempts };
+          }
+          continue;
         }
       }
 
@@ -299,7 +303,14 @@ export class AiManager {
       windowFrom: request.windowFrom ?? null,
       windowTo: request.windowTo ?? null,
       tradesAnalyzed: request.tradesAnalyzed ?? null,
-      insight: result?.insight ?? {},
+      // Screenshot outputs may contain provider-supplied raw OCR/date evidence.
+      // Return that evidence to the caller for correction, but keep the ledger to
+      // bounded structured fields only (never the image-derived raw text/response).
+      insight: request.feature === "screenshot_extraction"
+        ? sanitizeScreenshotLedgerInsight(result?.insight ?? null)
+        : request.feature === "transcribe"
+          ? transcriptionLedgerInsight(result?.text ?? null)
+          : result?.insight ?? {},
       tokensIn: result?.tokensIn ?? null,
       tokensOut: result?.tokensOut ?? null,
       costMicroUsd: result?.costMicroUsd ?? null,
@@ -337,6 +348,64 @@ export class AiManager {
       };
     }
   }
+}
+
+/** Persist only transcript length; transcript content remains transient for draft review. */
+function transcriptionLedgerInsight(text: string | null): Record<string, number> {
+  return text === null ? {} : { chars: text.length };
+}
+
+const SCREENSHOT_LEDGER_FIELD_KEYS = [
+  "symbol", "side", "direction", "entry", "entryPrice", "entry_price", "exit", "exitPrice", "exit_price",
+  "lot", "volume", "sl", "stopLoss", "stop_loss", "tp", "takeProfit", "take_profit", "pnl", "profit", "profit_loss",
+  "openTime", "open_time", "closeTime", "close_time", "sourceCalendar", "source_calendar", "dateFormat", "date_format",
+  "timezoneOffsetHintMinutes", "timezone_offset_hint_minutes",
+] as const;
+
+/** Privacy boundary for the single durable screenshot-attempt ledger row. */
+function sanitizeScreenshotLedgerInsight(value: Record<string, unknown> | null): Record<string, unknown> {
+  if (value === null) return {};
+  const nested = value["fields"];
+  const source = nested !== null && typeof nested === "object" && !Array.isArray(nested)
+    ? nested as Record<string, unknown>
+    : value;
+  const fields: Record<string, string | number> = {};
+  for (const key of SCREENSHOT_LEDGER_FIELD_KEYS) {
+    const safe = sanitizeScreenshotLedgerField(key, source[key]);
+    if (safe !== null) fields[key] = safe;
+  }
+  const result: Record<string, unknown> = { fields };
+  const confidence = value["confidence"];
+  if (typeof confidence === "number" && Number.isFinite(confidence) && confidence >= 0 && confidence <= 1) {
+    result["confidence"] = confidence;
+  }
+  return result;
+}
+
+function sanitizeScreenshotLedgerField(key: string, value: unknown): string | number | null {
+  if (value === null || value === undefined || (typeof value !== "string" && typeof value !== "number")) return null;
+  const text = String(value).trim();
+  if (text === "" || text.length > 64) return null;
+  if (key === "symbol") return /^[A-Za-z0-9][A-Za-z0-9._/-]{0,31}$/u.test(text) ? text.toUpperCase() : null;
+  if (key === "side" || key === "direction") {
+    const side = text.toLowerCase();
+    return side === "buy" || side === "sell" ? side : null;
+  }
+  if (key === "sourceCalendar" || key === "source_calendar") {
+    return ["gregorian", "jalali", "unknown"].includes(text.toLowerCase()) ? text.toLowerCase() : null;
+  }
+  if (key === "dateFormat" || key === "date_format") {
+    return ["DD/MM/YYYY", "MM/DD/YYYY", "YYYY/MM/DD", "YYYY-MM-DD", "unknown"].includes(text) ? text : null;
+  }
+  if (key === "openTime" || key === "open_time" || key === "closeTime" || key === "close_time") {
+    return /^20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/u.test(text) ? text : null;
+  }
+  if (key === "timezoneOffsetHintMinutes" || key === "timezone_offset_hint_minutes") {
+    if (!/^[+-]?\d{1,4}$/u.test(text)) return null;
+    const minutes = Number(text);
+    return Number.isInteger(minutes) && minutes >= -720 && minutes <= 840 ? minutes : null;
+  }
+  return /^-?\d{1,18}(?:\.\d{1,12})?$/u.test(text) ? text : null;
 }
 
 /** 0017's error_code shape: ^[A-Z0-9_]{1,48}$. */

@@ -29,6 +29,7 @@ import {
 } from "@velora/domain";
 import { TELEGRAM_DRAFT_TTL_SECONDS } from "@velora/contracts";
 import { TradeError, type TradeService } from "../trades/tradeService.js";
+import { isTerminalTelegramDraftState } from "../telegram/telegramStore.js";
 import type {
   TelegramDraftKind,
   TelegramDraftRecord,
@@ -325,6 +326,6 @@ function toView(draft: TelegramDraftRecord): JournalDraftView {
     state: draft.state,
     complete: isDraftComplete(draft.draft),
     sourceKind: draft.sourceKind,
-    transcript: draft.transcript,
+    transcript: isTerminalTelegramDraftState(draft.state) ? null : draft.transcript,
   };
 }

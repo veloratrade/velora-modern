@@ -290,6 +290,27 @@ test("confirming creates ONE trade, and a Telegram retry of the same callback do
   assert.equal((latest["pagination"] as Record<string, unknown>)["total"], 1);
 });
 
+test("a durable processing-start marker makes a worker replay a side-effect-free no-op", async () => {
+  const { bot, api, store } = makeBot();
+  const completed = commandUpdate(33, "/help");
+  assert.equal(await bot.claim(completed), true);
+  assert.equal(await bot.processClaimed(completed), "handled");
+  const sendsAfterFirstRun = api.sent.length;
+  assert.ok(sendsAfterFirstRun > 0);
+  assert.equal(await bot.processClaimed(completed), "ignored", "a completed update cannot start again");
+  assert.equal(api.sent.length, sendsAfterFirstRun, "a completed replay has no second Bot API side effect");
+
+  const interrupted = commandUpdate(34, "/help");
+  assert.equal(await bot.claim(interrupted), true);
+  assert.equal(await store.beginUpdateProcessing("34", new Date()), true);
+  const beforeReplay = api.sent.length;
+  assert.equal(await bot.processClaimed(interrupted), "ignored", "an already-started update is reconciled, not replayed");
+  assert.equal(api.sent.length, beforeReplay, "a crash-after-start replay does no work");
+  const stuck = store.updates.get("34");
+  assert.ok(stuck?.processingStartedAt !== null && stuck?.processingStartedAt !== undefined);
+  assert.equal(stuck?.processedAt, null, "the interrupted row stays visible as started but unprocessed");
+});
+
 test("a forged or stale callback cannot act: unknown ids are refused, foreign drafts are not found", async () => {
   const { bot, store, api, links } = makeBot();
   await linkAccount(links, "1", "555");

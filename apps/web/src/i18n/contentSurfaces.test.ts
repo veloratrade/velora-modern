@@ -1,10 +1,12 @@
 /*
  * Content-surface guards — AC-32 (MG-FRONTEND-SURFACES + MG-I18N-COVERAGE).
  *
- * The ten new catalogs (markets, news, performance, wallet, intelligence,
- * privacy, terms, checkout, blog, profile) are byte copies of Legacy's own
- * chunks — so, exactly like the support/admin surfaces before them, the risk
- * is not invented wording but SILENT DRIFT:
+ * The Legacy-derived catalogs (markets, news, performance, wallet,
+ * intelligence, privacy, terms, checkout, blog, profile) retain active source
+ * copy except for explicit Modern-authored `surface.*` state text. The
+ * intelligence page's fabricated demo-only keys are explicitly retired. Tests guard locale
+ * parity, page-key resolution, and unchanged Legacy-copy anchors against SILENT
+ * DRIFT:
  *
  *   1. FA/EN PARITY — every key exists in both locales with the SAME chunk
  *      wrapper (one key missing on one side = an English leak inside the
@@ -68,6 +70,7 @@ function pageKeys(relPath: string): string[] {
 }
 
 const PAGE_UNDER_TEST: readonly { file: string; features: readonly Feature[] }[] = [
+  { file: "src/app/(app)/trades/page.tsx", features: ["common", "errors", "trades"] },
   { file: "src/app/(app)/markets/page.tsx", features: ["common", "errors", "markets"] },
   { file: "src/app/(app)/news/page.tsx", features: ["common", "errors", "news"] },
   { file: "src/app/(app)/performance/page.tsx", features: ["common", "errors", "performance", "dashboard"] },
@@ -100,6 +103,24 @@ test("AC-32 pages: every t() key resolves through the real translator (both loca
       }
     }
   }
+});
+
+test("AC-32 intelligence demo: fabricated answer/metrics are intentionally retired", () => {
+  const retiredDemoKeys = [
+    "pages.intelligence.simulatedAnswer",
+    "pages.intelligence.72.win.rate.dbd22d81",
+    "pages.intelligence.best.strategy.this.week.15m.order.block.5fe719d7",
+    "pages.intelligence.the.main.causes.of.this.month.s.c7a3da5c",
+    "pages.intelligence.what.is.my.best.setup.53d921df",
+  ];
+  const keysUsedByPage = pageKeys("src/app/(app)/intelligence/page.tsx");
+  for (const key of retiredDemoKeys) {
+    assert.ok(!keysUsedByPage.includes(key), `intelligence page still renders Legacy demo key ${key}`);
+    assert.ok(!Object.prototype.hasOwnProperty.call(CATALOG_FILES.fa.intelligence.messages, key), `fa catalog retains retired demo key ${key}`);
+    assert.ok(!Object.prototype.hasOwnProperty.call(CATALOG_FILES.en.intelligence.messages, key), `en catalog retains retired demo key ${key}`);
+  }
+  assert.ok(keysUsedByPage.includes("surface.reportNoFields"), "the real report's structured empty state must stay visible");
+  assert.ok(keysUsedByPage.includes("surface.journalReports"), "the real journal-report surface must remain wired");
 });
 
 test("AC-32 blog data: every posts.ts key resolves in [common, blog] (both locales)", async () => {
@@ -139,14 +160,13 @@ test("AC-32 legacy-verbatim anchors: the ported values are byte-identical to Leg
     ) as { messages: Record<string, string> };
     return raw.messages;
   };
-  // A handful of strings a user actually reads, per surface — proved verbatim.
+  // A handful of strings a user actually reads on surfaces that still use Legacy copy — proved verbatim.
   const anchors: readonly [Feature, string, Locale][] = [
     ["markets", "pages.markets.live.forex.and.crypto.watchlist.707e34a1", "fa"],
     ["markets", "pages.markets.gold.us.dollar.b891c472", "en"],
     ["news", "pages.news.today.s.important.news.88663162", "fa"],
     ["performance", "pages.performance.total.win.rate.9294474a", "fa"],
     ["wallet", "pages.wallet.total.account.balance.9cc8b58f", "fa"],
-    ["intelligence", "pages.intelligence.simulatedAnswer", "fa"],
     ["privacy", "pages.privacy.p05.collection_title", "fa"],
     ["terms", "pages.terms.p05.risk_title", "fa"],
     ["checkout", "pages.checkout.p05.heading", "fa"],

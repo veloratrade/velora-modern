@@ -10,10 +10,10 @@
 //   not the bot.
 //
 // WHAT IT DOES OWN
-//   1. IDEMPOTENCY. Every update is claimed before any work happens
-//      (`telegram_updates`, keyed by Telegram's own update id), so a retried
-//      delivery cannot create a second journal entry, cannot act on a button
-//      twice and cannot spend a linking token twice.
+//   1. IDEMPOTENCY. Every update is claimed before dispatch, then
+//      `processClaimed` atomically acquires a one-shot start marker in
+//      `telegram_updates` before side effects. Replays cannot create a second
+//      journal entry, act on a button twice or spend a linking token twice.
 //   2. THE ONBOARDING GATE. An unlinked Telegram identity can reach onboarding
 //      and nothing else. That is a UX boundary; the security boundary is that no
 //      service can be called without a resolved user id.
@@ -102,16 +102,22 @@ export class TelegramBot {
   }
 
   /**
-   * Dispatch a CLAIMED update and record how it ended.
+   * Start a CLAIMED update exactly once, dispatch it, and record its outcome.
    *
-   * The `finally` block is the durability guarantee: whatever happens below —
-   * including a thrown error — the claimed row is stamped with an outcome, so an
-   * update that is stuck unprocessed is visible rather than invisible.
+   * The durable start marker is acquired before any side effect. A worker replay
+   * after a crash therefore becomes a no-op; a crash after the marker but before
+   * finish leaves an explicitly started, unprocessed row for reconciliation.
    */
   async processClaimed(update: TelegramUpdate): Promise<UpdateOutcome> {
     const kind = classifyUpdate(update);
+    const updateId = String(update.update_id);
     const telegramUserId = update.message?.from?.id ?? update.callback_query?.from.id ?? null;
     const chatId = update.message?.chat.id ?? update.callback_query?.message?.chat.id ?? null;
+    const started = await this.deps.store.beginUpdateProcessing(updateId, this.now());
+    if (!started) {
+      this.deps.log({ level: "info", event: "telegram.update_processing_duplicate", kind });
+      return "ignored";
+    }
     let outcome: UpdateOutcome = "handled";
     let errorCode: string | null = null;
     try {
@@ -124,7 +130,7 @@ export class TelegramBot {
       this.deps.log({ level: "error", event: "telegram.update_failed", code: errorCode });
       if (chatId !== null) await this.safeSend(String(chatId), copyFor(await this.localeOrNull(telegramUserId)).genericError);
     } finally {
-      await this.deps.store.finishUpdate(String(update.update_id), outcome, errorCode, this.now()).catch(() => undefined);
+      await this.deps.store.finishUpdate(updateId, outcome, errorCode, this.now()).catch(() => undefined);
     }
     return outcome;
   }

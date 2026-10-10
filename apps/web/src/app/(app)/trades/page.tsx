@@ -20,8 +20,10 @@
 // icon pipeline yet and the capability — choose a symbol, record an emotion — is
 // intact; the visual asset work is tracked in the capability matrix (TRD-02).
 import React, { useEffect, useState } from "react";
-import { listTrades, createTrade, getTradeSymbols, deleteTrade, getAnalyticsSummary } from "../../../lib/api/resources";
-import type { TradeRecord, AnalyticsSummary } from "../../../lib/api/resources";
+import { listTrades, createTrade, getTradeSymbols, deleteTrade, getAnalyticsSummary, extractTradeScreenshots, getMe } from "../../../lib/api/resources";
+import type { TradeRecord, AnalyticsSummary, ScreenshotExtractionResponse } from "../../../lib/api/resources";
+import { isValidTimeZone, screenshotTimePrefill, toApiDateTime, toLocalInputTime } from "../../../features/trades/screenshotTime.js";
+import type { ScreenshotTimePrefill } from "../../../features/trades/screenshotTime.js";
 import { previewPnl } from "../../../features/trades/pnlPreview";
 import type { Locale } from "../../../contracts/locale";
 import { fmtDateLong, fmtDecimal, fmtMoney, fmtPercent } from "../../../i18n/format";
@@ -31,11 +33,6 @@ function useLocale(): Locale {
   return typeof window !== "undefined" && window.location.pathname.startsWith("/en") ? "en" : "fa";
 }
 
-/** "YYYY-MM-DDTHH:mm" (datetime-local) → "YYYY-MM-DD HH:mm:ss" (API naive wall time). */
-function toApiDt(v: string): string {
-  if (!v) return "";
-  return v.length === 16 ? `${v.replace("T", " ")}:00` : v.replace("T", " ");
-}
 function localInputDefault(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
@@ -79,11 +76,38 @@ export default function TradesPage() {
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [creating, setCreating] = useState(false);
+  const [screenshotFiles, setScreenshotFiles] = useState<File[]>([]);
+  const [extracting, setExtracting] = useState(false);
+  const [screenshotError, setScreenshotError] = useState("");
+  const [extractionResult, setExtractionResult] = useState<ScreenshotExtractionResponse | null>(null);
+  const [profileTimeZone, setProfileTimeZone] = useState<string | null>(null);
+  const [profileTimeZoneLoading, setProfileTimeZoneLoading] = useState(true);
+  const [screenshotTimes, setScreenshotTimes] = useState<{
+    open: ScreenshotTimePrefill | null;
+    close: ScreenshotTimePrefill | null;
+  }>({ open: null, close: null });
   const [form, setForm] = useState(() => ({
     ...EMPTY_FORM,
     openTime: localInputDefault(new Date(Date.now() - 3600_000)),
     closeTime: localInputDefault(new Date()),
   }));
+
+  // Screenshot wall times are displayed in the account's timezone, never the
+  // browser's locale. The API's profile-timezone parser is the save authority.
+  useEffect(() => {
+    let active = true;
+    void getMe()
+      .then(({ user }) => {
+        if (active) setProfileTimeZone(isValidTimeZone(user.timezone) ? user.timezone : "UTC");
+      })
+      .catch(() => {
+        if (active) setProfileTimeZone(null);
+      })
+      .finally(() => {
+        if (active) setProfileTimeZoneLoading(false);
+      });
+    return () => { active = false; };
+  }, []);
 
   const refresh = async () => {
     setLoading(true);
@@ -144,8 +168,8 @@ export default function TradesPage() {
         contractSize: form.contractSize.trim() === "" ? "1" : form.contractSize.trim(),
         commission: form.commission.trim() === "" ? "0" : form.commission.trim(),
         swap: form.swap.trim() === "" ? "0" : form.swap.trim(),
-        openTime: toApiDt(form.openTime),
-        closeTime: toApiDt(form.closeTime),
+        openTime: toApiDateTime(form.openTime, screenshotTimes.open),
+        closeTime: toApiDateTime(form.closeTime, screenshotTimes.close),
       };
       if (form.stopLoss.trim()) payload.stopLoss = form.stopLoss.trim();
       if (form.takeProfit.trim()) payload.takeProfit = form.takeProfit.trim();
@@ -161,6 +185,71 @@ export default function TradesPage() {
       setMsg(err?.messageKey ? t(err.messageKey, err.params ?? null, err.message) : err?.message || t("trades.createFailed", null, "The trade could not be saved."));
     } finally {
       setCreating(false);
+    }
+  };
+
+  const onExtractScreenshots = async () => {
+    setScreenshotError("");
+    setExtractionResult(null);
+    if (screenshotFiles.length === 0) {
+      setScreenshotError(t("trades.screenshotChoose", null, "Choose one to four screenshots first."));
+      return;
+    }
+    if (profileTimeZoneLoading) {
+      setScreenshotError(t("trades.screenshotTimezoneLoading", null, "Loading your profile timezone…"));
+      return;
+    }
+    if (profileTimeZone === null) {
+      setScreenshotError(t("trades.screenshotTimezoneUnavailable", null, "Your profile timezone could not be loaded. Screenshot extraction is temporarily unavailable."));
+      return;
+    }
+    setExtracting(true);
+    try {
+      const result = await extractTradeScreenshots(screenshotFiles);
+      const extracted = result.extraction ?? result.data;
+      const openPrefill = screenshotTimePrefill(extracted.openTime, "", profileTimeZone, extracted.timezoneOffsetHintMinutes);
+      const closePrefill = screenshotTimePrefill(extracted.closeTime, "", profileTimeZone, extracted.timezoneOffsetHintMinutes);
+      const openInput = openPrefill.valid
+        ? toLocalInputTime(extracted.openTime, "", profileTimeZone, extracted.timezoneOffsetHintMinutes)
+        : null;
+      const closeInput = closePrefill.valid
+        ? toLocalInputTime(extracted.closeTime, "", profileTimeZone, extracted.timezoneOffsetHintMinutes)
+        : null;
+      setForm((current) => ({
+        ...current,
+        symbol: extracted.symbol ?? current.symbol,
+        direction: extracted.side === "buy" || extracted.side === "sell" ? extracted.side : current.direction,
+        entryPrice: extracted.entry ?? current.entryPrice,
+        exitPrice: extracted.exit ?? current.exitPrice,
+        volume: extracted.lot ?? current.volume,
+        stopLoss: extracted.sl ?? current.stopLoss,
+        takeProfit: extracted.tp ?? current.takeProfit,
+        openTime: openInput ?? current.openTime,
+        closeTime: closeInput ?? current.closeTime,
+      }));
+      setScreenshotTimes((current) => ({
+        open: openPrefill.valid ? openPrefill : current.open,
+        close: closePrefill.valid ? closePrefill : current.close,
+      }));
+      setExtractionResult(result);
+    } catch (e: unknown) {
+      const err = e as { code?: string; messageKey?: string; message?: string; params?: Record<string, unknown> };
+      const message = err.code === "CONSENT_REQUIRED"
+        ? t("trades.screenshotConsentRequired", null, "Enable AI processing consent in your account settings to use external AI. Local OCR may work without it.")
+        : err.code === "FEATURE_DISABLED"
+          ? t("trades.screenshotFeatureDisabled", null, "Screenshot extraction is disabled for this deployment.")
+          : err.code === "IMAGE_NOT_ANONYMIZED"
+            ? t("trades.screenshotPrivacyUnavailable", null, "External screenshot processing was refused because this deployment cannot safely redact the image. Local OCR may be unavailable.")
+            : err.code === "PROVIDER_NOT_CONFIGURED" || err.code === "NO_PROVIDER_AVAILABLE" || err.code === "OCR_UNAVAILABLE"
+            ? t("trades.screenshotProviderNotConfigured", null, "No screenshot extraction provider is available in this deployment.")
+            : err.code === "AI_INVALID_SCREENSHOT" || err.code === "PAYLOAD_TOO_LARGE" || err.message?.includes("screenshot")
+              ? t("trades.screenshotInvalid", null, "The screenshot could not be read. Use one to four PNG, JPEG, or WebP images within the size limits.")
+              : err?.messageKey
+                ? t(err.messageKey, err.params ?? null, err.message)
+                : t("trades.screenshotFailed", null, "Screenshot extraction could not be completed.");
+      setScreenshotError(message);
+    } finally {
+      setExtracting(false);
     }
   };
 
@@ -248,6 +337,44 @@ export default function TradesPage() {
 
       <div className="card">
         <h3 className="text-gold">{t("pages.trades.new.record.trade.in.journal.d60654ec", null, "Record Trade in Journal")}</h3>
+        <div className="card mb-12" role="group" aria-labelledby="screenshot-extract-title">
+          <h4 id="screenshot-extract-title" className="text-gold">{t("trades.screenshotTitle", null, "Fill from screenshots")}</h4>
+          <p className="page-sub">{t("trades.screenshotHelp", null, "Extracted values are a draft only. Review them carefully; this will not save a trade.")}</p>
+          <label>
+            <span className="label">{t("trades.screenshotChoose", null, "Choose one to four screenshots")}</span>
+            <input
+              className="input"
+              name="tradeScreenshots"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              multiple
+              onChange={(event) => {
+                setScreenshotError("");
+                setExtractionResult(null);
+                setScreenshotFiles(Array.from(event.currentTarget.files ?? []));
+              }}
+            />
+          </label>
+          <div className="flex-gap-8 mt-12">
+            <button className="btn-primary btn-sm" type="button" disabled={extracting || screenshotFiles.length === 0 || profileTimeZoneLoading || profileTimeZone === null} onClick={() => void onExtractScreenshots()}>
+              {extracting
+                ? t("trades.screenshotExtracting", null, "Reading screenshots…")
+                : t("trades.screenshotExtract", null, "Extract draft fields")}
+            </button>
+            {screenshotFiles.length > 0 ? <span className="muted-xs">{t("trades.screenshotSelected", { count: screenshotFiles.length }, `${screenshotFiles.length} selected`)}</span> : null}
+          </div>
+          {profileTimeZoneLoading
+            ? <p className="muted-xs mt-12">{t("trades.screenshotTimezoneLoading", null, "Loading your profile timezone…")}</p>
+            : profileTimeZone === null
+              ? <p className="error-card mt-12" role="alert">{t("trades.screenshotTimezoneUnavailable", null, "Your profile timezone could not be loaded. Screenshot extraction is temporarily unavailable.")}</p>
+              : <p className="muted-xs mt-12">{t("trades.screenshotTimezone", { timezone: profileTimeZone }, `Screenshot times are shown in ${profileTimeZone}.`)}</p>}
+          {screenshotError ? <p className="error-card mt-12" role="alert">{screenshotError}</p> : null}
+          {extractionResult ? (
+            <p className="page-sub mt-12" role="status">
+              {t("trades.screenshotReview", null, "Draft fields filled. Verify every value before saving.")} · {extractionResult.provider} · {t("trades.screenshotConfidence", { confidence: Math.round(extractionResult.confidence * 100) }, `Confidence ${Math.round(extractionResult.confidence * 100)}%`)}
+            </p>
+          ) : null}
+        </div>
         <form onSubmit={onCreate} className="grid-gap-12 mt-12">
           <div className="label label-nocap text-gold">{t("pages.trades.new.p05.symbol_setup", null, "Symbol and setup")}</div>
           <div className="grid-3">
@@ -326,13 +453,13 @@ export default function TradesPage() {
               <span className="label">
                 {t("pages.trades.new.open.time.f5d607ee", null, "Open Time")} *
               </span>
-              <input className="input v-latn-num" name="openTime" type="datetime-local" value={form.openTime} onChange={(e) => setForm({ ...form, openTime: e.target.value })} required />
+              <input className="input v-latn-num" name="openTime" type="datetime-local" step={1} value={form.openTime} onChange={(e) => setForm({ ...form, openTime: e.target.value })} required />
             </label>
             <label>
               <span className="label">
                 {t("pages.trades.new.close.time.3fc955ae", null, "Close Time")} *
               </span>
-              <input className="input v-latn-num" name="closeTime" type="datetime-local" value={form.closeTime} onChange={(e) => setForm({ ...form, closeTime: e.target.value })} required />
+              <input className="input v-latn-num" name="closeTime" type="datetime-local" step={1} value={form.closeTime} onChange={(e) => setForm({ ...form, closeTime: e.target.value })} required />
             </label>
             <div>
               <span className="label">{t("pages.trades.new.emotional.score.3adcd56b", null, "Emotional Score")}</span>

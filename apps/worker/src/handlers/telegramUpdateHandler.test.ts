@@ -119,15 +119,18 @@ test("no processor ⇒ fail closed with NOT_CONFIGURED, never a silent success",
   assert.ok(events.some((e) => e["event"] === "telegram.processor_absent"));
 });
 
-test("an outcome of `failed` is retried within the class policy, not swallowed", async () => {
+test("a returned `failed` outcome is terminal after processing starts; the queue must not replay side effects", async () => {
   const events: Record<string, unknown>[] = [];
-  const processor: TelegramUpdateProcessor = async () => "failed";
+  let calls = 0;
+  const processor: TelegramUpdateProcessor = async () => {
+    calls += 1;
+    return "failed";
+  };
   const code = await run(processor, jobFor(UPDATE), events);
-  assert.equal(code, "PROVIDER_UNAVAILABLE");
-  // The bot already recorded `failed` on the update row and answered the user;
-  // the job is handed back so pg-boss retries and then dead-letters it, which is
-  // what makes a stuck update visible instead of lost.
+  assert.equal(code, null, "a started update is not retried by the queue");
+  assert.equal(calls, 1);
   assert.ok(events.some((e) => e["event"] === "telegram.job_processed" && e["outcome"] === "failed"));
+  assert.ok(events.some((e) => e["event"] === "telegram.job_terminal_failure"));
 });
 
 test("`ignored` and `rejected` are completed, not retried", async () => {

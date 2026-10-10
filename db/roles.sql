@@ -194,6 +194,14 @@ REVOKE ALL ON TABLE user_credentials FROM velora_worker;
 -- Reporting/analytics must never read credential ciphertext or its envelope.
 REVOKE ALL ON TABLE user_credentials FROM velora_readonly;
 
+-- `ai_platform_secrets` (0028) contains encrypted provider keys and relay
+-- tokens. The worker's Telegram media manager is environment-only and must
+-- never receive CREDENTIAL_MASTER_KEY or encrypted secret envelopes (ADR-016,
+-- ADR-019 D-2). Default privileges would otherwise grant the worker full DML,
+-- so explicitly remove every table privilege. The API retains its existing
+-- runtime access for the admin-managed AI secret capability.
+REVOKE ALL ON TABLE ai_platform_secrets FROM velora_worker;
+
 -- `provisioning_operations` (OD-MP-1, migration 0014) is the durable record of
 -- MetaAPI provisioning attempts. It is written ONLY by the API-side
 -- provisioning service, which is the single authorized consumer of a decrypted

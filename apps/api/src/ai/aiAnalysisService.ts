@@ -26,6 +26,8 @@ import { createHash } from "node:crypto";
 import type { AiManager, AiCallOutcome } from "./aiManager.js";
 import { AI_DEADLINE_ANALYSIS_MS, AI_DEADLINE_REPORT_MS } from "./aiManager.js";
 import type { AiConfigStore, AiFeedbackRow } from "./aiConfigStore.js";
+import { SCREENSHOT_DEADLINE_MS, type DecodedScreenshot } from "./screenshotExtraction.js";
+import { TESSERACT_PROCESS_TIMEOUT_MS } from "./tesseractProvider.js";
 
 // ── prompts ───────────────────────────────────────────────────────────────────
 
@@ -151,6 +153,10 @@ export function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
+function sha256Buffer(value: Buffer): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
 // ── the facts a model may see ─────────────────────────────────────────────────
 
 /** The trade fields an analysis needs. `notes` is deliberately absent. */
@@ -229,11 +235,18 @@ export type AiOperationOutcome =
   | { readonly status: "error"; readonly code: string }
   | { readonly status: "invalid"; readonly code: "NO_OWNED_TRADES" | "TOO_MANY_TRADES" | "PAYLOAD_TOO_LARGE" | "INVALID_PERIOD" | "NO_CHANGES" };
 
+export interface LocalScreenshotOcrPort {
+  isAvailable(): boolean;
+  ocr(image: Buffer, timeoutMs?: number): Promise<{ readonly text: string; readonly confidence: number }>;
+}
+
 export interface AiAnalysisServiceDeps {
   readonly manager: AiManager;
   readonly store: AiConfigStore;
   readonly trades: TradeResolverPort;
   readonly userLocale: (userId: string) => Promise<string | null>;
+  /** Local-only OCR used for legacy `texts[]` compatibility; never sends bytes out. */
+  readonly localOcr?: LocalScreenshotOcrPort;
   readonly now?: () => Date;
 }
 
@@ -252,11 +265,138 @@ function outcomeFrom(call: AiCallOutcome, build: (insight: Record<string, unknow
   };
 }
 
+function legacyScreenshotPayload(call: Extract<AiCallOutcome, { status: "generated" }>, texts: readonly string[]): Record<string, unknown> {
+  const insight = call.insight ?? {};
+  const candidate = insight["fields"];
+  const fields = candidate !== null && typeof candidate === "object" && !Array.isArray(candidate)
+    ? candidate as Record<string, unknown>
+    : insight;
+  const confidence = finiteConfidence(insight["confidence"]) ?? (call.provider === "tesseract" ? 0.4 : 0);
+  const extraction = {
+    symbol: safeSymbol(fields["symbol"]),
+    side: safeSide(fields["side"] ?? fields["direction"]),
+    entry: safeDecimal(fields["entry"] ?? fields["entryPrice"] ?? fields["entry_price"]),
+    exit: safeDecimal(fields["exit"] ?? fields["exitPrice"] ?? fields["exit_price"]),
+    lot: safeDecimal(fields["lot"] ?? fields["volume"]),
+    sl: safeDecimal(fields["sl"] ?? fields["stopLoss"] ?? fields["stop_loss"]),
+    tp: safeDecimal(fields["tp"] ?? fields["takeProfit"] ?? fields["take_profit"]),
+    pnl: safeDecimal(fields["pnl"] ?? fields["profit"] ?? fields["profit_loss"]),
+    openTime: safeText(fields["openTime"] ?? fields["open_time"]) ?? "",
+    closeTime: safeText(fields["closeTime"] ?? fields["close_time"]) ?? "",
+    confidence,
+    provider: call.provider,
+    rawText: texts[0] === "" ? null : texts[0],
+    rawOpenText: safeText(fields["rawOpenText"] ?? fields["raw_open_text"]),
+    rawCloseText: safeText(fields["rawCloseText"] ?? fields["raw_close_text"]),
+    sourceCalendar: safeEnum(fields["sourceCalendar"] ?? fields["source_calendar"], ["gregorian", "jalali", "unknown"]),
+    dateFormat: safeEnum(fields["dateFormat"] ?? fields["date_format"], ["DD/MM/YYYY", "MM/DD/YYYY", "YYYY/MM/DD", "YYYY-MM-DD", "unknown"]),
+    timezoneText: safeText(fields["timezoneText"] ?? fields["timezone_text"]),
+    timezoneOffsetHintMinutes: safeOffset(fields["timezoneOffsetHintMinutes"] ?? fields["timezone_offset_hint_minutes"]),
+  };
+  const times = { openTime: extraction.openTime, closeTime: extraction.closeTime };
+  return {
+    engine: call.provider === "gemini" ? "gemini-vision" : call.provider === "tesseract" ? "tesseract-system" : `${call.provider}-vision`,
+    provider: call.provider,
+    texts: [...texts],
+    times,
+    extraction,
+    data: extraction,
+    confidence,
+  };
+}
+
+function finiteConfidence(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
+}
+
+function safeSymbol(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return /^[A-Za-z0-9][A-Za-z0-9._/-]{0,31}$/u.test(trimmed) ? trimmed.toUpperCase() : null;
+}
+
+function safeSide(value: unknown): "buy" | "sell" | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "buy" || normalized === "sell" ? normalized : null;
+}
+
+function safeDecimal(value: unknown): string | null {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const text = String(value).trim();
+  return text.length <= 32 && /^-?\d{1,18}(?:\.\d{1,12})?$/u.test(text) ? text : null;
+}
+
+function safeText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const text = value.replace(/[\u0000-\u001f\u007f]/gu, "").trim().slice(0, 256);
+  return text === "" ? null : text;
+}
+
+function safeEnum(value: unknown, allowed: readonly string[]): string | null {
+  return typeof value === "string" && allowed.includes(value.trim()) ? value.trim() : null;
+}
+
+function safeOffset(value: unknown): number | null {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  const text = String(value).trim();
+  if (!/^[+-]?\d{1,4}$/u.test(text)) return null;
+  const minutes = Number(text);
+  return Number.isInteger(minutes) && minutes >= -720 && minutes <= 840 ? minutes : null;
+}
+
 export class AiAnalysisService {
   constructor(private readonly deps: AiAnalysisServiceDeps) {}
 
   private get now(): () => Date {
     return this.deps.now ?? (() => new Date());
+  }
+
+  /** `POST /api/v1/trades/extract-screenshot` — first image yields fields; every image may yield local OCR text. */
+  async extractScreenshots(input: {
+    userId: string;
+    images: readonly DecodedScreenshot[];
+  }): Promise<AiOperationOutcome> {
+    if (input.images.length === 0) throw new Error("screenshot extraction requires a validated image");
+    const startedAt = Date.now();
+    const deadlineAt = startedAt + SCREENSHOT_DEADLINE_MS;
+    const first = input.images[0]!;
+    const call = await this.deps.manager.call({
+      userId: input.userId,
+      feature: "screenshot_extraction",
+      ledgerFeature: "ocr",
+      promptVersion: "screenshot_extraction_v1",
+      prompt: "Read only clearly visible trading fields. Return structured fields; do not guess or infer missing values.",
+      image: { bytes: first.bytes, mimeType: first.mimeType },
+      deadlineMs: deadlineAt,
+      attemptTimeoutMs: 20_000,
+      inputHash: sha256Buffer(first.bytes),
+      requiresStructuredOutput: false,
+    });
+    if (call.status !== "generated") return outcomeFrom(call, () => ({}));
+
+    const texts = Array.from({ length: input.images.length }, () => "");
+    if (call.provider === "tesseract" && call.text !== null) texts[0] = call.text.slice(0, 262_144);
+    const localOcr = this.deps.localOcr;
+    if (localOcr?.isAvailable()) {
+      for (let index = 0; index < input.images.length; index += 1) {
+        if (texts[index] !== "" || Date.now() >= deadlineAt) continue;
+        const remainingImages = input.images.length - index;
+        const remainingMs = deadlineAt - Date.now();
+        if (remainingMs < 500) break;
+        const timeoutMs = Math.max(500, Math.min(TESSERACT_PROCESS_TIMEOUT_MS, Math.floor(remainingMs / remainingImages)));
+        try {
+          const result = await localOcr.ocr(input.images[index]!.bytes, timeoutMs);
+          texts[index] = result.text.slice(0, 262_144);
+        } catch {
+          // OCR text is a backwards-compatible convenience; a failure here must
+          // not erase a structured extraction that the managed chain completed.
+        }
+      }
+    }
+
+    const payload = legacyScreenshotPayload(call, texts);
+    return outcomeFrom(call, () => payload);
   }
 
   /** `POST /api/v1/ai/analyze-trades` */

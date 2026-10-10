@@ -6,8 +6,9 @@
 // update and then ran `setTimeout(() => processClaimed)` inside the API
 // process — the work still occupied an API slot after the answer, and a slow
 // voice note blocked that slot. Moving the same `TelegramUpdate` through the
-// existing `pg-boss` boundary reuses the worker deployment that already exists
-// (ADR-007/D-13) and frees the API process immediately.
+// existing `pg-boss` boundary reuses the worker process architecture already in
+// this repository (ADR-007/D-13); the worker is not yet deployed, and the queue
+// handoff remains gated. A successful enqueue frees the API process immediately.
 //
 // WHAT THIS MODULE OWNS
 //   * THE JOB CLASS. `telegram.update` — the worker half consumes exactly this
@@ -25,14 +26,13 @@
 // update BEFORE enqueueing so a retry of the same `update_id` is recognised
 // as a duplicate at the HTTP layer (200 duplicate) rather than enqueued twice.
 // The worker then re-parses the same JSON and calls `processClaimed` (the
-// update is already claimed, so the worker does not claim again). If the
-// enqueue fails the claim already exists and a retry will be answered as a
-// duplicate — a narrow window (claim succeeded, enqueue did not) that is
-// logged and surfaced as 503 so the caller (Telegram) will retry; the next
-// retry will be a duplicate and will not be lost. In the steady state the
-// queue IS the durability: a crash after enqueue loses nothing because the
-// job row survives, and a duplicate webhook converges via the `stately`
-// singletonKey.
+// update is already claimed, so the worker does not claim again). On enqueue
+// refusal/error the pipeline logs the failure and selects the pre-existing
+// in-process `processClaimed` fallback; it does NOT surface a 503. That fallback
+// is best-effort and is not crash-durable: the claimed row remains visible, but
+// a Telegram retry is treated as a duplicate. Only a successful/deduplicated
+// queue handoff is the durable execution record; its job row survives an API
+// process crash, and the `stately` singleton key converges duplicate webhooks.
 
 import type { SafeJobDescriptor } from "@velora/contracts";
 import {

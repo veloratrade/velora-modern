@@ -16,6 +16,7 @@
 //      (for the relay) a HOST — never a key, a URL or a token.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createApp, listen } from "../kernel/server.js";
 import { AuthService } from "../auth/authService.js";
 import { MemoryUserStore } from "../auth/memoryUserStore.js";
@@ -63,7 +64,7 @@ interface Harness {
   consent: { granted: boolean };
 }
 
-async function build(options: { withAi?: boolean; withAdmin?: boolean; secrets?: Record<string, string> } = {}): Promise<Harness> {
+async function build(options: { withAi?: boolean; withAdmin?: boolean; secrets?: Record<string, string>; localOcr?: boolean } = {}): Promise<Harness> {
   const verificationTokens: string[] = [];
   const store = new MemoryUserStore();
   const audit = new MemoryAuditStore();
@@ -101,12 +102,16 @@ async function build(options: { withAi?: boolean; withAdmin?: boolean; secrets?:
   });
   const routeResolver = new AiRouteResolver({ store: config, env: (key) => envSecrets.get(key) });
   const guard = new AiFeatureGuard({ store: config });
+  const localOcr = {
+    isAvailable: () => options.localOcr === true,
+    async ocr() { return { text: "BUY XAUUSD entry 2010.50", confidence: 0.4 }; },
+  };
   const router = new AiFeatureRouter({
     store: config,
     secrets: secretService,
     routes: routeResolver,
     env: (key) => envSecrets.get(key),
-    localOcrAvailable: () => false,
+    localOcrAvailable: () => options.localOcr === true,
   });
 
   let behaviour: (call: number) => AiExecutorResult | Promise<AiExecutorResult> = () => ({
@@ -121,7 +126,20 @@ async function build(options: { withAi?: boolean; withAdmin?: boolean; secrets?:
       return behaviour(calls.length);
     },
   };
+  const tesseract: AiExecutor = {
+    provider: "tesseract",
+    async execute(request) {
+      assert.ok(request.image !== undefined, "screenshot extraction sends only the validated image bytes to local OCR");
+      return {
+        model: "tesseract",
+        insight: { fields: { symbol: "XAUUSD", direction: "buy", entryPrice: "2010.50", stopLoss: "2000" }, confidence: 0.4 },
+        text: "BUY XAUUSD entry 2010.50",
+        tokensIn: null, tokensOut: null, costMicroUsd: null, latencyMs: 5,
+      };
+    },
+  };
 
+  const executors = { gemini, tesseract };
   const manager = new AiManager({
     router,
     guard,
@@ -129,12 +147,13 @@ async function build(options: { withAi?: boolean; withAdmin?: boolean; secrets?:
     consent: { consentState: async () => ({ consented: consent.granted, consentedAt: consent.granted ? "2026-01-01T00:00:00Z" : null }) },
     attempts,
     anonymizer: new UnavailableImageAnonymizer(),
-    executors: { gemini },
+    executors,
   });
 
   const analysis = new AiAnalysisService({
     manager,
     store: config,
+    localOcr,
     trades: { findActiveByIdForUser: async (id, userId) => {
       const row = trades.get(id);
       return row !== undefined && row.ownerId === userId ? strip(row) : null;
@@ -160,8 +179,8 @@ async function build(options: { withAi?: boolean; withAdmin?: boolean; secrets?:
       guard,
       anonymizer: new UnavailableImageAnonymizer(),
       ledger,
-      executors: { gemini },
-      localOcrAvailable: () => false,
+      executors,
+      localOcrAvailable: () => options.localOcr === true,
       env: (key) => envSecrets.get(key),
     }),
   };
@@ -241,6 +260,71 @@ async function get(base: string, token: string, path: string): Promise<{ status:
 
 const data = (json: Record<string, unknown>): Record<string, unknown> => (json["data"] ?? {}) as Record<string, unknown>;
 const code = (json: Record<string, unknown>): string => String(((json["error"] ?? {}) as Record<string, unknown>)["code"] ?? "");
+
+test("screenshot extraction validates images, uses local OCR without consent, and returns a reviewable draft", async () => {
+  const h = await build({ localOcr: true });
+  const token = await h.login(`screenshot-${Date.now()}@velora.test`);
+  h.consent.granted = false;
+  const screenshot = readFileSync(new URL("./__fixtures__/ocr-trade-screenshot.png", import.meta.url));
+  const imageUrl = `data:image/png;base64,${screenshot.toString("base64")}`;
+  const res = await post(h.base, token, "/api/v1/trades/extract-screenshot", { images: [imageUrl, imageUrl], padding: "x".repeat(1_100_000) });
+  assert.equal(res.status, 200);
+  const payload = data(res.json);
+  assert.equal(payload["provider"], "tesseract");
+  assert.equal(payload["engine"], "tesseract-system");
+  assert.deepEqual(payload["texts"], ["BUY XAUUSD entry 2010.50", "BUY XAUUSD entry 2010.50"]);
+  const extraction = payload["extraction"] as Record<string, unknown>;
+  assert.equal(extraction["symbol"], "XAUUSD");
+  assert.equal(extraction["side"], "buy");
+  assert.equal(extraction["entry"], "2010.50");
+  assert.equal(extraction["confidence"], 0.4);
+  assert.equal(typeof payload["attempt_id"], "string");
+  assert.equal(h.calls.length, 0, "the user's missing consent must not cause provider egress");
+  assert.equal(h.attempts.entries.length, 1, "the local OCR attempt is recorded exactly once");
+  assert.equal(h.attempts.entries[0]!.feature, "ocr");
+  assert.equal(h.attempts.entries[0]!.inputHash?.length, 64);
+  await h.close();
+});
+
+test("screenshot extraction rejects malformed image data before provider work", async () => {
+  const h = await build({ secrets: { GEMINI_API_KEY: "test-key" } });
+  const token = await h.login(`screenshot-invalid-${Date.now()}@velora.test`);
+  const res = await post(h.base, token, "/api/v1/trades/extract-screenshot", { images: ["data:image/png;base64,AAAA"] });
+  assert.equal(res.status, 422);
+  assert.equal(code(res.json), "AI_INVALID_SCREENSHOT");
+  assert.equal(h.attempts.entries.length, 0, "invalid bytes must not reach or be logged as provider attempts");
+  assert.equal(h.calls.length, 0);
+  await h.close();
+});
+
+test("screenshot egress is refused with a deployment-status code when redaction and local OCR are unavailable", async () => {
+  const h = await build({ secrets: { GEMINI_API_KEY: "test-key" }, localOcr: false });
+  const token = await h.login(`screenshot-privacy-${Date.now()}@velora.test`);
+  const screenshot = readFileSync(new URL("./__fixtures__/ocr-trade-screenshot.png", import.meta.url));
+  const imageUrl = `data:image/png;base64,${screenshot.toString("base64")}`;
+  const res = await post(h.base, token, "/api/v1/trades/extract-screenshot", { images: [imageUrl] });
+  assert.equal(res.status, 503, "missing anonymization is a deployment capability failure, not an authorization failure");
+  assert.equal(code(res.json), "IMAGE_NOT_ANONYMIZED");
+  assert.equal(h.calls.length, 0, "the original screenshot must never reach the external executor");
+  assert.equal(h.attempts.entries[0]!.errorCode, "IMAGE_NOT_ANONYMIZED");
+  await h.close();
+});
+
+test("oversized JSON from an extended route is a client 413, never a generic 500", async () => {
+  const h = await build();
+  const token = await h.login(`body-limit-${Date.now()}@velora.test`);
+  const body = JSON.stringify({ trade_ids: ["t1"], padding: "x".repeat(1_100_000) });
+  const response = await fetch(`${h.base}/api/v1/ai/analyze-trades`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body,
+  });
+  assert.equal(response.status, 413);
+  const json = await response.json() as Record<string, unknown>;
+  assert.equal(code(json), "PAYLOAD_TOO_LARGE");
+  assert.ok(response.headers.get("content-security-policy"));
+  await h.close();
+});
 
 test("AI HTTP: without the capability wired the surface is 503, not an empty success", async () => {
   const h = await build({ withAi: false, withAdmin: false });

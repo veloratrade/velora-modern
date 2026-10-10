@@ -126,10 +126,11 @@ export class TelegramUpdatePipeline {
    * Claim now, finish later. This is the WEBHOOK path: the caller answers
    * Telegram as soon as the claim is held.
    *
-   * The claim is what makes the early answer safe. Without it, answering before
-   * the work is done would mean a crash mid-processing loses the update with no
-   * trace; with it, the update row exists (claimed, unprocessed) and Telegram's
-   * retry is recognised as a duplicate.
+   * The claim supplies idempotency and an operationally visible row. When the
+   * pg-boss enqueue succeeds, its job row is the durable execution record. The
+   * pre-existing in-process defer remains the default/failure fallback and is
+   * not crash-durable: a claimed, unprocessed update is visible, but a Telegram
+   * retry is recognized as a duplicate rather than automatically replayed.
    */
   async acceptDeferred(raw: Buffer | string | unknown, mode: TelegramUpdateMode): Promise<AcceptResult> {
     if (this.deps.mode() !== mode) return { status: "wrong_consumer", mode: this.deps.mode() };
@@ -145,11 +146,12 @@ export class TelegramUpdatePipeline {
 
     // MG-TG-3 — the queue handoff.
     //
-    // THE CLAIM PRECEDES THE ENQUEUE, and that order is the safety property:
-    // a Telegram retry that arrives before the job row exists is recognised as
-    // a duplicate here rather than enqueued twice. Once the job row is durable
-    // the API's obligation ends, and a crash costs nothing because the row —
-    // not this process — now owns the update.
+    // THE CLAIM PRECEDES THE ENQUEUE, and that order is the idempotency
+    // property: a Telegram retry that arrives after the claim is recognized as
+    // a duplicate rather than enqueued twice. In the successful queue path, the
+    // durable job row owns execution across an API crash. If enqueue fails, the
+    // process-local fallback below is only best-effort (the claimed row remains
+    // visible, but there is no durable job to replay automatically).
     const enqueue = this.deps.enqueue;
     if (enqueue !== undefined) {
       try {
@@ -159,8 +161,9 @@ export class TelegramUpdatePipeline {
         }
         this.deps.log({ level: "warn", event: "telegram.update_queue_rejected", updateId });
       } catch (err) {
-        // Degrade, do not lose: the update is already claimed, so finishing it
-        // here is still exactly-once. Only the latency benefit is given up.
+        // Select the best-effort in-process fallback. The claim stays visible,
+        // but this path is not crash-durable; only an accepted pg-boss job
+        // survives an API process crash.
         this.deps.log({
           level: "error",
           event: "telegram.update_queue_failed",

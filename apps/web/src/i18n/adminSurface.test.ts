@@ -224,6 +224,19 @@ test("the sensitive network fields are omitted by the server and LABELLED by the
   assert.ok(/ipAddress\?:/.test(resources) && /userAgent\?:/.test(resources), "the session/security types must keep ipAddress/userAgent optional");
 });
 
+test("User 360 renders paginated login history through the guarded per-user contract", () => {
+  const resources = read(RESOURCES);
+  const kernel = read(ROUTE_MODULES[3]!);
+  assert.ok(resources.includes("getUserLoginHistory"), "the client resource for login history is missing");
+  assert.ok(resources.includes("/login-history"), "the resource no longer targets the login-history route");
+  assert.ok(pageCode.includes("getUserLoginHistory") && pageCode.includes("setLoginHistoryPage"), "User 360 no longer loads/paginates login history");
+  assert.ok(pageCode.includes("authEventField"), "sensitive fields are no longer rendered with omission-aware labels");
+  assert.ok(kernel.includes("/login-history$"), "the per-user login-history route is missing");
+  assert.ok(kernel.includes('adminUsersRoute("users.view"'), "login history no longer uses users.view authorization");
+  assert.ok(kernel.includes("maySeeSensitive"), "the route no longer omits sensitive fields for restricted callers");
+  assert.ok(/ipAddress\?:/.test(resources) && /userAgent\?:/.test(resources), "sensitive history fields must remain optional");
+});
+
 test("every class the console applies exists in the stylesheet", () => {
   const defined = new Set<string>();
   for (const css of [APP_CSS, SHELL_CSS]) {

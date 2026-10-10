@@ -43,16 +43,28 @@ code into Telegram, and would be suspicious if it did — the copy says so.
 
 ## 3. Update-stream integrity
 
-- **One consumer.** Mode is explicit (`off|polling|webhook`), polling is refused in
-  production (`TG-007`), the ingress answers `409` when the deployment polls, and
-  the poller stops on a mode mismatch. Two consumers on one stream would let an
-  update be processed twice or by the wrong process.
-- **Claim before act.** `telegram_updates.update_id` is the primary key; the claim
-  is `INSERT … ON CONFLICT DO NOTHING RETURNING`. A Telegram retry, a webhook
-  redelivery or a replay after a crash becomes a duplicate outcome, never a second
-  journal entry or a second spent token.
-- **Claim before answer.** The webhook answers `200` only after the claim is held,
-  so a crash mid-processing leaves a durable record instead of a lost update.
+- **One ingress consumer.** Mode is explicit (`off|polling|webhook`), polling is
+  refused in production (`TG-007`), the ingress answers `409` when the deployment
+  polls, and the poller stops on a mode mismatch. The worker is not a second Bot
+  API consumer; it does not call `getUpdates`.
+- **One processing owner.** In the ADR-019 path, webhook ingress → API claim →
+  `pg-boss` (`telegram.update`) → worker → the same `TelegramBot`. The API queue
+  handoff is default-off and must not be enabled until the worker is deployed and
+  D-2 secrets are owner-approved. If enqueue itself refuses or fails, the API
+  falls back to its in-process `processClaimed` path; that costs latency, not the
+  already-held claim.
+- **Claim before act and enqueue.** `telegram_updates.update_id` is the primary
+  key; the claim is `INSERT … ON CONFLICT DO NOTHING RETURNING`. The queue job
+  carries a flat safe payload and `telegram.update:<update_id>` idempotency key;
+  it carries no provider or user credential. A Telegram retry, webhook redelivery
+  or replay after a crash becomes a duplicate, never a second journal entry or a
+  second spent token.
+- **Claim before answer.** The webhook answers `200` only after the claim is held
+  and the configured queue handoff has either been accepted or the existing
+  in-process fallback has been selected. A successful `pg-boss` enqueue is the
+  durable execution record. In fallback mode the claimed `telegram_updates` row
+  is visible, but execution still depends on the API process; this sweep does not
+  claim crash-proof processing for that fallback path.
 - **Ingress is secret-authenticated**, compared in constant time, before the body
   is read; the presented value is never logged.
 
@@ -121,9 +133,21 @@ bytes — so 256 KiB is ~50x the largest plausible delivery.
 | `GEMINI_API_KEY` | only in the `x-goog-api-key` header (never in a URL, which proxies log); provider error bodies are never echoed |
 | Link tokens | never logged; only hashes are stored |
 
+### Worker credential boundary (ADR-019 / D-2)
+
+The currently approved worker scope remains `DATABASE_URL` with the least-privilege
+`velora_worker` role and `METAAPI_PLATFORM_TOKEN`. Provisioning
+`TELEGRAM_BOT_TOKEN`, AI provider secrets, or mail secrets to that second process
+requires an owner-approved exact-name D-2 amendment; no credentials were supplied
+or deployed in this sweep. The worker's AI factory is environment-only and does
+not load `CREDENTIAL_MASTER_KEY`, credential decryption, or the encrypted
+`ai_platform_secrets` table. `db/roles.sql` revokes all worker privileges on that
+table; the PG-role battery was extended, but was not run here and no live role was
+changed.
+
 Shape checks reject a credential pasted into the wrong variable before any
-outbound call, and the repository's `tools/secret-scan.sh` gate covers the tree
-(current status: PASS).
+outbound call, and the repository's `tools/secret-scan.sh` gate covers the tree;
+its prior recorded result is not a verification of this worktree.
 
 ---
 

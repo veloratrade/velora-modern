@@ -471,6 +471,29 @@ test("PG D5 P17b: velora_worker attempting to read or write provisioning_operati
   } finally { await close(); }
 });
 
+test("PG D5 P20: the worker cannot read or change encrypted platform AI secrets", { skip: SKIP }, async () => {
+  const { pool, close } = await harness();
+  try {
+    // The worker's media resolver is environment-only (ADR-016 / ADR-019 D-2).
+    // Even ciphertext is outside its trust boundary; an encrypted provider key
+    // must not become a worker-readable payload merely because defaults grant
+    // DML on every application table.
+    for (const priv of ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE"]) {
+      const res = await pool.query(
+        "SELECT has_table_privilege('velora_worker','ai_platform_secrets',$1) AS p", [priv]);
+      assert.equal(res.rows[0].p, false, `velora_worker must hold no ${priv} on ai_platform_secrets`);
+    }
+    await assertDenied(pool, "velora_worker", "SELECT * FROM ai_platform_secrets");
+    await assertDenied(pool, "velora_worker", "UPDATE ai_platform_secrets SET updated_at = now()");
+    // API admin-managed AI-secret capability is unchanged.
+    for (const priv of ["SELECT", "INSERT", "UPDATE", "DELETE"]) {
+      const res = await pool.query(
+        "SELECT has_table_privilege('app_readwrite','ai_platform_secrets',$1) AS p", [priv]);
+      assert.equal(res.rows[0].p, true, `app_readwrite retains ${priv} on ai_platform_secrets`);
+    }
+  } finally { await close(); }
+});
+
 test("PG D5 P17c: the API role can run the operation state machine but cannot erase the evidence", { skip: SKIP }, async () => {
   const { pool, close } = await harness();
   try {

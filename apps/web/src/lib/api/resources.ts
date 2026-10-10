@@ -254,6 +254,63 @@ export function getTradeSymbols(): Promise<{ symbols: string[] }> {
   return api.request("/api/v1/trades/symbols");
 }
 
+export interface ScreenshotTradeFields {
+  symbol: string | null;
+  side: "buy" | "sell" | null;
+  entry: string | null;
+  exit: string | null;
+  lot: string | null;
+  sl: string | null;
+  tp: string | null;
+  pnl: string | null;
+  openTime: string;
+  closeTime: string;
+  rawText: string | null;
+  rawOpenText: string | null;
+  rawCloseText: string | null;
+  sourceCalendar: string | null;
+  dateFormat: string | null;
+  timezoneText: string | null;
+  timezoneOffsetHintMinutes: number | null;
+  confidence: number;
+  provider: string;
+}
+
+export interface ScreenshotExtractionResponse {
+  engine: string;
+  provider: string;
+  model: string;
+  confidence: number;
+  attempt_id: string;
+  texts: string[];
+  times: { openTime: string; closeTime: string };
+  extraction: ScreenshotTradeFields;
+  data: ScreenshotTradeFields;
+}
+
+/** Bounded PNG/JPEG/WebP screenshot upload; server validates actual bytes before OCR. */
+export async function extractTradeScreenshots(files: readonly File[]): Promise<ScreenshotExtractionResponse> {
+  if (files.length < 1 || files.length > 4) throw new Error("screenshots must contain between one and four images");
+  let totalBytes = 0;
+  for (const file of files) {
+    if (file.size > 8_388_608) throw new Error("screenshot image exceeds the 8 MiB limit");
+    totalBytes += file.size;
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) throw new Error("screenshot must be PNG, JPEG, or WebP");
+  }
+  if (totalBytes > 16_777_216) throw new Error("screenshots exceed the 16 MiB combined limit");
+  const images = await Promise.all(files.map(fileToDataUrl));
+  return api.request<ScreenshotExtractionResponse>("/api/v1/trades/extract-screenshot", { method: "POST", body: { images } });
+}
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("could not read screenshot"));
+    reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("could not read screenshot"));
+    reader.readAsDataURL(file);
+  });
+}
+
 // --- Analytics ---
 // SHAPES ARE THE API'S, NOT A GUESS. These interfaces used to declare
 // `totalTrades`/`winningTrades`/`totalPnL`/`period` and an `equity`/`balance`
@@ -611,6 +668,22 @@ export interface AdminSecurityRow {
   userAgent?: string | null;
 }
 
+export interface AdminAuthEventRow {
+  id: string;
+  eventType: "signup" | "login";
+  result: "success" | "failure";
+  reason: string | null;
+  createdAt: string;
+  /** Omitted by the server unless the actor is super_admin or System Owner. */
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}
+
+export interface AdminAuthHistoryView {
+  events: AdminAuthEventRow[];
+  pagination: { total: number; page: number; perPage: number; hasMore: boolean };
+}
+
 export interface AdminPage<T> {
   items: T[];
   total: number;
@@ -657,6 +730,13 @@ export function listAdminUsers(filter: { search?: string; role?: string; status?
 
 export function getUserSessions(id: string, perPage = 25): Promise<AdminPage<AdminSessionRow> & { sensitive: boolean }> {
   return api.request(`/api/v1/admin/users/${encodeURIComponent(id)}/sessions${qs({ perPage })}`);
+}
+
+export function getUserLoginHistory(
+  id: string,
+  options: { page?: number; perPage?: number; result?: "success" | "failure" } = {},
+): Promise<AdminAuthHistoryView> {
+  return api.request(`/api/v1/admin/users/${encodeURIComponent(id)}/login-history${qs(options)}`);
 }
 
 export function getUserDevices(id: string): Promise<AdminPage<AdminDeviceRow>> {

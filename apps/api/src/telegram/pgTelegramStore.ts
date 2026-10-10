@@ -10,6 +10,7 @@
 // Neither may be rewritten as read-then-write.
 import type { Pool } from "pg";
 import { isUniqueViolation, poolQuery, withTransaction, type QueryFn } from "../persistence/pg.js";
+import { isTerminalTelegramDraftState } from "./telegramStore.js";
 import type {
   IdentityInsert,
   LinkConsumption,
@@ -63,6 +64,7 @@ function toToken(row: Row): TelegramTokenRecord {
 }
 
 function toDraft(row: Row): TelegramDraftRecord {
+  const state = (row["state"] as TelegramDraftState | null) ?? "AWAITING_CONFIRMATION";
   return {
     id: String(row["id"]),
     userId: String(row["user_id"]),
@@ -70,10 +72,10 @@ function toDraft(row: Row): TelegramDraftRecord {
     chatId: String(row["chat_id"]),
     sourceMessageId: String(row["source_message_id"]),
     sourceKind: (row["source_kind"] as TelegramDraftKind | null) ?? "TEXT",
-    state: (row["state"] as TelegramDraftState | null) ?? "AWAITING_CONFIRMATION",
+    state,
     draft: (row["draft"] as TelegramDraftRecord["draft"]) ?? ({} as TelegramDraftRecord["draft"]),
     missingFields: Array.isArray(row["missing_fields"]) ? (row["missing_fields"] as string[]) : [],
-    transcript: textOrNull(row["transcript"]),
+    transcript: isTerminalTelegramDraftState(state) ? null : textOrNull(row["transcript"]),
     media: (row["media"] as Record<string, unknown> | null) ?? {},
     createdAt: iso(row["created_at"]),
     expiresAt: iso(row["expires_at"]),
@@ -128,9 +130,26 @@ export class PgTelegramStore implements TelegramStore {
     return rows.length > 0;
   }
 
+  async beginUpdateProcessing(updateId: string, at: Date): Promise<boolean> {
+    const rows = await this.q(
+      `UPDATE telegram_updates
+          SET processing_started_at = $2::timestamptz
+        WHERE update_id = $1::bigint
+          AND processed_at IS NULL
+          AND processing_started_at IS NULL
+        RETURNING update_id`,
+      [updateId, at.toISOString()],
+    );
+    return rows.length > 0;
+  }
+
   async finishUpdate(updateId: string, outcome: "handled" | "ignored" | "rejected" | "failed", errorCode: string | null, at: Date): Promise<void> {
     await this.q(
-      `UPDATE telegram_updates SET processed_at = $2::timestamptz, outcome = $3, error_code = $4 WHERE update_id = $1::bigint`,
+      `UPDATE telegram_updates
+          SET processed_at = $2::timestamptz, outcome = $3, error_code = $4
+        WHERE update_id = $1::bigint
+          AND processing_started_at IS NOT NULL
+          AND processed_at IS NULL`,
       [updateId, at.toISOString(), outcome, errorCode],
     );
   }
@@ -348,6 +367,7 @@ export class PgTelegramStore implements TelegramStore {
     if (patch.state !== undefined) {
       params.push(patch.state);
       sets.push(`state = $${params.length}`);
+      if (isTerminalTelegramDraftState(patch.state)) sets.push("transcript = NULL");
     }
     const rows = await this.q(
       `UPDATE telegram_journal_drafts SET ${sets.join(", ")} WHERE id = $1::bigint RETURNING *`,
@@ -370,7 +390,7 @@ export class PgTelegramStore implements TelegramStore {
   async markDraftConfirmed(draftId: string, tradeId: string, at: Date): Promise<boolean> {
     const rows = await this.q(
       `UPDATE telegram_journal_drafts
-          SET state = 'CONFIRMED', confirmed_trade_id = $2::bigint, updated_at = $3::timestamptz
+          SET state = 'CONFIRMED', confirmed_trade_id = $2::bigint, transcript = NULL, updated_at = $3::timestamptz
         WHERE id = $1::bigint AND state = 'CONFIRMING'
         RETURNING id`,
       [draftId, tradeId, at.toISOString()],
@@ -380,7 +400,10 @@ export class PgTelegramStore implements TelegramStore {
 
   async releaseConfirmationClaim(draftId: string, restoreState: TelegramDraftState, at: Date): Promise<void> {
     await this.q(
-      `UPDATE telegram_journal_drafts SET state = $2, updated_at = $3::timestamptz
+      `UPDATE telegram_journal_drafts
+          SET state = $2,
+              transcript = CASE WHEN $2 IN ('CONFIRMED', 'CANCELLED', 'EXPIRED') THEN NULL ELSE transcript END,
+              updated_at = $3::timestamptz
         WHERE id = $1::bigint AND state = 'CONFIRMING'`,
       [draftId, restoreState, at.toISOString()],
     );
@@ -389,7 +412,7 @@ export class PgTelegramStore implements TelegramStore {
   async expireStaleDrafts(at: Date): Promise<number> {
     const rows = await this.q(
       `UPDATE telegram_journal_drafts
-          SET state = 'EXPIRED', updated_at = $1::timestamptz
+          SET state = 'EXPIRED', transcript = NULL, updated_at = $1::timestamptz
         WHERE state IN ('AWAITING_CONFIRMATION', 'NEEDS_DETAIL') AND expires_at <= $1::timestamptz
         RETURNING id`,
       [at.toISOString()],

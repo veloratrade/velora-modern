@@ -127,7 +127,7 @@ async function handleWebhookIngress(ctx: ExtendedRouteContext): Promise<RouteRes
   // never file bytes. The kernel's 1 MiB default would let a caller who knows the
   // secret make this process buffer far more than any real delivery ever contains.
   // The response mirrors the kernel's own oversized-body contract (400 +
-  // VALIDATION_FAILED, `BodyParseError` mapping in kernel/server.ts) rather than
+  // VALIDATION_FAILED, typed `RequestBodyError` handling in kernel/server.ts) rather than
   // inventing a new error code for one route.
   let raw: Buffer;
   try {

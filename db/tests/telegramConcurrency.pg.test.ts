@@ -1,16 +1,17 @@
 // Real-PostgreSQL battery — TELEGRAM ATOMICITY UNDER CONCURRENCY (ADR-018).
 //
-// WHY THIS BATTERY EXISTS. The Telegram client's safety rests on four claims that
+// WHY THIS BATTERY EXISTS. The Telegram client's safety rests on five claims that
 // are ONLY true if the database arbitrates them, because a bot answers the same
 // press of a button twice, on two replicas, at the same instant:
 //
 //   1. a linking token is spent EXACTLY ONCE  (consumeLinkToken)
 //   2. an incoming update is claimed EXACTLY ONCE (claimUpdate)
-//   3. a draft is confirmed EXACTLY ONCE       (claimDraftForConfirmation)
-//   4. a trade is posted to a channel ONCE     (claimChannelPost)
+//   3. side effects for a claimed update start AT MOST ONCE (beginUpdateProcessing)
+//   4. a draft is confirmed EXACTLY ONCE       (claimDraftForConfirmation)
+//   5. a trade is posted to a channel ONCE     (claimChannelPost)
 //
-// Each of those is a single statement with its guard in the WHERE clause (or an
-// ON CONFLICT), and the store's own contract says so. PGlite cannot prove it: the
+// Each database-arbitrated guard is one statement with its predicate in the
+// WHERE clause (or an ON CONFLICT), and the store's own contract says so. PGlite cannot prove it: the
 // in-process WASM build runs ONE session, so "two callers raced" is simulated
 // rather than observed, and a single-statement guard is exactly the thing a
 // single session cannot falsify. This battery therefore runs ONLY against a real,
@@ -259,7 +260,7 @@ test("LINK RACE: an EXPIRED token loses to the clock even under concurrency (no 
   }
 });
 
-// ── 2. The four remaining single-statement claims ───────────────────────────
+// ── 2. Update claim and processing-start races ───────────────────────────────
 
 test("UPDATE RACE: the same update_id is claimed once — the replay is ignored", { skip: SKIP }, async () => {
   const h = await harness();
@@ -275,6 +276,33 @@ test("UPDATE RACE: the same update_id is claimed once — the replay is ignored"
     assert.equal([a, b].filter(Boolean).length, 1, "PostgreSQL's dedupe table must let exactly one consumer claim the update");
     const rows = await h.pool.query("SELECT 1 FROM telegram_updates WHERE update_id = $1", ["900001"]);
     assert.equal(rows.rowCount, 1);
+  } finally {
+    await h.close();
+  }
+});
+
+test("START RACE: two workers cannot begin side effects for one claimed update", { skip: SKIP }, async () => {
+  const h = await harness();
+  try {
+    const claim = {
+      updateId: "900002",
+      kind: "message",
+      telegramUserId: "111111",
+      chatId: "111111",
+      at: T0,
+    };
+    assert.equal(await h.storeA.claimUpdate(claim), true);
+    const [a, b] = await race([
+      () => h.storeA.beginUpdateProcessing("900002", T0),
+      () => h.storeB.beginUpdateProcessing("900002", T0),
+    ]);
+    assert.equal([a, b].filter(Boolean).length, 1, "only one process may acquire the start marker");
+    const row = await h.pool.query<{ processing_started_at: Date | null; processed_at: Date | null }>(
+      "SELECT processing_started_at, processed_at FROM telegram_updates WHERE update_id = $1",
+      ["900002"],
+    );
+    assert.notEqual(row.rows[0]!.processing_started_at, null);
+    assert.equal(row.rows[0]!.processed_at, null, "a crash at start remains visible for reconciliation");
   } finally {
     await h.close();
   }

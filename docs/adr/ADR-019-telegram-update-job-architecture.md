@@ -1,12 +1,15 @@
 # ADR-019 — Telegram update processing over the job architecture
 
-Status: **Accepted** (implementation complete and tested at `e041856`; **live worker
-execution is deployment-gated** — see §Decision 6 and §Consequences)
-Date: 2026-10-08
+Status: **Accepted for the repository architecture** (queue path implementation and
+its test battery were recorded at `e041856`; **live worker execution is
+DEPLOYMENT_GATED** — see §Decision 6 and §Consequences). This acceptance does **not**
+approve any credential-provisioning change to D-2.
+Date: 2026-10-08 (D-2 clarification: 2026-10-10)
 Supersedes: nothing. Extends: ADR-007 (job semantics / pg-boss), ADR-008 (webhook
 ingestion), ADR-017 (agent-context state), **ADR-018** (Telegram journal client).
-Amends-in-part (owner-gated): the worker credential boundary recorded in
-`apps/worker/src/index.ts` (D-2, Boundary-Scoped Option B).
+Proposes an owner-gated amendment to the worker credential boundary recorded in
+`apps/worker/src/index.ts` (D-2, Boundary-Scoped Option B); no amendment is
+ratified by this ADR.
 
 ## Context
 
@@ -100,11 +103,15 @@ retry that arrives before the job row exists is recognised as a duplicate at the
 HTTP layer and never becomes a second job; a retry that arrives after is
 recognised by both the claim and the `stately` singleton key.
 
-### 4. Graceful degradation, never loss
-If the queue refuses the job or throws, the pipeline falls back to the
-pre-ADR-019 in-process path and logs a **code**, never provider text. The update
-was already claimed, so it is still processed exactly once — a degradation costs
-latency, not correctness.
+### 4. Queue failure falls back in-process, but only an accepted job is crash-durable
+If enqueue returns false or throws, the pipeline logs a **code**, never provider
+text, and selects the pre-ADR-019 in-process `processClaimed` path. In a live API
+process that path attempts the already-claimed update; it is **not** a durable
+queue substitute and cannot guarantee completion across an API process crash.
+The claimed row remains observable, but Telegram retries are treated as duplicates.
+Therefore the queue path is the durable execution contract; the fallback is a
+best-effort availability measure and must not be described as crash-proof or
+exactly-once across a process failure.
 
 ### 5. The worker composes the same bot, from a second composition root
 The worker is a separate process and cannot reach the API's object graph, so
@@ -122,6 +129,15 @@ drop an email or an achievement that the HTTP path sends.
 * The API enqueues only when `TELEGRAM_QUEUE_ENABLED=true`.
 * The worker registers the `telegram.update` handler only when it can compose a
   processor, which requires `TELEGRAM_BOT_TOKEN`.
+* The base D-2 worker credential scope remains `DATABASE_URL` plus
+  `METAAPI_PLATFORM_TOKEN`. A Telegram processor may additionally consume
+  `TELEGRAM_BOT_TOKEN`; optional AI/mail processing may consume environment-only
+  provider settings (`GEMINI_API_KEY`, `GEMINI_RELAY_URL`,
+  `GEMINI_RELAY_TOKEN`, `RESEND_API_KEY`, with `APP_ORIGIN` and
+  `SUPPORT_NOTIFY_EMAIL` as non-secret configuration). **Supplying any such
+  additional secret to the worker is a proposed D-2 amendment and requires an
+  explicit owner decision for the exact process/environment allowlist.** This
+  ADR does not supply or provision them.
 
 Rationale: **a job enqueued into a queue nobody consumes is an update that was
 claimed and never processed** — a silent regression, strictly worse than the
@@ -130,15 +146,23 @@ precondition, not a config convenience.
 
 `apps/worker/src/index.ts` logs `telegram.worker_gated` with the reason when the
 processor is absent, and registers nothing: the same fail-closed rule the MetaAPI
-sync handler applies to a missing platform token.
+sync handler applies to a missing platform token. The processor's AI resolver is
+environment-only; it does not import credential decryption, does not use
+`CREDENTIAL_MASTER_KEY`, and cannot read the encrypted API-managed
+`ai_platform_secrets` table. `db/roles.sql` revokes every worker privilege on that
+table while preserving API-role DML. The new PG-role assertions are code evidence
+only until run on the disposable real-PostgreSQL workflow; this sweep did not
+apply privileges to any database.
 
 ## Consequences
 
 ### Positive
 * The API process is released as soon as the job row is durable.
-* Durability moves from "a `setTimeout` in a process that may die" to a pg-boss
-  row with ADR-007 retry/backoff/DLQ semantics, so a failure is retried within
-  the class policy and then made visible in `velora.dlq`.
+* With a successful queue handoff, durability moves from "a `setTimeout` in a
+  process that may die" to a pg-boss row with ADR-007 retry/backoff/DLQ
+  semantics, so a failure is retried within the class policy and then made
+  visible in `velora.dlq`. The process-local fallback on enqueue failure is not
+  covered by that guarantee.
 * No new dependency, service, or Telegram rule.
 
 ### Negative / accepted
@@ -154,16 +178,23 @@ sync handler applies to a missing platform token.
   busy. This is the intended trade: bounded API latency over unbounded worst-case
   message latency.
 
-### Still open — owner decisions, not code
-1. **`MG-WORKER-DEPLOY`.** No service hosts the worker. Until one does, the
-   handoff stays off by design.
-2. **D-2 credential boundary.** Provisioning `TELEGRAM_BOT_TOKEN` (and, for
-   voice/vision, `GEMINI_API_KEY`; for transactional mail, `RESEND_API_KEY` and
-   `APP_ORIGIN`) to a second process **amends** the worker's documented boundary
-   of "exactly two environment secrets". That amendment is an owner decision;
-   this ADR records the implication and does not make it.
-3. **Live verification.** No Telegram round trip exists. A passing unit test is
-   not live verification, and none is claimed.
+### Still open — owner and deployment gates, not missing queue architecture
+1. **`MG-WORKER-DEPLOY` (`DEPLOYMENT_GATED`).** No service hosts the worker. Until
+   one does, the queue handoff stays off by design; this ADR does not change the
+   deployment topology.
+2. **D-2 credential boundary (`OWNER_DECISION_REQUIRED`).** The owner must approve
+   or reject the exact additional worker environment-secret allowlist before any
+   deployment supplies it: `TELEGRAM_BOT_TOKEN`, optional `GEMINI_API_KEY` /
+   `GEMINI_RELAY_TOKEN` (and the relay URL), and optional `RESEND_API_KEY`.
+   `APP_ORIGIN` and `SUPPORT_NOTIFY_EMAIL` are configuration, not credentials.
+   The worker must never receive `CREDENTIAL_MASTER_KEY`, per-user broker
+   credentials/ciphertext, or decrypted per-user credentials. AI secret lookup in
+   the worker is environment-only; encrypted `ai_platform_secrets` remain
+   API-only, with worker access revoked in `db/roles.sql`. The new role-test
+   assertions are **not run in this worktree** and no database role was changed.
+3. **Live verification (`DEPLOYMENT_GATED`).** No Telegram round trip exists. A
+   passing unit test is not live verification; no token was supplied, webhook
+   registered, service deployed, or live journal entry observed in this sweep.
 
 ## Compliance
 
@@ -187,5 +218,5 @@ sync handler applies to a missing platform token.
 | Composition root | `apps/api/src/telegram/telegramProcessorFactory.ts` |
 | Registration + gate | `apps/worker/src/index.ts` (`telegram.worker_gated` / `telegram.worker_enabled`) |
 | Provisioning | `db/provision.ts` — `telegram.update` in `PGBOSS_QUEUES` (the `velora_worker` role holds no CREATE) |
-| Battery | 1,442/1,442 (1,371 general + 71 PGlite), 0 fail; `tsc -b` 0; `secret-scan` 0; `next build --webpack` 39/39 |
-| Commit | `e041856` |
+| Historical battery (at `e041856`) | 1,442/1,442 (1,371 general + 71 PGlite), 0 fail; `tsc -b` 0; `secret-scan` 0; `next build --webpack` 39/39. This is the recorded result for that tree, not a test result for this residue-sweep worktree or the new PG-role assertions. |
+| Architectural implementation record | `e041856` |

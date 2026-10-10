@@ -15,7 +15,9 @@
 // `*.pg.test.ts` batteries remain the real-server evidence path.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { copyFileSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { createEngine, migrate, type MigrationEngine } from "../migrate.ts";
 
 const MIGRATIONS = join(import.meta.dirname, "..", "migrations");
@@ -186,10 +188,18 @@ test("telegram_updates: update_id is the dedupe claim, and stored classification
       engine.query("UPDATE telegram_updates SET error_code=$1 WHERE update_id=$2", ["telegram said: bad request", 9001]),
       /check constraint|violates/i,
     );
-    await engine.query("UPDATE telegram_updates SET outcome='handled', error_code='SEND_FAILED', processed_at=now() WHERE update_id=$1", [9001]);
-    const row = (await engine.query("SELECT outcome, error_code FROM telegram_updates WHERE update_id=$1", [9001])).rows[0]!;
+    await engine.query("UPDATE telegram_updates SET processing_started_at=now(), outcome='handled', error_code='SEND_FAILED', processed_at=now() WHERE update_id=$1", [9001]);
+    const row = (await engine.query("SELECT outcome, error_code, processing_started_at FROM telegram_updates WHERE update_id=$1", [9001])).rows[0]!;
     assert.equal(row["outcome"], "handled");
     assert.equal(row["error_code"], "SEND_FAILED");
+    assert.notEqual(row["processing_started_at"], null);
+
+    await engine.query("INSERT INTO telegram_updates(update_id, update_kind) VALUES ($1,$2)", [9003, "message"]);
+    await assert.rejects(
+      engine.query("UPDATE telegram_updates SET outcome='handled', processed_at=now() WHERE update_id=$1", [9003]),
+      /check constraint|violates/i,
+      "a terminal outcome requires an explicit processing-start marker",
+    );
   } finally {
     await engine.close();
   }
@@ -242,6 +252,88 @@ test("telegram_journal_drafts: one draft per source message, a real confirmation
       /check constraint|violates/i,
     );
   } finally {
+    await engine.close();
+  }
+});
+
+test("0034: terminal voice drafts are backfilled and cannot retain transient transcript text", async () => {
+  const engine = await createEngine();
+  const priorMigrations = mkdtempSync(join(tmpdir(), "velora-telegram-prior-migrations-"));
+  try {
+    for (const file of readdirSync(MIGRATIONS).filter((name) => name.endsWith(".sql") && name < "0034_telegram_draft_transcript_retention.sql").sort()) {
+      copyFileSync(join(MIGRATIONS, file), join(priorMigrations, file));
+    }
+    await migrate(engine, priorMigrations);
+    const alice = await seedUser(engine, "transcript-retention@example.com");
+    const oldTerminal = await engine.query(
+      `INSERT INTO telegram_journal_drafts(user_id, telegram_user_id, chat_id, source_message_id,
+         source_kind, state, draft, missing_fields, transcript, expires_at)
+       VALUES ($1,$2,$2,99001,'VOICE','CANCELLED','{}'::jsonb,'[]'::jsonb,'transient voice copy',now() + interval '30 minutes')
+       RETURNING id`,
+      [alice, "555000991"],
+    );
+    await migrate(engine, MIGRATIONS);
+
+    const terminalId = String(oldTerminal.rows[0]!["id"]);
+    const terminal = (await engine.query("SELECT state, transcript FROM telegram_journal_drafts WHERE id=$1", [terminalId])).rows[0]!;
+    assert.equal(terminal["state"], "CANCELLED");
+    assert.equal(terminal["transcript"], null, "0034 backfills previously terminal voice transcripts");
+    await assert.rejects(
+      engine.query("UPDATE telegram_journal_drafts SET transcript='must not persist' WHERE id=$1", [terminalId]),
+      /check constraint|violates/i,
+    );
+
+    const open = await engine.query(
+      `INSERT INTO telegram_journal_drafts(user_id, telegram_user_id, chat_id, source_message_id,
+         source_kind, state, draft, missing_fields, transcript, expires_at)
+       VALUES ($1,$2,$2,99002,'VOICE','AWAITING_CONFIRMATION','{}'::jsonb,'[]'::jsonb,'review me',now() + interval '30 minutes')
+       RETURNING id`,
+      [alice, "555000991"],
+    );
+    const openId = String(open.rows[0]!["id"]);
+    await assert.rejects(
+      engine.query("UPDATE telegram_journal_drafts SET state='CANCELLED' WHERE id=$1", [openId]),
+      /check constraint|violates/i,
+      "terminal transition must clear the transcript in the same write",
+    );
+    await engine.query("UPDATE telegram_journal_drafts SET state='CANCELLED', transcript=NULL WHERE id=$1", [openId]);
+  } finally {
+    rmSync(priorMigrations, { recursive: true, force: true });
+    await engine.close();
+  }
+});
+
+test("0035: completed update markers are backfilled and an unstarted update cannot be completed", async () => {
+  const engine = await createEngine();
+  const priorMigrations = mkdtempSync(join(tmpdir(), "velora-telegram-prior-migrations-"));
+  try {
+    for (const file of readdirSync(MIGRATIONS).filter((name) => name.endsWith(".sql") && name < "0035_telegram_update_processing_guard.sql").sort()) {
+      copyFileSync(join(MIGRATIONS, file), join(priorMigrations, file));
+    }
+    await migrate(engine, priorMigrations);
+    const receivedAt = new Date("2026-10-01T10:00:00.000Z");
+    const processedAt = new Date("2026-10-01T10:05:00.000Z");
+    await engine.query(
+      `INSERT INTO telegram_updates(update_id, update_kind, received_at, processed_at, outcome)
+       VALUES (9004,'message',$1::timestamptz,$2::timestamptz,'handled')`,
+      [receivedAt.toISOString(), processedAt.toISOString()],
+    );
+    await engine.query("INSERT INTO telegram_updates(update_id, update_kind) VALUES (9005,'message')");
+
+    const applied = await migrate(engine, MIGRATIONS);
+    assert.deepEqual(applied, ["0035_telegram_update_processing_guard.sql"]);
+    const completed = (await engine.query("SELECT processing_started_at, processed_at FROM telegram_updates WHERE update_id=9004")).rows[0]!;
+    assert.equal(new Date(String(completed["processing_started_at"])).toISOString(), processedAt.toISOString());
+    const pending = (await engine.query("SELECT processing_started_at, processed_at FROM telegram_updates WHERE update_id=9005")).rows[0]!;
+    assert.equal(pending["processing_started_at"], null);
+    assert.equal(pending["processed_at"], null);
+    await assert.rejects(
+      engine.query("UPDATE telegram_updates SET outcome='handled', processed_at=now() WHERE update_id=9005"),
+      /check constraint|violates/i,
+      "the lifecycle constraint requires a durable processing-start marker",
+    );
+  } finally {
+    rmSync(priorMigrations, { recursive: true, force: true });
     await engine.close();
   }
 });

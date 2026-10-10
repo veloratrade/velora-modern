@@ -41,6 +41,11 @@ export interface SecretResolution {
   readonly source: SecretSource;
 }
 
+/** The read-only secret lookup needed by provider routing and execution. */
+export interface AiSecretResolver {
+  resolve(key: AiSecretKey): Promise<SecretResolution>;
+}
+
 /** What an HTTP surface may know about a secret. There is no value field. */
 export interface SecretStatus {
   readonly key: AiSecretKey;

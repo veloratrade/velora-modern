@@ -223,10 +223,19 @@ returned to any caller — not to the owning user, and not to an operator. Nothi
   an account never becomes authority to impersonate its owner to a third party.
 - **No admin or System Owner may use another user's credentials** to provision, bind, or
   disconnect that user's MetaAPI account.
-- **No Worker access.** The Worker never receives `CREDENTIAL_MASTER_KEY`, ciphertext, or
-  plaintext; it authenticates with `METAAPI_PLATFORM_TOKEN` plus the non-secret
-  `metaapi_account_id` (D-2). `db/roles.sql` keeps `REVOKE ALL ON user_credentials FROM
-  velora_worker` and is **not** weakened by this amendment.
+- **No Worker access to per-user credentials.** The Worker never receives
+  `CREDENTIAL_MASTER_KEY`, per-user ciphertext, or decrypted user credentials; it
+  authenticates with `METAAPI_PLATFORM_TOKEN` plus the non-secret
+  `metaapi_account_id` (D-2). `db/roles.sql` keeps `REVOKE ALL ON user_credentials
+  FROM velora_worker` and is **not** weakened by this amendment.
+- **No Worker access to encrypted AI platform secrets.** Telegram's worker-side
+  AI composition uses `EnvironmentAiSecretResolver`; it does not use the
+  credential crypto or `CREDENTIAL_MASTER_KEY`. `db/roles.sql` also revokes all
+  worker privileges on `ai_platform_secrets`; only the API role retains its
+  configured DML. Supplying any Telegram/AI/mail secret to the worker is a
+  separate, exact-name D-2 owner decision (ADR-019), not approval to decrypt or
+  query that table. A real-PostgreSQL role assertion was added in the residue
+  sweep but has not been run or applied to a database here.
 - **No plaintext egress.** Plaintext must never be persisted, logged, written to an audit row,
   placed on `QueuePort`, placed in a pg-boss or DLQ payload, or returned in an HTTP response.
 - **No extension by analogy.** This authorization covers **MetaAPI provisioning only**. Any
@@ -241,8 +250,10 @@ exists at this HEAD. `CredentialStore.reveal()` still has **zero production call
 
 At the database layer the same boundary is enforced independently
 (`db/roles.sql`): `velora_worker` and `velora_readonly` hold **no privileges at
-all** on `user_credentials`; only `app_readwrite` may read or write it. This is
-operator-applied, so it holds wherever the file has been applied.
+all** on `user_credentials`; only `app_readwrite` may read or write it. The
+worker's privileges on `ai_platform_secrets` are also fully revoked; the API's
+own DML grant remains. These are repository instructions until an operator
+applies them, so this sweep does not claim a live role change.
 
 ## Lifecycle
 

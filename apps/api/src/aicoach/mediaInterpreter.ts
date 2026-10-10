@@ -35,9 +35,7 @@ export class MediaInterpreterNotConfiguredError extends Error {
 
 /** Raised when a configured provider failed. Fixed text; never a provider body. */
 export class MediaInterpreterError extends Error {
-  constructor(
-    readonly code: "PROVIDER_ERROR" | "TIMEOUT" | "EMPTY_RESULT" | "UNSUPPORTED_MEDIA" | "TOO_LARGE",
-  ) {
+  constructor(readonly code: string) {
     super(`media interpreter: ${code}`);
     this.name = "MediaInterpreterError";
   }
@@ -83,8 +81,10 @@ export interface ImageInterpretationResult {
 }
 
 export interface MediaInterpreter {
-  readonly name: AiProviderName | "unconfigured";
+  readonly name: AiProviderName | "unconfigured" | "managed";
   readonly model: string;
+  /** True when an enclosing manager already records every provider attempt. */
+  readonly managesAttempts?: boolean;
   transcribe(request: TranscriptionRequest): Promise<TranscriptionResult>;
   interpretImage(request: ImageInterpretationRequest): Promise<ImageInterpretationResult>;
 }
@@ -255,10 +255,11 @@ export async function transcribeAndRecord(
   deps: { readonly interpreter: MediaInterpreter; readonly attempts: AiAttemptStore },
   request: TranscriptionRequest & { readonly feature: AiAttemptFeature },
 ): Promise<{ readonly ok: true; readonly text: string; readonly model: string } | { readonly ok: false; readonly code: string }> {
+  const managesAttempts = deps.interpreter.managesAttempts === true;
   const base = {
     userId: request.userId,
     feature: request.feature,
-    provider: (deps.interpreter.name === "unconfigured" ? "gemini" : deps.interpreter.name) as AiProviderName,
+    provider: (deps.interpreter.name === "unconfigured" || deps.interpreter.name === "managed" ? "gemini" : deps.interpreter.name) as AiProviderName,
     model: deps.interpreter.model,
     promptVersion: "media-v1",
     windowFrom: null,
@@ -267,19 +268,23 @@ export async function transcribeAndRecord(
   };
   try {
     const result = await deps.interpreter.transcribe(request);
-    await recordAttempt(deps.attempts, { ...base, model: result.model, insight: { chars: result.text.length }, tokensIn: null, tokensOut: null, costMicroUsd: null, outcome: "success", errorCode: null });
+    if (!managesAttempts) {
+      await recordAttempt(deps.attempts, { ...base, model: result.model, insight: { chars: result.text.length }, tokensIn: null, tokensOut: null, costMicroUsd: null, outcome: "success", errorCode: null });
+    }
     return { ok: true, text: result.text, model: result.model };
   } catch (err) {
     const code = err instanceof MediaInterpreterNotConfiguredError ? "PROVIDER_NOT_CONFIGURED" : err instanceof MediaInterpreterError ? err.code : "PROVIDER_ERROR";
-    await recordAttempt(deps.attempts, {
-      ...base,
-      insight: {},
-      tokensIn: null,
-      tokensOut: null,
-      costMicroUsd: null,
-      outcome: code === "PROVIDER_NOT_CONFIGURED" ? "refused" : "error",
-      errorCode: code,
-    });
+    if (!managesAttempts) {
+      await recordAttempt(deps.attempts, {
+        ...base,
+        insight: {},
+        tokensIn: null,
+        tokensOut: null,
+        costMicroUsd: null,
+        outcome: code === "PROVIDER_NOT_CONFIGURED" ? "refused" : "error",
+        errorCode: code,
+      });
+    }
     return { ok: false, code };
   }
 }
@@ -289,10 +294,11 @@ export async function interpretImageAndRecord(
   deps: { readonly interpreter: MediaInterpreter; readonly attempts: AiAttemptStore },
   request: ImageInterpretationRequest,
 ): Promise<{ readonly ok: true; readonly fields: ImageInterpretationResult["fields"]; readonly model: string } | { readonly ok: false; readonly code: string }> {
+  const managesAttempts = deps.interpreter.managesAttempts === true;
   const base = {
     userId: request.userId,
     feature: "vision_extract" as const,
-    provider: (deps.interpreter.name === "unconfigured" ? "gemini" : deps.interpreter.name) as AiProviderName,
+    provider: (deps.interpreter.name === "unconfigured" || deps.interpreter.name === "managed" ? "gemini" : deps.interpreter.name) as AiProviderName,
     model: deps.interpreter.model,
     promptVersion: "media-v1",
     windowFrom: null,
@@ -303,19 +309,23 @@ export async function interpretImageAndRecord(
     const result = await deps.interpreter.interpretImage(request);
     // Only the STRUCTURED fields are retained — never the image, never the raw
     // provider answer (0017's prohibition, applied to media).
-    await recordAttempt(deps.attempts, { ...base, model: result.model, insight: { ...result.fields }, tokensIn: null, tokensOut: null, costMicroUsd: null, outcome: "success", errorCode: null });
+    if (!managesAttempts) {
+      await recordAttempt(deps.attempts, { ...base, model: result.model, insight: { ...result.fields }, tokensIn: null, tokensOut: null, costMicroUsd: null, outcome: "success", errorCode: null });
+    }
     return { ok: true, fields: result.fields, model: result.model };
   } catch (err) {
     const code = err instanceof MediaInterpreterNotConfiguredError ? "PROVIDER_NOT_CONFIGURED" : err instanceof MediaInterpreterError ? err.code : "PROVIDER_ERROR";
-    await recordAttempt(deps.attempts, {
-      ...base,
-      insight: {},
-      tokensIn: null,
-      tokensOut: null,
-      costMicroUsd: null,
-      outcome: code === "PROVIDER_NOT_CONFIGURED" ? "refused" : "error",
-      errorCode: code,
-    });
+    if (!managesAttempts) {
+      await recordAttempt(deps.attempts, {
+        ...base,
+        insight: {},
+        tokensIn: null,
+        tokensOut: null,
+        costMicroUsd: null,
+        outcome: code === "PROVIDER_NOT_CONFIGURED" ? "refused" : "error",
+        errorCode: code,
+      });
+    }
     return { ok: false, code };
   }
 }

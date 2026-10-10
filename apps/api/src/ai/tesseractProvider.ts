@@ -21,12 +21,16 @@
 //     screenshots, which is why the confidence is low and why every OCR result in
 //     this product is a DRAFT the user confirms, never an authoritative record.
 //
-// VERIFIED LOCALLY: tesseract 5.5.0 is installed in this environment, so the
-// OCR path is exercised against the real binary in `aiProvider.test.ts` and in
-// the real-PostgreSQL battery — not only against an injected fake.
+// RUNTIME STATUS (2026-10-10): this workspace does NOT have the Tesseract
+// binary. The real-binary test in `aiCapability.test.ts` is unconditional, so it
+// will fail here rather than being skipped; its failure is reported honestly.
+// Deterministic bounds/failure tests run separately. No runtime package was
+// installed for this sweep. Binary availability remains environment-gated and
+// is reported by the feature-specific AI status endpoint.
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { StringDecoder } from "node:string_decoder";
+import { accessSync, constants as fsConstants, statSync } from "node:fs";
 import { mkdtempSync, writeFileSync, rmSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -60,11 +64,13 @@ export interface TesseractOptions {
 export function findTesseractBinary(candidates: readonly string[] = TESSERACT_CANDIDATE_PATHS): string | null {
   for (const path of candidates) {
     try {
-      if (existsSync(path)) return path;
+      const candidate = statSync(path);
+      if (!candidate.isFile() || (candidate.mode & 0o111) === 0) continue;
+      accessSync(path, fsConstants.X_OK);
+      return path;
     } catch {
-      // An unreadable path is simply "not usable" — Legacy suppresses the same
-      // probe error, because a warning here would corrupt a JSON response and
-      // leak a server path.
+      // A missing, unreadable, non-regular, or non-executable path is simply
+      // "not usable" — never leak a server path into a response or warning.
     }
   }
   return null;
@@ -137,22 +143,28 @@ export class TesseractProvider {
   async #run(binary: string, args: readonly string[], timeoutMs: number): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       const child = spawn(binary, [...args], { stdio: ["ignore", "pipe", "pipe"] });
+      const decoder = new StringDecoder("utf8");
       let stdout = "";
+      let stdoutBytes = 0;
       let stderr = "";
-      let killed = false;
+      let termination: "timeout" | "output_limit" | null = null;
       const timer = setTimeout(() => {
-        killed = true;
+        if (termination !== null) return;
+        termination = "timeout";
         child.kill("SIGKILL");
       }, Math.max(500, Math.min(timeoutMs, TESSERACT_PROCESS_TIMEOUT_MS)));
 
       child.stdout.on("data", (chunk: Buffer) => {
-        stdout += chunk.toString("utf8");
-        // The output bound is enforced while reading, not after: a runaway
-        // process must not be able to allocate its way into the host.
-        if (stdout.length > TESSERACT_MAX_OUTPUT_BYTES) {
-          killed = true;
+        stdoutBytes += chunk.byteLength;
+        // Enforce the UTF-8 BYTE contract while reading, not after: a stream of
+        // multi-byte text must not evade the bound by having fewer JS chars.
+        if (stdoutBytes > TESSERACT_MAX_OUTPUT_BYTES) {
+          if (termination === null) termination = "output_limit";
           child.kill("SIGKILL");
+          return;
         }
+        // StringDecoder preserves a code point split across pipe chunks.
+        stdout += decoder.write(chunk);
       });
       child.stderr.on("data", (chunk: Buffer) => {
         // Kept bounded and never surfaced: tesseract writes warnings here, and a
@@ -167,8 +179,13 @@ export class TesseractProvider {
       });
       child.on("close", (code) => {
         clearTimeout(timer);
-        if (killed) {
+        stdout += decoder.end();
+        if (termination === "timeout") {
           reject(failed("PROVIDER_TIMEOUT", "tesseract", true));
+          return;
+        }
+        if (termination === "output_limit") {
+          reject(failed("OCR_FAILED", "tesseract", false));
           return;
         }
         if (code !== 0) {

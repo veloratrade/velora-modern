@@ -17,12 +17,14 @@
 // graph. Every behavioural rule stays where it was; nothing is re-implemented.
 //
 // CREDENTIAL NOTE (deployment-gated). A worker that runs this composition needs
-// `TELEGRAM_BOT_TOKEN` (and, for voice/vision and journal analysis,
-// `GEMINI_API_KEY`; for transactional mail, `RESEND_API_KEY` + `APP_ORIGIN`).
-// Provisioning application secrets to a second process amends the worker's
-// documented D-2 credential boundary, which is an OWNER DECISION — so the
-// factory simply returns `null` when the bot is not configured and the worker
-// registers no handler. Nothing here is invented to make that decision go away.
+// `TELEGRAM_BOT_TOKEN` (and, for voice/vision and journal analysis, explicitly
+// approved environment-only AI provider settings; for transactional mail,
+// `RESEND_API_KEY` + `APP_ORIGIN`). Provisioning these to a second process amends
+// the worker's D-2 boundary and remains an OWNER DECISION. This factory never
+// reads `CREDENTIAL_MASTER_KEY` or decrypts `ai_platform_secrets`; admin-managed
+// AI secrets remain API-only. Until the token is provisioned, this returns null
+// and the worker registers no handler. Nothing here is invented to make that
+// decision go away.
 //
 // KNOWN DELIBERATE DIFFERENCE, STATED NOT HIDDEN: `attachments` is not composed
 // here (the API composes one from its object-storage capability). `TelegramBot`
@@ -47,7 +49,17 @@ import { AiCoachService } from "../aicoach/aiCoachService.js";
 import { AI_PROVIDERS, PgAiAttemptStore, UnconfiguredAiProvider } from "../aicoach/aiProvider.js";
 import { PgAiCoachStore } from "../aicoach/aiCoachRoutes.js";
 import { GeminiAiProvider } from "../aicoach/geminiProvider.js";
-import { GeminiMediaInterpreter, UnconfiguredMediaInterpreter, type MediaInterpreter } from "../aicoach/mediaInterpreter.js";
+import type { MediaInterpreter } from "../aicoach/mediaInterpreter.js";
+import { PgAiConfigStore } from "../ai/aiConfigStore.js";
+import { AiFeatureGuard } from "../ai/aiFeatureGuard.js";
+import { AiFeatureRouter } from "../ai/aiFeatureRouter.js";
+import { AiManager } from "../ai/aiManager.js";
+import { AiManagerMediaInterpreter } from "../ai/aiManagerMediaInterpreter.js";
+import { AiRouteResolver } from "../ai/aiRouteResolver.js";
+import { EnvironmentAiSecretResolver } from "../ai/envAiSecretResolver.js";
+import { GeminiExecutor, TesseractExecutor } from "../ai/aiExecutors.js";
+import { TesseractProvider } from "../ai/tesseractProvider.js";
+import { UnavailableImageAnonymizer } from "../ai/imageAnonymizer.js";
 import { FixedWindowRateLimiter } from "../ratelimits/rateLimiter.js";
 import { PgRateLimitStore } from "../ratelimits/pgRateLimitStore.js";
 import { LogMailProvider } from "../mail/logMailProvider.js";
@@ -124,11 +136,45 @@ export function createTelegramUpdateProcessor(deps: TelegramProcessorFactoryDeps
     allowedProviders: AI_PROVIDERS,
   });
 
-  // Media interpretation is its own capability with its own key decision: a
-  // deployment may enable journal analysis and decline voice/vision, and the
-  // bot degrades to "send it as text" instead of failing.
-  let interpreter: MediaInterpreter = new UnconfiguredMediaInterpreter();
-  if (geminiKey !== "") interpreter = new GeminiMediaInterpreter({ apiKey: geminiKey });
+  // Voice and image media must use the same governed manager as the API path:
+  // per-user consent/feature gate, atomic provider budget, fail-closed image
+  // anonymization, local Tesseract fallback, and one attempt ledger. Resolving
+  // secrets per call preserves admin/env precedence without exposing values.
+  const aiConfig = new PgAiConfigStore(pool);
+  const aiEnv = (key: string): string | undefined => env[key];
+  // The worker is intentionally env-only: no CREDENTIAL_MASTER_KEY, no
+  // credential-crypto import, and no read of the encrypted ai_platform_secrets
+  // table. Provider secrets must be explicitly supplied within the owner-approved
+  // D-2 boundary; routing, feature flags, quotas and attempts remain shared.
+  const aiSecrets = new EnvironmentAiSecretResolver(aiEnv);
+  const aiRoutes = new AiRouteResolver({ store: aiConfig, env: aiEnv });
+  const tesseract = new TesseractProvider();
+  const aiRouter = new AiFeatureRouter({
+    store: aiConfig,
+    secrets: aiSecrets,
+    routes: aiRoutes,
+    env: aiEnv,
+    localOcrAvailable: () => tesseract.isAvailable(),
+  });
+  const mediaManager = new AiManager({
+    router: aiRouter,
+    guard: new AiFeatureGuard({ store: aiConfig }),
+    store: aiConfig,
+    consent,
+    attempts,
+    anonymizer: new UnavailableImageAnonymizer(),
+    executors: {
+      gemini: new GeminiExecutor({
+        apiKey: async () => (await aiSecrets.resolve("GEMINI_API_KEY")).value,
+        relayConfig: async () => ({
+          url: (await aiSecrets.resolve("GEMINI_RELAY_URL")).value,
+          token: (await aiSecrets.resolve("GEMINI_RELAY_TOKEN")).value,
+        }),
+      }),
+      tesseract: new TesseractExecutor({ provider: tesseract }),
+    },
+  });
+  const interpreter: MediaInterpreter = new AiManagerMediaInterpreter(mediaManager);
 
   // MG-EMAIL-TYPES side effects. The FIRST-TRADE email and achievement must
   // fire on the worker path exactly as they do on the HTTP path — Legacy's one

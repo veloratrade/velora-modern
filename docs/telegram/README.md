@@ -22,8 +22,11 @@ shaped the way it is. Every claim here is checkable in the named file.
 | `apps/api/src/telegram/telegramStore.ts` (+ `pg`/`memory` adapters) | the persistence PORT | the atomic claims live in the `pg` adapter |
 | `apps/api/src/telegram/telegramLinkService.ts` | one-time token, both link directions, state resolution | one live link per identity *and* per account |
 | `apps/api/src/telegram/telegramBot.ts` | every user-visible decision | never resolves a user itself |
-| `apps/api/src/telegram/telegramUpdatePipeline.ts` | parse → mode gate → claim → dispatch | one path for webhook and polling |
-| `apps/api/src/telegram/telegramPoller.ts` | the development consumer | offset discipline + backoff |
+| `apps/api/src/telegram/telegramUpdatePipeline.ts` | parse → mode gate → claim → dispatch | webhook/polling share one pipeline; webhook may hand off after claim |
+| `apps/api/src/telegram/telegramUpdateQueue.ts` | API-side pg-boss producer | `telegram.update`, idempotent enqueue; enabled only by explicit gate |
+| `apps/worker/src/handlers/telegramUpdateHandler.ts` | queue consumer | re-validates the frozen contract and calls `processClaimed` |
+| `apps/api/src/telegram/telegramProcessorFactory.ts` | worker composition root | composes the same bot/journal and environment-only AI secret resolver |
+| `apps/api/src/telegram/telegramPoller.ts` | the development consumer | offset discipline + backoff; not a production ingress |
 | `apps/api/src/telegram/telegramRoutes.ts` | HTTP surface (ingress + authenticated) | identity from `claims.sub` only |
 | `apps/api/src/journal/journalApplicationService.ts` | drafts → confirmed trades, `latest`/`history` | client-agnostic: **not** under `telegram/` |
 | `apps/api/src/journal/journalAnalysisService.ts` | facts → existing AI coaching pipeline | excludes `notes`; bounded sample |
@@ -50,7 +53,7 @@ client's directory would invite a second one later.
 | `CONFIRMED` implies a real trade | FK on `confirmed_trade_id` + `UNIQUE (telegram_user_id, source_message_id)` |
 | The mirror cannot post twice, or post a foreign trade | `UNIQUE (channel_id, trade_id)` + composite FK to the owning user's trade |
 | A channel is only bound after the server verified posting rights | `getChatMember` for the **bot's** id; `canPostMessages` for channel/supergroup, membership for group |
-| One consumer per update stream | mode gate in the resolver (`TG-007`), `409` in the ingress, poller mode mismatch stop |
+| One ingress consumer (`webhook` or `polling`); one processing owner for queued work | mode gate (`TG-007`), `409` in ingress, poller mismatch stop; queue default-off and worker handler registration gate (ADR-019) |
 | Missing values are never invented | `journalExtraction` reports `missingRequired`; the AI prompt says "do not guess" and returns `null` |
 | AI cannot mutate a financial record | `JournalApplicationService` is the only writer (via `TradeService`); analysis has no writer at all |
 | No credential in a log, an error or a URL anyone else sees | secret holder + fixed error text; asserted by `telegramApi.test.ts` and `geminiProvider.test.ts` |
@@ -60,23 +63,37 @@ client's directory would invite a second one later.
 ## 3. Two ways to be a client, one journal
 
 ```
-Telegram user ──► Bot API ──► [webhook ingress | poller] ──► TelegramUpdatePipeline
-                                                                    │
-                                                          TelegramBot.handleUpdate
-                                                    (claim → process → record outcome)
-                                                                    │
-                    ┌───────────────┬────────────────┬──────────────┴───────────┐
-              TelegramLinkService  JournalApplicationService        JournalAnalysisService
-                    │                    │                                  │
-             telegram_identities,   TradeService (ADR-002 ledger)      AiCoachService
-             telegram_link_tokens   → trades / trade_events →         (consent, bound,
-                    │                 the SAME journal the web shows   ledger, validate)
-                    └────► verification via getChatMember                   │
+Telegram user ──► Bot API ──► [webhook ingress | development poller]
+                                      │
+                              TelegramUpdatePipeline
+                              parse → mode gate → claim
+                                      │
+                        webhook queue gate enabled?
+                           ┌──────────┴───────────┐
+                           │ yes                  │ no / queue unavailable
+                        pg-boss              API in-process path
+                           │                 (deferred fallback)
+                     `telegram.update`
+                           │
+                        Worker
+                           │ processClaimed (never claims twice)
+                           └──────────────┬─────────────────────────────┐
+                                          │                             │
+                              TelegramBot (one implementation)           │
+                    ┌─────────────┬──────────────────┬───────────────┐  │
+              TelegramLinkService JournalApplicationService JournalAnalysisService
+                    │                    │                    │
+             telegram_identities,   TradeService (ADR-002)   AiCoachService
+             telegram_link_tokens   → trades / trade_events  (consent, bound,
+                    │                  same web journal       ledger, validate)
+                    └────► getChatMember
 ```
 
-Web app ──► `/api/v1/telegram/*` (bearer) ──► same services, same rows.
-A trade confirmed in Telegram is visible in the web journal; a trade created on
-the web appears in `/last` and `/history`.
+The worker is a **processing consumer**, not a second Bot API ingress and never
+polls `getUpdates`. Web app ──► `/api/v1/telegram/*` (bearer) ──► the same services
+and rows. A trade confirmed in Telegram is visible in the web journal; a trade
+created on the web appears in `/last` and `/history`. Queue handoff remains
+default-off and is not live until worker deployment and D-2 approval.
 
 ---
 
@@ -107,7 +124,9 @@ the web appears in `/last` and `/history`.
 | `apps/api/src/telegram/telegramRoutes.test.ts` (9) | ingress auth order (503/405/401/400/409), `/status`, link start + rate limit, unlink mapping, channel DELETE |
 | `apps/api/src/telegram/telegramPoller.test.ts` (9) | offset discipline, a failed update staying in the window, `CONFLICT` backoff, mode mismatch, claim-before-answer |
 | `apps/api/src/telegram/telegramApi.test.ts` (10) | token never in an error/stack/URL, failure classification, download cap, posting-rights truth table |
-| `apps/api/src/telegram/telegramConfig.test.ts` (7) | fail-closed resolution, redaction, per-capability degradation, mode gates |
+| `apps/api/src/telegram/telegramConfig.test.ts` | fail-closed resolution, redaction, per-capability degradation, mode gates |
+| `apps/api/src/telegram/telegramUpdateQueue.test.ts` + `telegramUpdatePipeline.test.ts` | producer descriptor and claim-before-enqueue / fallback semantics (ADR-019) |
+| `apps/worker/src/handlers/telegramUpdateHandler.test.ts` | contract re-validation, `processClaimed`, safe retry/DLQ outcomes |
 | `apps/api/src/journal/journalApplicationService.test.ts` (10) | no write before confirm, missing fields reported not invented, exactly one trade, TTL/cancel/reuse |
 | `apps/api/src/journal/journalAnalysisService.test.ts` (6) | `notes` never leave, bounded sample, `coach` feature tagging, refusals forwarded |
 | `apps/api/src/aicoach/mediaInterpreter.test.ts` (8) | fails closed with no credential, transcript counts only, prose → `EMPTY_RESULT`, key never in a URL/data/error |

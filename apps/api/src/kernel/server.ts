@@ -25,6 +25,7 @@ import {
 } from "@velora/contracts";
 import { newSecurityContext, buildCsp, SECURITY_HEADERS, originAllowed } from "./security.js";
 import { dispatchExtendedRoutes } from "../routes/extendedRoutes.js";
+import { RequestBodyError } from "../routes/types.js";
 import { AuthService, AuthError } from "../auth/authService.js";
 import { AdminUserService, type ActorContext } from "../auth/adminUserService.js";
 import { OwnershipService } from "../auth/ownershipService.js";
@@ -193,15 +194,22 @@ export const THROTTLED_ROUTES: Readonly<Record<string, RateLimitKey>> = {
   "POST /api/v1/accounts/detect-server": "accounts:detect-server",
   "POST /api/v1/webhooks/metaapi": "webhooks:metaapi",
   // Phase 5: support writes (create / reply / reopen). Opening a ticket and
-  // replying are the two operations that can be used to flood the inbox, so they
-  // share one bucket per user. Reads are unbounded but cheap and ownership-scoped.
+  // replying share one operation bucket; like every HTTP dispatcher bucket here,
+  // it is keyed by resolved client IP before auth. Reads are unbounded but cheap
+  // and ownership-scoped.
   "POST /api/v1/support/tickets": "support:write",
-  // Phase 7: the three AI operations whose work leaves the process and costs
-  // money. Legacy's per-user limits, carried over verbatim (AIController):
-  // analyze 10/3600, weekly report 5/3600, feedback 20/3600.
+  // Phase 7: AI operations whose work leaves the process and costs money.
+  // Legacy's numeric values are preserved (AIController), but this outer
+  // dispatch limiter buckets by resolved client IP, before authentication.
+  // The AI manager separately checks per-user consent/rollout and the atomic
+  // provider-wide budget.
   "POST /api/v1/ai/analyze-trades": "ai:analyze",
   "POST /api/v1/ai/weekly-report": "ai:report",
   "POST /api/v1/ai/feedback": "ai:feedback",
+  // Legacy ScreenshotExtractController rate: 8 requests per 300 seconds;
+  // this HTTP bucket is keyed by resolved client IP. Telegram media is separate:
+  // its TelegramBot checks `telegram:journal` by Telegram identity pre-download.
+  "POST /api/v1/trades/extract-screenshot": "trades:extract-screenshot",
 };
 
 /**
@@ -239,8 +247,9 @@ export const THROTTLED_PATTERN_ROUTES: readonly {
   { method: "POST", pattern: /^\/api\/v1\/accounts\/[^/]+\/metaapi\/connect$/, key: "accounts:metaapi-connect" },
   // SEC-02: Legacy threw `admin-user-action` (30/300) inside the two handlers
   // that mutate a user — setStatus and setRole — rather than at dispatch. Modern
-  // has the same two operations, so the same limit covers the same surface; the
-  // ids are opaque strings here, hence a pattern rather than the exact map.
+  // covers the same two operations with the same number; this HTTP bucket is
+  // keyed by resolved client IP like every dispatcher bucket here. Opaque target
+  // ids require patterns rather than exact-map entries.
   { method: "PATCH", pattern: /^\/api\/v1\/admin\/users\/[^/]+\/role$/, key: "admin:user-action" },
   { method: "PATCH", pattern: /^\/api\/v1\/admin\/users\/[^/]+\/status$/, key: "admin:user-action" },
 ];
@@ -257,16 +266,25 @@ export function throttleKeyFor(method: string, path: string): RateLimitKey | und
 
 type RouteResult = { status: number; body: unknown; headers?: Record<string, string | string[]> };
 
-class BodyParseError extends Error {}
+const DEFAULT_JSON_BODY_BYTES = 1_048_576;
+const MAX_RAW_BODY_BYTES = 64 * 1_048_576;
 
-/** Read + parse a JSON object body (1 MiB cap); {} when absent. */
-async function parseJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+/** Read + parse a JSON object body with a bounded byte cap; {} when absent. */
+async function parseJsonBody(req: IncomingMessage, maxBytes = DEFAULT_JSON_BODY_BYTES): Promise<Record<string, unknown>> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_RAW_BODY_BYTES) {
+    throw new TypeError("invalid request-body limit");
+  }
+  const declaredLength = req.headers["content-length"];
+  if (declaredLength !== undefined && Number(declaredLength) > maxBytes) {
+    throw new RequestBodyError(413, "PAYLOAD_TOO_LARGE", "request body too large");
+  }
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > 1_048_576) throw new BodyParseError("request body too large");
-    chunks.push(chunk as Buffer);
+    const bytes = chunk as Buffer;
+    size += bytes.length;
+    if (size > maxBytes) throw new RequestBodyError(413, "PAYLOAD_TOO_LARGE", "request body too large");
+    chunks.push(bytes);
   }
   const raw = Buffer.concat(chunks).toString("utf8").trim();
   if (raw === "") return {};
@@ -274,10 +292,10 @@ async function parseJsonBody(req: IncomingMessage): Promise<Record<string, unkno
   try {
     parsed = JSON.parse(raw);
   } catch {
-    throw new BodyParseError("request body must be valid JSON");
+    throw new RequestBodyError(400, "VALIDATION_FAILED", "request body must be valid JSON");
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new BodyParseError("request body must be a JSON object");
+    throw new RequestBodyError(400, "VALIDATION_FAILED", "request body must be a JSON object");
   }
   return parsed as Record<string, unknown>;
 }
@@ -405,8 +423,8 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
       if (err instanceof AuthError) {
         return { status: err.status, body: fail(err.code, err.message, sec.requestId, err.details) };
       }
-      if (err instanceof BodyParseError) {
-        return { status: 400, body: fail("VALIDATION_FAILED", err.message, sec.requestId) };
+      if (err instanceof RequestBodyError) {
+        return { status: err.status, body: fail(err.code, err.message, sec.requestId) };
       }
       throw err;
     });
@@ -1432,13 +1450,21 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
  * bytes. `maxBytes` defaults to the 1 MiB JSON cap; an attachment upload passes
  * its own 5 MiB bound.
  */
-async function readRawBody(req: IncomingMessage, maxBytes = 1_048_576): Promise<Buffer> {
+async function readRawBody(req: IncomingMessage, maxBytes = DEFAULT_JSON_BODY_BYTES): Promise<Buffer> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_RAW_BODY_BYTES) {
+    throw new TypeError("invalid request-body limit");
+  }
+  const declaredLength = req.headers["content-length"];
+  if (declaredLength !== undefined && Number(declaredLength) > maxBytes) {
+    throw new RequestBodyError(413, "PAYLOAD_TOO_LARGE", "request body too large");
+  }
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > maxBytes) throw new BodyParseError("request body too large");
-    chunks.push(chunk as Buffer);
+    const bytes = chunk as Buffer;
+    size += bytes.length;
+    if (size > maxBytes) throw new RequestBodyError(413, "PAYLOAD_TOO_LARGE", "request body too large");
+    chunks.push(bytes);
   }
   return Buffer.concat(chunks);
 }
@@ -1481,7 +1507,17 @@ export function createApp(config: ApiConfig): Server {
         res.writeHead(r.status, headers);
         res.end(JSON.stringify(r.body));
       })
-      .catch(() => {
+      .catch((err: unknown) => {
+        if (err instanceof RequestBodyError) {
+          res.writeHead(err.status, {
+            "Content-Type": "application/json; charset=utf-8",
+            "X-Request-Id": sec.requestId,
+            "Content-Security-Policy": buildCsp(sec.nonce),
+            ...SECURITY_HEADERS,
+          });
+          res.end(JSON.stringify(fail(err.code, err.message, sec.requestId)));
+          return;
+        }
         res.writeHead(500, { "Content-Type": "application/json; charset=utf-8", "X-Request-Id": sec.requestId });
         res.end(JSON.stringify(fail("INTERNAL", "internal error", sec.requestId)));
       });

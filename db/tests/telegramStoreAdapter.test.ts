@@ -87,11 +87,18 @@ test("claimUpdate is a primary-key claim: the first delivery wins and every late
     assert.equal(await h.store.claimUpdate({ ...claim, at: at(1) }), false, "a redelivery must not act");
     assert.equal(await h.store.claimUpdate({ ...claim, telegramUserId: "999", at: at(2) }), false, "…not even from another user id");
 
+    assert.equal(await h.store.beginUpdateProcessing("900001", at(2)), true, "only one worker may acquire the durable start marker");
+    assert.equal(await h.store.beginUpdateProcessing("900001", at(2)), false, "a worker retry after start must not replay side effects");
     await h.store.finishUpdate("900001", "handled", null, at(3));
-    const { rows } = await h.engine.query("SELECT outcome, error_code, processed_at FROM telegram_updates WHERE update_id = $1::bigint", ["900001"]);
+    const { rows } = await h.engine.query("SELECT processing_started_at, outcome, error_code, processed_at FROM telegram_updates WHERE update_id = $1::bigint", ["900001"]);
+    assert.notEqual(rows[0]!["processing_started_at"], null);
     assert.equal(rows[0]!["outcome"], "handled");
     assert.equal(rows[0]!["error_code"], null);
     assert.notEqual(rows[0]!["processed_at"], null, "finishing is what records that the work happened");
+    assert.equal(await h.store.beginUpdateProcessing("900001", at(4)), false, "a completed row cannot start again");
+    await h.store.finishUpdate("900001", "failed", "REPLAY", at(5));
+    const unchanged = (await h.engine.query("SELECT outcome, error_code FROM telegram_updates WHERE update_id = $1::bigint", ["900001"])).rows[0]!;
+    assert.equal(unchanged["outcome"], "handled", "a repeated finish cannot overwrite its terminal outcome");
 
     // A finished update still cannot be re-claimed: the row IS the dedupe key.
     assert.equal(await h.store.claimUpdate(claim), false);

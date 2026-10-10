@@ -10,10 +10,12 @@
 //      A payload that cannot be parsed is TERMINAL — retrying cannot fix it —
 //      so it is classified and dead-lettered instead of looping.
 //   2. CALLING the injected processor, and nothing else. This handler knows
-//      no Telegram business rule: it does not resolve a user, does not claim an
-//      update and does not write a journal entry. `TelegramBot` does all of
-//      that, and there is exactly one `TelegramBot` in this repository.
-//   3. REPORTING the outcome as a structured, code-only event.
+//      no Telegram business rule: it does not resolve a user, claim an update or
+//      write a journal entry. `TelegramBot` acquires the durable one-shot
+//      processing marker before any side effect.
+//   3. REPORTING the outcome as a structured, code-only event. Processor throws
+//      can be retried; a returned `failed` outcome is terminal because the start
+//      marker forbids replaying side effects and leaves the row for reconciliation.
 //
 // WHY THE PROCESSOR IS INJECTED. The bot's composition (`TelegramBot` +
 // journal + AI + notifications over one pool) lives in the API package. The
@@ -21,10 +23,10 @@
 // factory is imported and its result injected. That is a second composition
 // root, NOT a second architecture: every rule still lives in the one bot.
 //
-// IDEMPOTENCY IS NOT RE-DONE HERE. The API claims the `update_id` BEFORE it
-// enqueues, which is what makes its early 200 safe. The processor therefore
-// calls `processClaimed` on an already-claimed update; a redelivered webhook is
-// answered as a duplicate at the HTTP layer and never becomes a second job.
+// CLAIMING IS NOT RE-DONE HERE. The API claims the `update_id` BEFORE it
+// enqueues, which is what makes its early 200 safe. The processor calls
+// `processClaimed` on an already-claimed update; its durable processing-start
+// marker makes a worker replay after a crash a no-op before business side effects.
 import { telegramUpdateSchema, type TelegramUpdate, type TelegramUpdatePayload } from "@velora/contracts";
 import type { QueuedJob } from "../queue/QueuePort.js";
 import { ClassifiedError } from "../observability/safeError.js";
@@ -101,11 +103,11 @@ export function createTelegramUpdateHandler(deps: TelegramUpdateHandlerDeps) {
     deps.log({ level: "info", event: "telegram.job_processed", updateId, kind, outcome, attempts: job.attempts });
 
     if (outcome === "failed") {
-      // The bot already recorded `failed` on the update row and answered the
-      // user. Throwing hands the job back to pg-boss so it is retried within
-      // the class policy and then dead-lettered, which is what makes a stuck
-      // update VISIBLE instead of silently dropped.
-      throw new ClassifiedError("PROVIDER_UNAVAILABLE", "telegram update processing reported failed");
+      // The processing-start marker is durable and one-shot. Replaying this
+      // business operation after it began could duplicate an external effect;
+      // the update row is already marked failed for reconciliation, so complete
+      // the queue job instead of inviting an unsafe retry.
+      deps.log({ level: "error", event: "telegram.job_terminal_failure", updateId, kind, attempts: job.attempts });
     }
   };
 }

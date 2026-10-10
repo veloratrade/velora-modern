@@ -1,9 +1,10 @@
 # Telegram Journal Client — operator guide
 
-**Status of this document:** it describes how to run the Telegram client that is
-implemented on `feat/telegram-journal-client`. It separates what is *implemented
-and verified in this repository* from what needs an external credential or a
-deployment decision. Nothing here claims a live round trip: see §7.
+**Status of this document:** it describes the Telegram client merged into Modern
+`main` and the asynchronous update path recorded in ADR-019. It separates
+repository implementation from credential approval, deployment and live proof.
+The queue handoff is default-off, and this document does **not** claim a live
+round trip: see §7.
 
 ---
 
@@ -53,6 +54,28 @@ restart. Resolution is fail-closed and every failure is a fixed, listed finding.
 | `APP_ENV=production` | mode gate | refuses `polling` in production | `TG-007` |
 | `GEMINI_API_KEY` | voice / images / analysis | any non-empty string | — (capability off, not an error) |
 
+### Process boundary (ADR-019 / D-2)
+
+- **API process:** owns webhook ingress and update claiming; it needs the Telegram
+  webhook secret and its own configured bot/provider values. `TELEGRAM_QUEUE_ENABLED`
+  is **false unless explicitly set to `true`**.
+- **Worker process:** receives a claimed update from `pg-boss` and runs the same
+  `TelegramBot` composition. The API must not set the handoff to `true` until a
+  worker consumer is deployed and ready; otherwise the code falls back to the
+  API path only when the enqueue itself fails, not when an update is stranded in
+  a queue with no consumer.
+- The current D-2 base boundary covers `DATABASE_URL` (least-privilege
+  `velora_worker`) and `METAAPI_PLATFORM_TOKEN`. Supplying `TELEGRAM_BOT_TOKEN`
+  or optional AI/mail secrets (`GEMINI_API_KEY`, relay token, `RESEND_API_KEY`)
+  to the worker is an **OWNER_DECISION_REQUIRED** exact-name allowlist amendment.
+  `APP_ORIGIN`, the relay URL and `SUPPORT_NOTIFY_EMAIL` are configuration values.
+  Do not provision those secrets to the worker before owner approval.
+- The worker AI resolver is environment-only. It never receives
+  `CREDENTIAL_MASTER_KEY` or per-user broker credentials and has no database
+  privilege on the API-managed encrypted `ai_platform_secrets` table. This
+  repository gate does not itself approve, provision, or verify any production
+  credential.
+
 **Degradation is per capability, never global.** A deployment with a token but no
 `TELEGRAM_BOT_USERNAME` still receives updates and journals by text; only the
 deep link and the linking button are unavailable. With no token the entire
@@ -78,6 +101,13 @@ still act on an update it should not have.
 | `webhook` | `POST /api/v1/webhooks/telegram` | **production** (needs public HTTPS + secret) |
 | `polling` | in-process `TelegramPoller` | local development and staging |
 
+The worker is **not** a second Telegram ingress and never calls `getUpdates`.
+Production `webhook` mode receives updates at the API; when the queue gate is
+enabled, the path is `update → API/webhook → pg-boss → worker → TelegramBot`.
+With the gate off, the API keeps its existing processing path. The worker must be
+ready before the API queue gate is enabled; setting it early can strand already
+claimed work.
+
 The rule is enforced in three independent places, so a mistake cannot be a single
 point of failure:
 
@@ -93,15 +123,29 @@ nothing at all (`503 TELEGRAM_UPDATES_OFF` on ingress).
 
 ### Production (webhook)
 
+The following is an operator checklist, **not a deployment performed by this
+sweep**. The API and worker have separate environment scopes. Keep
+`TELEGRAM_QUEUE_ENABLED=false` until a worker is deployed, healthy, and explicitly
+approved under D-2; the worker must receive no secret that the owner has not
+approved for that process.
+
 ```bash
+# API process
 TELEGRAM_BOT_TOKEN=...            # from @BotFather
 TELEGRAM_BOT_USERNAME=velora_bot
 TELEGRAM_WEBHOOK_SECRET=...       # 16-256 chars; generate with openssl rand -hex 32
 VELORA_APP_URL=https://app.example.com
 TELEGRAM_UPDATE_MODE=webhook
+TELEGRAM_QUEUE_ENABLED=false      # change only after worker + D-2 approval
 APP_ENV=production
-GEMINI_API_KEY=...                # optional; enables voice/image/analysis
+GEMINI_API_KEY=...                # optional API-side provider setting
 ```
+
+If and only if the owner approves the exact D-2 extension and the worker service
+is live, configure that separate process with its least-privilege `DATABASE_URL`,
+`TELEGRAM_BOT_TOKEN`, and only the optional provider/mail environment values the
+owner approved. The worker reads AI secrets from environment only; it cannot use
+`ai_platform_secrets` or `CREDENTIAL_MASTER_KEY`.
 
 Then register the webhook **once**, from a machine that holds the token:
 
@@ -187,10 +231,12 @@ Drafts expire after 30 minutes and the sweep marks them `EXPIRED`.
   `TELEGRAM`).
 - **Rate limits** (per user): link-start 5/h · updates 60/min · journal 20/h ·
   analysis 8/h · channel 10/h. Exceeding one answers `429` with `Retry-After`.
-- **Rollback:** set `TELEGRAM_UPDATE_MODE` to anything other than the current mode
-  (or remove `TELEGRAM_BOT_TOKEN`) and restart — the client stops consuming and
-  the web product is untouched. Nothing in the Telegram schema is required by any
-  other feature; migration `0023` is additive and leaves existing rows alone.
+- **Rollback:** for the queued production path, first set
+  `TELEGRAM_QUEUE_ENABLED=false` on the API and verify the in-process path is
+  active before stopping the worker. To disable Telegram completely, set
+  `TELEGRAM_UPDATE_MODE` to anything other than the current mode or remove
+  `TELEGRAM_BOT_TOKEN` and restart. The web product is untouched; migration
+  `0023` is additive and leaves existing rows alone.
 - **Uninstalling cleanly:** `deleteWebhook` (if webhook mode) before removing the
   environment variables, so Telegram stops retrying a dead endpoint.
 
@@ -200,9 +246,11 @@ Drafts expire after 30 minutes and the sweep marks them `EXPIRED`.
 
 | Claim | State |
 |---|---|
-| Live round trip against `api.telegram.org` (real bot, real user) | **NOT VERIFIED** — no bot token in scope. Everything else is exercised against a scripted transport. |
-| Live Gemini call (voice, screenshot, analysis) | **NOT VERIFIED** — no provider credential in scope; the transport, prompt shape, refusal and ledger paths are tested with an injected fetch. |
-| Webhook delivery from Telegram to a deployed endpoint | **NOT VERIFIED** — needs the deployed host + `setWebhook`. |
-| Real-PostgreSQL concurrency (two sessions racing a token/claim) | **NOT VERIFIED** — the atomic statements are single-statement by construction and covered by PGlite (single session); `db/tests/*.pg.test.ts` remains the real-server path. |
-| n8n relay transport | **NOT IMPLEMENTED** — recorded as a gap in ADR-018; the `MediaInterpreter` seam is where a relay would be added. |
-| Worker-based background processing | **NOT USED** — `apps/worker` is not deployed; all Telegram work runs synchronously in the API process (deferred after the webhook's 200). |
+| Live round trip against `api.telegram.org` (real bot, real user) | **NOT VERIFIED** — no bot token or real account was used in this sweep. |
+| Live Gemini call (voice, screenshot, analysis) | **NOT VERIFIED** — no provider credential was used. Scripted transports and refusal/ledger paths are repository evidence, not live provider evidence. |
+| Webhook delivery from Telegram to a deployed endpoint | **NOT VERIFIED** — needs a deployed HTTPS host and `setWebhook`. |
+| Real-PostgreSQL concurrency (two sessions racing a token/claim) | **NOT VERIFIED by this sweep** — use the real-server `db/tests/*.pg.test.ts` workflow; no database was started or changed here. |
+| n8n relay transport | **IMPLEMENTED IN REPOSITORY; LIVE CONFIGURATION/ROUND TRIP NOT VERIFIED** — `apps/api/src/ai/n8nRelayTransport.ts` is code, not a deployed relay. |
+| `telegram.update` queue path | **IMPLEMENTED AND HISTORICALLY TESTED** at `e041856`; current-tree tests were not run in this sweep. See ADR-019. |
+| Worker execution in a deployed environment | **DEPLOYMENT_GATED** — no worker service was deployed or enabled here; `TELEGRAM_QUEUE_ENABLED` remains an explicit API-side gate. |
+| Worker credential approval | **OWNER_DECISION_REQUIRED** — the exact D-2 allowlist for Telegram/AI/mail secrets must be approved before those values are supplied to a second process. The worker cannot decrypt or read `ai_platform_secrets`. |

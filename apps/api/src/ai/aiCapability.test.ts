@@ -2,8 +2,8 @@
 //
 // WHAT THIS FILE PROVES, AND WITH WHAT
 //   * the chain walk: a switched-off feature never reaches a provider; an empty
-//     chain is a refusal and not an empty success; consent stops the walk before
-//     any egress; a spent quota skips to the next provider and says so; an image
+//     chain is a refusal and not an empty success; consent stops external egress
+//     (with the screenshot-only local OCR fallback); a spent quota skips to the next provider and says so; an image
 //     that cannot be redacted never leaves the machine; a failure falls through to
 //     the next entry; and EVERY attempt — success, refusal, error — reaches the
 //     ledger (unit-level, with the in-memory config store and fake executors);
@@ -11,9 +11,10 @@
 //     header and nowhere else, and the error mapping (injected fetch, no network);
 //   * the rollout gate: deterministic per user, and the default posture Legacy
 //     ships (extraction on, everything else off);
-//   * the LOCAL OCR fallback: against the REAL tesseract binary on a real image —
-//     this is the one AI provider whose live behaviour this repository can prove
-//     without a credential, so it is proved rather than mocked;
+//   * the LOCAL OCR fallback's bounds and failure contract, plus one required
+//     real-binary test. This sweep host has no Tesseract binary and installing
+//     runtime tools is out of scope, so that test is intentionally left
+//     unconditional and cannot be reported as passed here.
 //   * the output rules: Legacy's whitelists, the locale resolution order, and
 //     `changed_fields` being derived rather than accepted.
 import { test } from "node:test";
@@ -28,7 +29,7 @@ import { AiRouteResolver } from "./aiRouteResolver.js";
 import { MemoryAiConfigStore } from "./memoryAiConfigStore.js";
 import { UnavailableImageAnonymizer, type ImageAnonymizer } from "./imageAnonymizer.js";
 import { N8nRelayTransport, relayIsConfigured } from "./n8nRelayTransport.js";
-import { TesseractProvider, findTesseractBinary, parseOcrTradeFields } from "./tesseractProvider.js";
+import { TesseractProvider, parseOcrTradeFields } from "./tesseractProvider.js";
 import type { AiExecutor, AiExecutorResult } from "./aiExecutors.js";
 import { AiFailure } from "./aiErrors.js";
 import { MemoryAiAttemptStore } from "../aicoach/aiProvider.js";
@@ -143,12 +144,13 @@ test("AI: an unconfigured deployment refuses instead of inventing an answer", as
   assert.equal(out.status === "refused" && out.code, "NO_PROVIDER_AVAILABLE");
 });
 
-test("AI: consent is checked before any egress and stops the whole walk", async () => {
+test("AI: consent stops a non-screenshot chain before any external egress", async () => {
   const calls: string[] = [];
   const h = harness({
     flags: [["ai_trade_analysis", true, 100]],
     consented: false,
     secrets: { GEMINI_API_KEY: "key" },
+    localOcr: false,
     executors: { gemini: executor("gemini", () => okResult("m", { summary: "x" }), calls) },
   });
   const out = await h.manager.call(baseCall());
@@ -159,6 +161,98 @@ test("AI: consent is checked before any egress and stops the whole walk", async 
   assert.equal(h.attempts.entries.length, 1);
   assert.equal(h.attempts.entries[0]!.outcome, "refused");
   assert.equal(h.attempts.entries[0]!.errorCode, "CONSENT_REQUIRED");
+});
+
+test("AI: a text feature does not use local OCR as a consent fallback", async () => {
+  const calls: string[] = [];
+  const h = harness({
+    flags: [["ai_trade_analysis", true, 100]],
+    consented: false,
+    secrets: { GEMINI_API_KEY: "key" },
+    localOcr: true,
+    chains: [
+      { feature: "trade_analysis", provider: "gemini", priority: 1 },
+      { feature: "trade_analysis", provider: "tesseract", priority: 2 },
+    ],
+    executors: {
+      gemini: executor("gemini", () => okResult("m", { summary: "x" }), calls),
+      tesseract: executor("tesseract", () => ({
+        model: "tesseract", insight: { fields: {} }, text: "unexpected", tokensIn: null,
+        tokensOut: null, costMicroUsd: null, latencyMs: 3,
+      }), calls),
+    },
+  });
+  const out = await h.manager.call(baseCall());
+  assert.equal(out.status, "refused");
+  assert.equal(out.status === "refused" && out.code, "CONSENT_REQUIRED");
+  assert.equal(out.attempts.length, 1);
+  assert.equal(out.attempts[0]!.provider, "gemini");
+  assert.deepEqual(calls, [], "neither the external model nor the local OCR path should run");
+  assert.equal(h.attempts.entries.length, 1, "the chain stops after the recorded consent refusal");
+});
+
+test("AI: missing consent records the external refusal, then permits only the configured local screenshot fallback", async () => {
+  const calls: string[] = [];
+  const h = harness({
+    flags: [["ai_screenshot_extraction", true, 100]],
+    consented: false,
+    secrets: { GEMINI_API_KEY: "key" },
+    chains: [
+      { feature: "screenshot_extraction", provider: "gemini", priority: 1 },
+      { feature: "screenshot_extraction", provider: "tesseract", priority: 2 },
+    ],
+    executors: {
+      gemini: executor("gemini", () => okResult("m", { fields: {} }), calls),
+      tesseract: executor("tesseract", () => ({
+        model: "tesseract", insight: { fields: { symbol: "XAUUSD" } }, text: "XAUUSD",
+        tokensIn: null, tokensOut: null, costMicroUsd: null, latencyMs: 3,
+      }), calls),
+    },
+  });
+  const out = await h.manager.call(baseCall({
+    feature: "screenshot_extraction", ledgerFeature: "ocr", image: { bytes: Buffer.from("image"), mimeType: "image/png" },
+    requiresStructuredOutput: false,
+  }));
+  assert.equal(out.status, "generated");
+  assert.equal(out.status === "generated" && out.provider, "tesseract");
+  assert.deepEqual(calls, ["tesseract:auto#1"], "no external executor is called without consent");
+  assert.deepEqual(h.attempts.entries.map((row) => `${row.provider}:${row.outcome}:${row.errorCode ?? "-"}`), [
+    "gemini:refused:CONSENT_REQUIRED", "tesseract:success:-",
+  ]);
+});
+
+test("AI: a managed transcription attempt records only character count, never transcript content", async () => {
+  const transcript = "Bought EURUSD at 1.0850; closed at 1.0900.";
+  const h = harness({
+    secrets: { GEMINI_API_KEY: "test-key" },
+    chains: [{ feature: "transcribe", provider: "gemini", priority: 1 }],
+    executors: {
+      gemini: {
+        provider: "gemini",
+        async execute() {
+          return {
+            model: "gemini-audio",
+            // Be defensive even if a future executor puts the transcript in both
+            // fields: the managed ledger must use the count-only projection.
+            insight: { transcript },
+            text: transcript,
+            tokensIn: null, tokensOut: null, costMicroUsd: null, latencyMs: 4,
+          };
+        },
+      },
+    },
+  });
+  const out = await h.manager.call(baseCall({
+    feature: "transcribe",
+    ledgerFeature: "transcribe",
+    promptVersion: "telegram_transcription_v1",
+    audio: { bytes: Buffer.from("private audio bytes"), mimeType: "audio/ogg", languageHint: "en-US" },
+    requiresStructuredOutput: false,
+  }));
+  assert.equal(out.status, "generated");
+  assert.equal(out.status === "generated" && out.text, transcript, "transcript remains transiently available to the draft flow");
+  assert.deepEqual(h.attempts.entries[0]!.insight, { chars: transcript.length });
+  assert.ok(!JSON.stringify(h.attempts.entries[0]).includes(transcript), "the canonical AI attempt ledger stores no transcript content");
 });
 
 test("AI: an exhausted quota skips to the next provider and records why", async () => {
@@ -240,6 +334,60 @@ test("AI: a redacting anonymizer lets the external provider run, with the redact
   }));
   assert.equal(out.status, "generated");
   assert.deepEqual(seen, [8], "the anonymizer saw the original exactly once");
+});
+
+test("AI: screenshot attempts persist only bounded structured fields, never raw OCR or raw provider payload", async () => {
+  const anonymizer: ImageAnonymizer = {
+    shouldAnonymize: () => true,
+    anonymize: () => Buffer.from("redacted"),
+    info: () => ({ anonymized: true, method: "blur_top_15_percent", topPercent: 15, failClosed: true }),
+  };
+  const h = harness({
+    flags: [["ai_screenshot_extraction", true, 100]],
+    secrets: { GEMINI_API_KEY: "key" },
+    anonymizer,
+    executors: {
+      gemini: {
+        provider: "gemini",
+        async execute() {
+          return {
+            model: "gemini-3.6-flash",
+            insight: {
+              fields: {
+                symbol: "xauusd", side: "BUY", entry: "2010.50", openTime: "2026-04-03T12:34",
+                closeTime: "2026-04-03T13:14:15", sourceCalendar: "jalali", dateFormat: "DD/MM/YYYY",
+                timezoneOffsetHintMinutes: "210", rawOpenText: "visible date evidence", timezoneText: "UTC+03:30",
+                untrusted: "not allowed",
+              },
+              confidence: 0.9,
+              rawText: "private OCR string",
+              rawResponse: { secret: "provider payload" },
+            },
+            text: "private OCR string", tokensIn: null, tokensOut: null, costMicroUsd: null, latencyMs: 7,
+          };
+        },
+      },
+    },
+  });
+  const out = await h.manager.call(baseCall({
+    feature: "screenshot_extraction", ledgerFeature: "ocr",
+    image: { bytes: Buffer.from("image"), mimeType: "image/png" },
+    requiresStructuredOutput: false,
+  }));
+  assert.equal(out.status, "generated");
+  assert.deepEqual(h.attempts.entries[0]!.insight, {
+    fields: {
+      symbol: "XAUUSD", side: "buy", entry: "2010.50", openTime: "2026-04-03T12:34",
+      closeTime: "2026-04-03T13:14:15", sourceCalendar: "jalali", dateFormat: "DD/MM/YYYY",
+      timezoneOffsetHintMinutes: 210,
+    },
+    confidence: 0.9,
+  });
+  assert.ok(!JSON.stringify(h.attempts.entries[0]).includes("private OCR string"));
+  assert.ok(!JSON.stringify(h.attempts.entries[0]).includes("visible date evidence"));
+  assert.ok(!JSON.stringify(h.attempts.entries[0]).includes("UTC+03:30"));
+  assert.ok(!JSON.stringify(h.attempts.entries[0]).includes("provider payload"));
+  assert.equal(out.status === "generated" && out.insight?.["rawText"], "private OCR string", "raw output is returned transiently, never persisted");
 });
 
 test("AI: a provider failure falls through, and the ledger keeps both attempts", async () => {
@@ -424,7 +572,7 @@ test("relay: an unconfigured relay refuses rather than calling an empty URL", as
 
 // ── the local OCR fallback, against the REAL binary ───────────────────────────
 
-test("OCR: the real tesseract binary reads a real screenshot", { skip: findTesseractBinary() === null ? "tesseract is not installed here" : false }, async () => {
+test("OCR: the real tesseract binary reads a real screenshot", async () => {
   assert.ok(existsSync(FIXTURE), "the fixture image must exist");
   const provider = new TesseractProvider();
   assert.equal(provider.isAvailable(), true);

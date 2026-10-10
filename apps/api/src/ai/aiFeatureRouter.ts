@@ -26,7 +26,7 @@ import {
   type AiCapability, type AiCatalogProvider, type AiFeature, type AiRoute,
 } from "./aiCatalog.js";
 import type { AiConfigStore } from "./aiConfigStore.js";
-import type { AiSecretService } from "./aiSecrets.js";
+import type { AiSecretResolver } from "./aiSecrets.js";
 import type { AiRouteResolver } from "./aiRouteResolver.js";
 
 export interface ChainEntry {
@@ -53,7 +53,7 @@ export interface ResolvedChain {
 
 export interface AiFeatureRouterDeps {
   readonly store: AiConfigStore;
-  readonly secrets: AiSecretService;
+  readonly secrets: AiSecretResolver;
   readonly routes: AiRouteResolver;
   readonly env: (key: string) => string | undefined;
   /** True when the local OCR binary is really present. Injected, never probed lazily. */

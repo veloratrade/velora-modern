@@ -12,6 +12,7 @@
 // "one live identity per user / per Telegram id" is enforced here too.
 //
 // NOT database evidence — the same label the repo's other memory stores carry.
+import { isTerminalTelegramDraftState } from "./telegramStore.js";
 import type {
   IdentityInsert,
   LinkConsumption,
@@ -37,6 +38,7 @@ type MutableToken = { -readonly [K in keyof TelegramTokenRecord]: TelegramTokenR
 
 interface UpdateRow {
   updateId: string;
+  processingStartedAt: Date | null;
   processedAt: Date | null;
   outcome: string | null;
   errorCode: string | null;
@@ -60,13 +62,20 @@ export class MemoryTelegramStore implements TelegramStore {
 
   async claimUpdate(claim: { updateId: string; telegramUserId: string | null; chatId: string | null; kind: string; at: Date }): Promise<boolean> {
     if (this.updates.has(claim.updateId)) return false;
-    this.updates.set(claim.updateId, { updateId: claim.updateId, processedAt: null, outcome: null, errorCode: null });
+    this.updates.set(claim.updateId, { updateId: claim.updateId, processingStartedAt: null, processedAt: null, outcome: null, errorCode: null });
+    return true;
+  }
+
+  async beginUpdateProcessing(updateId: string, at: Date): Promise<boolean> {
+    const row = this.updates.get(updateId);
+    if (row === undefined || row.processedAt !== null || row.processingStartedAt !== null) return false;
+    row.processingStartedAt = at;
     return true;
   }
 
   async finishUpdate(updateId: string, outcome: "handled" | "ignored" | "rejected" | "failed", errorCode: string | null, at: Date): Promise<void> {
     const row = this.updates.get(updateId);
-    if (row === undefined) return;
+    if (row === undefined || row.processingStartedAt === null || row.processedAt !== null) return;
     row.processedAt = at;
     row.outcome = outcome;
     row.errorCode = errorCode;
@@ -235,6 +244,7 @@ export class MemoryTelegramStore implements TelegramStore {
       ...(patch.draft !== undefined ? { draft: patch.draft } : {}),
       ...(patch.missingFields !== undefined ? { missingFields: [...patch.missingFields] } : {}),
       ...(patch.state !== undefined ? { state: patch.state } : {}),
+      transcript: patch.state !== undefined && isTerminalTelegramDraftState(patch.state) ? null : current.transcript,
     };
     void at;
     this.drafts[index] = next;
@@ -256,7 +266,7 @@ export class MemoryTelegramStore implements TelegramStore {
     const current = this.drafts[index];
     if (current === undefined || current.state !== "CONFIRMING") return false;
     void at;
-    this.drafts[index] = { ...current, state: "CONFIRMED", confirmedTradeId: tradeId };
+    this.drafts[index] = { ...current, state: "CONFIRMED", confirmedTradeId: tradeId, transcript: null };
     return true;
   }
 
@@ -265,7 +275,11 @@ export class MemoryTelegramStore implements TelegramStore {
     const current = this.drafts[index];
     if (current === undefined || current.state !== "CONFIRMING") return;
     void at;
-    this.drafts[index] = { ...current, state: restoreState };
+    this.drafts[index] = {
+      ...current,
+      state: restoreState,
+      transcript: isTerminalTelegramDraftState(restoreState) ? null : current.transcript,
+    };
   }
 
   async expireStaleDrafts(at: Date): Promise<number> {
@@ -275,7 +289,7 @@ export class MemoryTelegramStore implements TelegramStore {
       if (draft === undefined) continue;
       if (draft.state !== "AWAITING_CONFIRMATION" && draft.state !== "NEEDS_DETAIL") continue;
       if (Date.parse(draft.expiresAt) > at.getTime()) continue;
-      this.drafts[i] = { ...draft, state: "EXPIRED" };
+      this.drafts[i] = { ...draft, state: "EXPIRED", transcript: null };
       count += 1;
     }
     return count;

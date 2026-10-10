@@ -29,7 +29,7 @@ ADR-019 takes the next free number. **ADR-020 is the next free number.**
 | ADR-017 | `ADR-017-agent-context-system.md` | Agent Context System (persistent project state) | Accepted 2026-09-26 (owner instruction) |
 
 | ADR-018 | `ADR-018-telegram-journal-client.md` | Telegram journal client (external identity + shared journal domain) | Accepted 2026-10-03 (**added to this index 2026-10-08** — the ADR existed but was never listed) |
-| ADR-019 | `ADR-019-telegram-update-job-architecture.md` | Telegram update processing over the job architecture (`telegram.update` → pg-boss → worker) | Accepted 2026-10-08 — implementation complete and tested; **live worker execution deployment-gated** (`MG-WORKER-DEPLOY` + D-2 boundary amendment) |
+| ADR-019 | `ADR-019-telegram-update-job-architecture.md` | Telegram update processing over the job architecture (`telegram.update` → pg-boss → worker) | Architecture accepted; repository path/test record at `e041856`; **worker deployment and live round trip deployment-gated**; exact second-process secret allowlist remains an owner decision (D-2) |
 
 Note: the **legacy** repository has its own, unrelated `ADR-014` (census-probe
 transport); modern ADR numbering is independent of legacy numbering

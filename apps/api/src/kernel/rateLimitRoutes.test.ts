@@ -82,14 +82,14 @@ test("THROTTLED_ROUTES maps exactly the implemented routes to the C-14 keys", ()
     // Phase 5 — opening a support ticket. The id-bearing support writes
     // (messages / reopen / admin status) live in the pattern list below.
     "POST /api/v1/support/tickets",
-    // Phase 7 — the three AI operations whose work leaves the process and costs
-    // money. Legacy's own per-user numbers (AIController): 10/3600, 5/3600,
-    // 20/3600. They join this exact-match guard the moment the routes exist,
-    // which is the guard's whole purpose: a throttled route cannot be added or
-    // removed without a test noticing.
+    // Phase 7 — AI and screenshot work. The numeric values come from Legacy;
+    // Modern's outer dispatcher keys them by resolved client IP; AI consent and
+    // rollout are per-user, with a separate atomic provider-wide budget.
+    // A route cannot be added or removed without this exact-match test noticing.
     "POST /api/v1/ai/analyze-trades",
     "POST /api/v1/ai/weekly-report",
     "POST /api/v1/ai/feedback",
+    "POST /api/v1/trades/extract-screenshot",
   ]);
   for (const routeKey of Object.values(THROTTLED_ROUTES)) {
     assert.ok(routeKey in RATE_LIMIT_DEFAULTS);
@@ -101,9 +101,11 @@ test("THROTTLED_ROUTES maps exactly the implemented routes to the C-14 keys", ()
   // dynamic connect path lives in the pattern list below (it carries an id).
   assert.equal(THROTTLED_ROUTES["POST /api/v1/accounts/detect-server"], "accounts:detect-server");
   assert.equal(THROTTLED_ROUTES["POST /api/v1/webhooks/metaapi"], "webhooks:metaapi");
-  // Phase 5: support writes share ONE per-user bucket ("support:write") and
-  // opening a ticket is the route that must carry it.
+  // Phase 5: support writes share ONE HTTP bucket ("support:write"), keyed by
+  // resolved client IP; opening a ticket is the route that must carry it.
   assert.equal(THROTTLED_ROUTES["POST /api/v1/support/tickets"], "support:write");
+  assert.equal(THROTTLED_ROUTES["POST /api/v1/trades/extract-screenshot"], "trades:extract-screenshot");
+  assert.deepEqual(RATE_LIMIT_DEFAULTS[THROTTLED_ROUTES["POST /api/v1/trades/extract-screenshot"]!], { limit: 8, windowSec: 300 });
 
   // OD-14: exactly ONE canonical resend endpoint — the Legacy
   // `/auth/resend-verification-email` alias is deliberately not reproduced.
@@ -299,7 +301,7 @@ test("SEC-02: throttle lookup covers the dynamic provisioning path, and only the
   assert.equal(throttleKeyFor("POST", "/api/v1/support/tickets/7/read"), undefined);
   assert.equal(throttleKeyFor("GET", "/api/v1/admin/communications/tickets/7/status"), undefined, "the admin queue is a read");
   // The collection resolves through the EXACT map (no id in the path) — same key,
-  // so a burst spread across create + reply still shares one budget per user.
+  // so a burst spread across create + reply shares the resolved-IP budget.
   assert.equal(throttleKeyFor("POST", "/api/v1/support/tickets"), "support:write");
   assert.equal(throttleKeyFor("POST", "/api/v1/support/tickets/7/messages/extra"), undefined);
   assert.equal(throttleKeyFor("POST", "/api/v1/accounts/acc-123/metaapi/connect"), "accounts:metaapi-connect");
@@ -402,10 +404,10 @@ test("SEC-02: the admin user mutations carry Legacy's admin-user-action limit", 
 
 test("SEC-02: the admin user mutations are throttled in behaviour, before auth", async () => {
   // Legacy put the limiter INSIDE the two handlers, i.e. after authorization.
-  // Modern puts it at dispatch (the same place every other limit lives), which
-  // is strictly earlier — the ordering is the safe direction: an unauthenticated
-  // flood is refused without the server doing any auth work, and an authorized
-  // actor still gets exactly Legacy's 30 mutations per 5 minutes.
+  // Modern puts it at dispatch (the same place every other HTTP limit lives),
+  // keyed by resolved client IP, before auth. An unauthenticated flood is
+  // refused without auth work; the numeric 30/5m surface matches Legacy, but the
+  // bucket discriminator is intentionally Modern's shared HTTP-caller IP.
   await withServer(async (base) => {
     for (let i = 0; i < 30; i++) {
       const r = await patch(base, "/api/v1/admin/users/u-1/status", { status: "active" });
@@ -429,8 +431,8 @@ test("SEC-02: the two mutations share ONE bucket, so they cannot be alternated f
       assert.equal((await patch(base, "/api/v1/admin/users/u-1/role", {})).status, 503);
     }
     assert.equal((await patch(base, "/api/v1/admin/users/u-1/role", {})).status, 429);
-    // The bucket is keyed by the caller + key, NOT by the target: changing the
-    // target id must not hand out a fresh quota.
+    // The HTTP bucket is keyed by resolved client IP + rate-limit key, NOT by
+    // the target: changing the target id must not hand out a fresh quota.
     assert.equal((await patch(base, "/api/v1/admin/users/u-2/status", {})).status, 429);
   });
 });

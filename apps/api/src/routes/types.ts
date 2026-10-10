@@ -21,6 +21,14 @@ import type { ApiConfig } from "../kernel/server.js";
 /** Identical shape to the kernel's own `RouteResult`. */
 export type RouteResult = { status: number; body: unknown; headers?: Record<string, string | string[]> };
 
+/** Typed failure from the kernel-owned bounded request-body readers. */
+export class RequestBodyError extends Error {
+  constructor(readonly status: 400 | 413, readonly code: "VALIDATION_FAILED" | "PAYLOAD_TOO_LARGE", message: string) {
+    super(message);
+    this.name = "RequestBodyError";
+  }
+}
+
 /** Verified bearer claims (signature-checked; never client-supplied). */
 export interface RouteClaims {
   readonly sub: string;
@@ -43,8 +51,8 @@ export interface ExtendedRouteContext {
   readonly requestId: string;
   /** Bearer access-token verification (kernel-owned, fail-closed). */
   readonly authenticate: (req: IncomingMessage) => RouteClaims | null;
-  /** Parsed JSON object body (kernel-owned; 1 MiB cap; `{}` when absent). */
-  readonly readBody: (req: IncomingMessage) => Promise<Record<string, unknown>>;
+  /** Parsed JSON object body (kernel-owned; 1 MiB default; `{}` when absent). */
+  readonly readBody: (req: IncomingMessage, maxBytes?: number) => Promise<Record<string, unknown>>;
   /**
    * Raw request bytes. HMAC verification is over BYTES, not over a re-encoded
    * parse of them, so a migrated ingress route must use this reader and must
