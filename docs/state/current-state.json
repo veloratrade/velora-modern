@@ -2,7 +2,7 @@
   "$comment": "VELORA-MODERN machine-readable current project state — twin of docs/state/CURRENT_STATE.md (update both in the same change). Read and verified by tools/agent-context.mjs at every session start (ADR-017).",
   "schema_version": 1,
   "system": "velora-agent-context",
-  "last_updated": "2026-10-10",
+  "last_updated": "2026-10-11",
   "verification_states": [
     "STATIC",
     "RECORDED_RUNTIME",
@@ -38,12 +38,12 @@
     }
   },
   "current_verified": {
-    "modern_sha": "cc09d54fee11baaf3b5b7fd72cac026fadcd1691",
+    "modern_sha": "f304317874088f7b87f582da57287426a1192ae7",
     "legacy_sha": "edede313280f2f0e298f5ccbf5bbdd4d676c80bd",
-    "verified_at": "2026-10-10",
-    "verification": "RECORDED_RUNTIME 2026-10-10 @ cc09d54: residue sweep — Telegram durable processing-start marker (0035) + transcript privacy (0034) + screenshot ingest 24MiB cap + AI consent/ledger guards + toLocalInputTime + Tesseract fallback + trades timezone UX. Re-verified: tsc -b clean (5 projects: contracts/domain/api/worker/web), secret-scan PASS (0), npm test 1394/1395 general (1 honest OCR binary-absent fail, unconditional) + 73 PGlite, PGlite 73/73, migrations 19/19 (0001→0035), web contentSurfaces parity fixed (intelligence fa latin digits). MG-TG-3 remains PARTIAL: code path RECORDED_RUNTIME (claim+processing_started_at+terminal failed), live worker execution deployment-gated (MG-WORKER-DEPLOY + D-2). See RESIDUE_SWEEP_2026-10-10.md for five dispositions.",
-    "notes": "AC-47 (2026-10-10): cc09d54 — 70 files, migrations 0034 (terminal transcript CHECK) + 0035 (processing_started_at lifecycle) with backfills; adapters clear transcript on terminal + acquire one-shot marker; Bot.processClaimed & worker handler make failed terminal (no replay); screenshot 24MiB route cap proved by 1.1MiB-padding valid test; tesseractProvider comment corrected (unconditional OCR test fails honestly, not skipped); toLocalInputTime + transcriptionLedgerInsight {chars} retained; trades timezone note + seconds step=1. State will be curated in next AC entry after CHANGE_LOG.",
-    "modern_head": "cc09d54fee11baaf3b5b7fd72cac026fadcd1691"
+    "verified_at": "2026-10-11",
+    "verification": "RECORDED_RUNTIME 2026-10-11 @ f304317: healthcheck R-01 + OCR API placement. Re-verified: tsc -b clean (5 projects), secret-scan PASS (0), npm test 1394/1395 general (1 honest OCR binary-absent fail, unconditional: aiCapability.test.ts OCR real binary) + 73 PGlite 73/73 (PGlite OOM harness 5 SIGKILL transient, rerun disciplined — not code), migrations 19/19 (0001→0035), healthcheck suite python compile OK + yaml safe_load OK, capability-matrix TRD-03 cross-surface annotated, deployment-contract OCR placement documented, branch protection strict:true verify, CI 38110274764 success (with tesseract), Railway bypass still documented (checkSuites=false). MG-TG-3 remains PARTIAL: code RECORDED_RUNTIME, live worker deployment-gated (MG-WORKER-DEPLOY + D-2). See RESIDUE_SWEEP_2026-10-10.md + AC-55.",
+    "notes": "AC-55 (2026-10-11): f304317 — healthcheck R-01 (landing 200+footer, robots/sitemap env parity C-04/C-05, app shell no-store/DENY) + OCR cross-surface (matrix TRD-03 + deployment-contract OR placement API-owned, image have/missing verified grep infra/ empty, CI-only binary). Logs previously unlogged 59b168e (TRD-03 PARTIAL, toLatin, screenshot cap) + 57875c1 (CI tesseract, branch protection, Actions enabled). State will be curated in next AC entry after CHANGE_LOG (this sync). No gap closed by renaming; no blocker closed by inventing evidence.",
+    "modern_head": "f304317874088f7b87f582da57287426a1192ae7"
   },
   "artifacts": {
     "current_state_md": "docs/state/CURRENT_STATE.md",
@@ -127,7 +127,7 @@
     "push_note": "PUSHED 2026-10-06 (AC-39): branch integration/reconcile-lineages → remote. PROMOTED to main same day (AC-40) by explicit owner instruction: remote main fast-forwarded 0e9c4d7 → be4732d (no force, no history rewrite). Pre-push secret-scan PASS 0 findings. Local main fast-forwarded to match."
   },
   "last_battery": {
-    "result": "RE-CAPTURED 2026-10-10 @ cc09d54: tsc -b clean (5 projects), secret-scan PASS (0), npm test 1394/1395 general (1 honest OCR binary-absent fail, unconditional: aiCapability.test.ts OCR real binary) + 73 PGlite = 1468 total (1467 pass, 1 fail), migrations 19/19 (0001→0035), PGlite 73/73, contentSurfaces 6/6 fixed (intelligence fa latin digits)."
+    "result": "RE-CAPTURED 2026-10-11 @ f304317: tsc -b clean (5 projects), secret-scan PASS (0), npm test 1394/1395 general (1 honest OCR binary-absent fail, unconditional) + 73 PGlite 73/73 = 1468 total (1467 pass, 1 fail honest), migrations 19/19 (0001→0035), PGlite 73/73 when isolated (5 SIGKILL transient harness OOM on full run, not code), healthcheck python dedent compile OK + yaml OK, contentSurfaces 6/6 (fa intelligence latin 200 + toLatin), aiRoutes 23/23 (1.1MiB screenshot 200), capability-matrix TRD-03 PARTIAL with API placement have/missing, deployment-contract OCR placement, CI 38110274764 success, protection strict:true verify."
   },
   "distribution": {
     "branch": "governance/agent-context",
