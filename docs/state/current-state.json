@@ -38,12 +38,12 @@
     }
   },
   "current_verified": {
-    "modern_sha": "f304317874088f7b87f582da57287426a1192ae7",
+    "modern_sha": "7d91ff1df0b7381eb9a3d48a0ce87c5d9219fd92",
     "legacy_sha": "edede313280f2f0e298f5ccbf5bbdd4d676c80bd",
     "verified_at": "2026-10-11",
-    "verification": "RECORDED_RUNTIME 2026-10-11 @ f304317: healthcheck R-01 + OCR API placement. Re-verified: tsc -b clean (5 projects), secret-scan PASS (0), npm test 1394/1395 general (1 honest OCR binary-absent fail, unconditional: aiCapability.test.ts OCR real binary) + 73 PGlite 73/73 (PGlite OOM harness 5 SIGKILL transient, rerun disciplined — not code), migrations 19/19 (0001→0035), healthcheck suite python compile OK + yaml safe_load OK, capability-matrix TRD-03 cross-surface annotated, deployment-contract OCR placement documented, branch protection strict:true verify, CI 38110274764 success (with tesseract), Railway bypass still documented (checkSuites=false). MG-TG-3 remains PARTIAL: code RECORDED_RUNTIME, live worker deployment-gated (MG-WORKER-DEPLOY + D-2). See RESIDUE_SWEEP_2026-10-10.md + AC-55.",
-    "notes": "AC-55 (2026-10-11): f304317 — healthcheck R-01 (landing 200+footer, robots/sitemap env parity C-04/C-05, app shell no-store/DENY) + OCR cross-surface (matrix TRD-03 + deployment-contract OR placement API-owned, image have/missing verified grep infra/ empty, CI-only binary). Logs previously unlogged 59b168e (TRD-03 PARTIAL, toLatin, screenshot cap) + 57875c1 (CI tesseract, branch protection, Actions enabled). State will be curated in next AC entry after CHANGE_LOG (this sync). No gap closed by renaming; no blocker closed by inventing evidence.",
-    "modern_head": "f304317874088f7b87f582da57287426a1192ae7"
+    "verification": "RECORDED_RUNTIME 2026-10-11 @ 7d91ff1: quality gate successor (8 gates, backup byte-identity 9-field STORAGE_VERIFIED, 1468 bug→tests trace), registry twin byte-sync (MIGRATION_GAP_REGISTER md<->json MG-AI-ANONYMIZE insert, 53 vs 56 not equated, 5-test tools/registryConsistency 5/5), 24MiB ceiling 413 (aiRoutes 24/24 incl. new 24MiB+1KiB ceiling + existing 1.1MiB floor). Re-verified: tsc -b clean (5 projects), secret-scan PASS (0), registry 5/5, aiRoutes ceiling 1/1, migrations 19/19 (0001→0035), healthcheck suite python compile OK + yaml safe_load OK, capability-matrix TRD-03 cross-surface still annotated, deployment-contract OCR placement with 6-step runtime verification (no image change), Railway bypass labeled reported/unverified. Full general 1401 (1400 pass +1 honest OCR) +73 PGlite 73/73 =1474 (1 fail honest, 5 SIGKILL OOM harness transient — isolated reruns prove each file green, testRunnerVerdict retry). Branch protection strict:true verify, CI 38110274764 success (with tesseract), origin/main still 67d7d9b. See QUALITY_GATE_SUCCESSOR §§1-6 + AC-57/AC-58.",
+    "notes": "AC-57 (2026-10-11): 7d91ff1 — docs/QUALITY_GATE_SUCCESSOR_2026-10-11.md (8 gates, 1468 bug→tests, backup 9-field chain, twin discipline), tools/registryConsistency.test.ts 5/5, MIGRATION_GAP_REGISTER md twin fix MG-AI-ANONYMIZE (56 vs 53 not equated), aiRoutes 24MiB ceiling 413, deployment-contract 6-step OCR runtime verification, deploy-staging-gated.yml bypass as reported/unverified (no RAILWAY_TOKEN). Logs previously unlogged 0ae8832 (R-01+OCR) and its parents 59b168e+57875c1. AC-58 curates this into CURRENT (governance delta). No gap closed by renaming; no live claim.",
+    "modern_head": "7d91ff1df0b7381eb9a3d48a0ce87c5d9219fd92"
   },
   "artifacts": {
     "current_state_md": "docs/state/CURRENT_STATE.md",
@@ -71,7 +71,7 @@
     "missing_means": "legacy state NOT_VERIFIED this session (report, do not fail)"
   },
   "summary": {
-    "migration_closure": "NOT_CLOSED (phase 7 web slice done, phase 8 integrations CLOSED, phase 9 platform+analytics+admin-diagnostics CLOSED (settings/flags/logs/billing + overview/ai/operations/revenue + config/effective/diagnostics/activity) — remaining: worker, offsite drill, 4 OD-gated admin stubs)",
+    "migration_closure": "NOT_CLOSED (phase 7 web slice done, phase 8 integrations CLOSED, phase 9 platform+analytics+admin-diagnostics CLOSED (settings/flags/logs/billing + overview/ai/operations/revenue + config/effective/diagnostics/activity) — remaining: worker, offsite drill, 4 OD-gated admin stubs; quality gate successor + backup byte-identity + registry twin + 24MiB ceiling landed)",
     "open_owner_decisions": [
       "R1 password policy at login",
       "R8 public vs protected routes (markets/news/support)",
