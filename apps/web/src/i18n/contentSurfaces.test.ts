@@ -28,6 +28,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createTranslator, messagesFor, CATALOG_FILES } from "./catalog.js";
+import { toLatin } from "./latinDigits.js";
 import type { Locale } from "../contracts/locale.js";
 import type { Feature } from "./catalog.js";
 
@@ -98,7 +99,7 @@ test("AC-32 pages: every t() key resolves through the real translator (both loca
         const rendered = t(key);
         assert.ok(typeof rendered === "string" && rendered.length > 0 && rendered !== key,
           `${file} [${locale}]: ${key} did not resolve`);
-        assert.ok(rendered === merged[key] || /\d/.test(merged[key]!),
+        assert.ok(rendered === merged[key] || /\d/.test(toLatin(merged[key]!)),
           `${file} [${locale}]: ${key} rendered "${rendered}" but catalog says "${merged[key]}"`);
       }
     }

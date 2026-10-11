@@ -310,6 +310,26 @@ test("screenshot egress is refused with a deployment-status code when redaction 
   await h.close();
 });
 
+test("screenshot route uses 24MiB request cap, not the generic 1MiB cap", async () => {
+  const { MAX_SCREENSHOT_REQUEST_BYTES } = await import("./screenshotExtraction.js");
+  assert.equal(MAX_SCREENSHOT_REQUEST_BYTES, 24 * 1024 * 1024);
+  // 1.1MiB is oversized for the generic 1MiB limit (proven 413 above) but must NOT be 413 for screenshot
+  // because screenshot's limit is 24MiB. It should instead reach validation (422) or succeed, proving distinct caps.
+  const h = await build();
+  const token = await h.login(`screenshot-limit-${Date.now()}@velora.test`);
+  const body = JSON.stringify({ images: [`data:image/png;base64,${"A".repeat(800_000)}`], padding: "x".repeat(300_000) });
+  // body is ~1.1M, under 24M -> not 413
+  const response = await fetch(`${h.base}/api/v1/trades/extract-screenshot`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body,
+  });
+  // Either 422 (image validation) or 200/403/503 depending on feature flag, but never 413
+  assert.notEqual(response.status, 413, "screenshot route must not use the 1MiB generic cap");
+  assert.ok([200, 422, 403, 503].includes(response.status), `unexpected status ${response.status}`);
+  await h.close();
+});
+
 test("oversized JSON from an extended route is a client 413, never a generic 500", async () => {
   const h = await build();
   const token = await h.login(`body-limit-${Date.now()}@velora.test`);

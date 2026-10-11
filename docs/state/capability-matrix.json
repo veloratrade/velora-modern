@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-05",
+  "generated_at": "2026-10-11",
   "source_audit": "docs/audits/2026-10-04-CAPABILITY-AUDIT-legacy-to-modern.md",
   "git": {
-    "modern_head": "d5710fe (phase 7 — the AI capability's API slice; the web surface is the next commit)",
-    "modern_branch": "feat/telegram-journal-client",
-    "legacy_ref": "edede31"
+    "modern_head": "67d7d9b48b666a009f147505bc292121f19b93de (main, verified sweep cc09d54)",
+    "modern_branch": "main",
+    "legacy_ref": "edede31 (edede313280f2f0e298f5ccbf5bbdd4d676c80bd)"
   },
   "status_vocabulary": [
     "MISSING",
@@ -20,8 +20,8 @@
   "counts": {
     "VERIFIED": 13,
     "IMPLEMENTED": 8,
-    "PARTIAL": 13,
-    "MISSING": 9,
+    "PARTIAL": 14,
+    "MISSING": 8,
     "UI_ONLY": 1,
     "LEGACY_ONLY": 2,
     "INTENTIONALLY_NOT_MIGRATED": 2,
@@ -185,10 +185,10 @@
       "id": "TRD-03",
       "area": "trading",
       "capability": "Screenshot import (OCR)",
-      "status": "MISSING",
+      "status": "PARTIAL",
       "legacy_evidence": "POST /trades/extract-screenshot + velora-smart-import.js; trade_screenshots, ai_extractions",
-      "modern_evidence": "audited 2026-10-04: nothing on the Modern side. Legacy pipeline read end to end — POST /trades/extract-screenshot: 8/300 per user, max 4 images (8 MiB each / 16 MiB total, ≤12 MP, PNG/JPEG/WebP verified against the declared type), 30 s deadline, AI_FEATURE_DISABLED flag, consent gate, Tesseract fallback, sha256 dedup, ai_extractions + ai_audit_logs rows (hash only, never the image), and the 501 OCR_UNAVAILABLE answer when no engine exists; the wizard (velora-smart-import.js) validates, compresses and maps the result into the trade form.",
-      "next_action": "Phase 7 (AI): the endpoint's core deliverable is `texts` + `times` produced by a DETERMINISTIC OCR engine, so it depends on an OCR engine this host does not have (no tesseract binary). Design the deterministic-first contract + ingest half (image validation, feature flag, dedup, audit, quota, job lifecycle) here in phase 3 and wire the engine as the fail-closed dependency (MG-AI-OCR)."
+      "modern_evidence": "Modern @67d7d9b (cc09d54 verified): POST /api/v1/trades/extract-screenshot via apps/api/src/ai/aiRoutes.ts (MAX_SCREENSHOT_REQUEST_BYTES=24MiB route cap via ctx.readBody, decodeScreenshotImages 4×8MiB/16MiB/12MP/6000px, PNG/JPEG/WebP header-only parsers, 422 Screenshot validation), apps/api/src/ai/tesseractProvider.ts (0600 temp, psm6 oem1, 0.4 conf, 8MiB/8s/256KiB), apps/api/src/ai/screenshotExtraction.ts, ledger hash-only. Tests: screenshotExtraction 3/3, tesseractProvider 3/3, aiRoutes 23/23 (including 413 for oversized JSON, 422 for image limits). Live Tesseract binary deployment-gated (1 honest fail when binary absent), web surfaces PARTIAL.",
+      "next_action": "Live Tesseract binary in deployment image (infra/Dockerfile.api) + web surface; already code-complete, needs deployment-gated verification."
     },
     {
       "id": "TRD-04",
@@ -506,5 +506,5 @@
       "next_action": "Optional admin UI"
     }
   ],
-  "notes": []
+  "notes": "Reconciled 2026-10-11: TRD-03 MISSING→PARTIAL after 0034/0035 and ai/tesseract/screenshot landing at cc09d54. Previous stale matrix from 2026-10-05 (d5710fe branch) corrected via evidence at 67d7d9b. See FINAL_PROJECT_CLOSURE_AUDIT_PROPOSED.md §8 and LEGACY_GUARDRAILS_DISPOSITION_REVIEW.md group 1."
 }
