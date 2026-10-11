@@ -26,6 +26,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Install Tesseract OCR (for unconditional real-binary test — deployment image still lacks it; CI-only, see infra/Dockerfile.api)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq tesseract-ocr tesseract-ocr-eng
       - run: npm ci
       - name: Typecheck
         run: npx tsc -b packages/contracts packages/domain apps/api apps/worker apps/web
