@@ -60,6 +60,16 @@ this contract). Until the host image provides `/usr/bin/tesseract`,
 is absent). Adding the binary is an owner decision about the API image
 (or a sidecar), not a CI fix.
 
+**Verification to prove OCR works in the API runtime (owner-gated, do not claim live without this):**
+
+1. Build and deploy the new API image to `staging` (Railway) — `railway.json` `startCommand` unchanged (`npx tsx db/migrate.ts && npx tsx apps/api/src/server-main.ts`).
+2. `exec` into the running container: `which tesseract` → `/usr/bin/tesseract`, `tesseract --version` → `5.x`, `ls -l /usr/bin/tesseract` executable.
+3. `GET /health` still `200` `B-8` (frozen contract) — image change did not break boot.
+4. `POST /api/v1/trades/extract-screenshot` with the repo fixture `apps/api/src/ai/__fixtures__/ocr-trade-screenshot.png` (as `data:image/png;base64,…`) → `200` `provider:tesseract` `engine:tesseract-system` `confidence:0.4` (the local fallback, no external egress, no consent needed — see `aiManager.ts` `local` check).
+5. The unconditional test `aiCapability.test.ts` `OCR: the real tesseract binary reads a real screenshot` — run **inside that runtime** (`node --test` with the deployed env) must switch from `false !== true` to `true` and read the fixture.
+6. Record the run (commit SHA, image digest, `tesseract --version`, and the 200 response) and update `capability-matrix.json` TRD-03 `next_action` to `VERIFIED` with that evidence — do not mark `VERIFIED` from a local `apt-get` run.
+
+
 ## Start command
 
 `railway.json`:

@@ -17,11 +17,15 @@
 #
 # KNOWN RESIDUAL RISK (documented, not silently accepted)
 # =======================================================
-# Railway's GitHub trigger `staging -> staging` (checkSuites=false) still
-# deploys on push, bypassing this workflow entirely. This workflow cannot
-# revoke that trigger; doing so is an owner action in the Railway UI. Until the
-# trigger is removed or repointed, this pipeline is the *sanctioned* path but
-# not yet the *exclusive* one. See ADR-012 A.6 and the deployment audit.
+# Railway's GitHub trigger `staging -> staging` (checkSuites=false) is *reported* to
+# still deploy on push, bypassing this workflow entirely. Direct Railway API
+# inspection was not performed in this sandbox (no RAILWAY_TOKEN) — see
+# docs/QUALITY_GATE_SUCCESSOR_2026-10-11.md §6 which labels the bypass as
+# "reported, not re-proven current" rather than asserting it. This workflow
+# cannot revoke that trigger; doing so is an owner action in the Railway UI.
+# Until the trigger is removed or repointed (checkSuites:true + required checks),
+# this pipeline is the *sanctioned* path but not yet the *exclusive* one.
+# See ADR-012 A.6 and the deployment audit for the exact owner remediation.
 name: Deploy Staging (gated)
 
 on:

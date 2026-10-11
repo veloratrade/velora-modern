@@ -330,6 +330,24 @@ test("screenshot route uses 24MiB request cap, not the generic 1MiB cap", async 
   await h.close();
 });
 
+test("screenshot route over 24MiB is 413 PAYLOAD_TOO_LARGE (production ceiling)", async () => {
+  const h = await build();
+  const token = await h.login(`screenshot-ceiling-${Date.now()}@velora.test`);
+  // Body must exceed the route-specific 24MiB cap — proves the ceiling is enforced (413), not just the floor.
+  // Use a tiny image so the 413 comes from the request cap, not from image validation.
+  const padding = "x".repeat(24 * 1024 * 1024 + 1024);
+  const body = JSON.stringify({ images: [`data:image/png;base64,${"A".repeat(1000)}`], padding });
+  const response = await fetch(`${h.base}/api/v1/trades/extract-screenshot`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body,
+  });
+  assert.equal(response.status, 413);
+  const json = await response.json() as Record<string, unknown>;
+  assert.equal(code(json), "PAYLOAD_TOO_LARGE");
+  await h.close();
+});
+
 test("oversized JSON from an extended route is a client 413, never a generic 500", async () => {
   const h = await build();
   const token = await h.login(`body-limit-${Date.now()}@velora.test`);
