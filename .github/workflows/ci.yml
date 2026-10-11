@@ -1,11 +1,11 @@
 # CI — Phase 1 foundation (ADR-010 + PHP-era cost-guard discipline).
 #
-# ⚠️ GOVERNANCE: GitHub Actions is DISABLED at the repository level per the
-# owner's cost policy. This workflow executes only after (a) the owner pushes
-# these commits (explicit authorization required) and (b) Actions is enabled
-# for an authorized window. No schedules, no caches, standard runner only,
-# 15-minute timeout, cancel-in-progress — mirroring tools/check_github_cost_guard.py
-# philosophy from the PHP repository.
+# GOVERNANCE: GitHub Actions is ENABLED with cost controls per owner policy.
+# Triggers are limited to push[main] + pull_request[main] only; no schedules,
+# no caches, standard runner only, 15-minute timeout, cancel-in-progress.
+# This mirrors tools/check_github_cost_guard.py philosophy from the PHP repository.
+# Previously the repository was intentionally disabled; it was re-enabled for
+# verified readiness (main at 354edaa) with the same controls preserved.
 name: ci
 on:
   push:
