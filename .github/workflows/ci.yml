@@ -40,3 +40,5 @@ jobs:
         run: npm run test:migrations
       - name: Secret-safety scan (public repository policy)
         run: bash tools/secret-scan.sh
+      - name: Dependency audit (high+ only, informational)
+        run: npm audit --audit-level=high || true
