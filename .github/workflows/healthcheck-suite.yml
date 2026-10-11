@@ -161,7 +161,72 @@ jobs:
               check('POST forgot-password {} → 400 (validation boundary live, no side effects)',
                     st == 400, f'status={st}')
 
-          # ── 5. Version-drift evidence (warn only, never fails) ─────
+          # ── 5. Public landing 200 + footer marker (R-01 200/footer) ─────
+          st, hd, body = call('GET', '/')
+          hd_low2 = {k.lower(): v for k, v in hd.items()}
+          ok_land = (st == 200)
+          detail_land = f'status={st}'
+          try:
+              body_low = body.lower()
+              has_footer = ('velora' in body_low) or ('<footer' in body_low)
+              ok_land = ok_land and has_footer and len(body) > 800
+              detail_land += f'; bytes={len(body)} footer={has_footer}'
+              robots = hd_low2.get('x-robots-tag', '')
+              if ENVNAME == 'staging' and robots:
+                  print(f"info: staging landing X-Robots-Tag={robots!r} (expected noindex,nofollow per ADR-009)")
+          except Exception:
+              ok_land = False
+              detail_land += f'; body read failed snippet={body[:120]!r}'
+          check('GET / → 200 + product footer (landing shell)', ok_land, detail_land)
+
+          # ── 6. robots.txt + sitemap.xml env parity (C-04/C-05, ADR-009) ────
+          st, hd, body = call('GET', '/robots.txt')
+          hd_low = {k.lower(): v for k, v in hd.items()}
+          ok = (st == 200)
+          detail = f'status={st}'
+          try:
+              if ENVNAME == 'staging':
+                  ok = ok and ('disallow: /' in body.lower())
+                  detail += f"; staging Disallow:/ present={('disallow: /' in body.lower())}"
+              else:
+                  ok = ok and ('disallow: /admin' in body.lower() or 'disallow:' in body.lower())
+                  detail += f"; prod robots body {len(body)}b"
+          except Exception:
+              ok = False
+              detail += f'; snippet={body[:120]!r}'
+          check('GET /robots.txt → 200 + env-appropriate Disallow (C-05)', ok, detail)
+
+          st2, hd2, _ = call('GET', '/sitemap.xml')
+          ok2 = True
+          detail2 = f'status={st2}'
+          if ENVNAME == 'staging':
+              ok2 = (st2 == 404)
+              detail2 += '; expected 404 on staging (C-04)'
+              robots2 = {k.lower(): v for k, v in hd2.items()}.get('x-robots-tag', '')
+              if st2 == 200 and 'noindex' not in robots2.lower():
+                  print(f"::warning::staging sitemap 200 without X-Robots-Tag noindex (got {robots2!r}) — ADR-009 says staging sitemap must be noindex")
+          else:
+              ok2 = (st2 in (200, 404))
+              detail2 += f'; prod allows 200|404 (got {st2})'
+          check('GET /sitemap.xml env parity (C-04)', ok2, detail2)
+
+          # ── 7. App shell noindex edge contract (proxy no-store + DENY) ────
+          st3, hd3, _ = call('GET', '/dashboard')
+          hd3_low = {k.lower(): v for k, v in hd3.items()}
+          ok3 = (st3 in (302, 303, 307, 308, 401, 403))
+          detail3 = f'status={st3}'
+          cc = hd3_low.get('cache-control', '')
+          xfo = hd3_low.get('x-frame-options', '')
+          ok3 = ok3 and ('no-store' in cc.lower() or 'private' in cc.lower() or cc == '')
+          if 'x-frame-options' in hd3_low:
+              ok3 = ok3 and (xfo == 'DENY')
+              detail3 += f'; cache={cc!r} xfo={xfo!r}'
+          else:
+              detail3 += f'; cache={cc!r} (xfo absent — warn)'
+              print(f"::warning::/dashboard probe missing X-Frame-Options (got headers {list(hd3.keys())[:6]})")
+          check('GET /dashboard (unauth) → auth deny + no-store/DENY (app shell noindex edge contract)', ok3, detail3)
+
+          # ── 8. Version-drift evidence (warn only, never fails) ─────
           try:
               with open('package.json', encoding='utf-8') as f:
                   repo_version = json.load(f).get('version', 'unknown')

@@ -36,6 +36,30 @@ Two different questions must not be conflated:
 `velora_owner` is `NOLOGIN`: it is an ownership identity, never a connection
 identity. It is reached only through `SET ROLE`.
 
+
+## OCR binary placement (2026-10-11)
+
+Screenshot OCR is owned by the **API service** only. Both
+`apps/api/src/server-main.ts` (HTTP handling) and
+`apps/api/src/telegram/telegramProcessorFactory.ts` (the same bot for the
+queued handler) construct `new TesseractProvider()` and expose it as
+`localOcrAvailable: () => tesseract.isAvailable()` and as the
+`tesseract: new TesseractExecutor(...)` entry in the AI chain. The worker service
+does **not** need a separate image change: the queued telegram handler reuses the
+same factory and therefore the same host requirement.
+
+Verified at `57875c1`: neither `infra/Dockerfile.api` nor
+`infra/Dockerfile.worker` installs `tesseract-ocr` (`grep -R tesseract infra/` is
+empty). The workflow `.github/workflows/ci.yml` installs it with
+`sudo apt-get install -y tesseract-ocr tesseract-ocr-eng` **only in CI**,
+never in the deployed image — the comment in `tesseractProvider.ts` header now
+applies to every surface claiming OCR (capability matrix TRD-03, phase-7 map,
+this contract). Until the host image provides `/usr/bin/tesseract`,
+`/api/v1/trades/extract-screenshot` correctly answers `503 OCR_UNAVAILABLE`
+(the unconditional test in `aiCapability.test.ts` fails honestly when the binary
+is absent). Adding the binary is an owner decision about the API image
+(or a sidecar), not a CI fix.
+
 ## Start command
 
 `railway.json`:
