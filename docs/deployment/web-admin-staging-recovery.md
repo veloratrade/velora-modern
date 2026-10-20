@@ -195,12 +195,33 @@ answers `503 BOOT_BLOCKED: SC-001` rather than serving anything.
 * `apps/api-cf` had to be added to the root `npm run typecheck` (6 projects) — its `tsconfig.json` compiles
   the API sources directly, which is what keeps "one kernel, two hosts" true rather than aspirational.
 
-## D5. What is left
+## D5. What is left — and a gap this deployment exposed
 
-1. **A verified staging account** (owner-held). Either the owner logs in through the panel in a browser, or
-   supplies the account through a 0600 file outside git — never through chat — and the last two rows above
-   can be executed. Nothing will be created on the owner's behalf.
-2. **Migration 0042** is still absent from Neon; it gates the bot's post-edit/result screens, not the panel.
-3. Rebuilding the panel later: `npm run cf:build -w @velora/web` on a ≥4 GB machine, then
-   `npx wrangler deploy` from `apps/web`.
+**The panel is deployed, gated and reachable, but nobody can log into it: staging has no admin account, and
+there is no path in the product that can create the first one.** That is not a bug in the panel; it is a
+missing capability, and it is the last thing between "deployed" and "usable".
+
+Why every route fails closed here, from the source:
+
+| Path | Why it cannot bootstrap the first admin |
+|---|---|
+| `POST /api/v1/ownership/claim` (`OwnershipService.claim`) | precondition 4 requires the acting row to **already** be `role = 'admin'` (and active + email-verified). It claims ownership *of* an existing admin; it does not create one |
+| `AdminUserService` (invite / create user) | requires an authenticated admin to call it |
+| `POST /api/v1/auth/register` | creates an unverified `normal` user; login then answers `401 EMAIL_NOT_VERIFIED`, and this Worker's mail port is the log provider, so no verification link is sent |
+| ops scripts (`ops/`, `tools/`) | none seeds an admin |
+
+Unblocking options, all owner-side (none of them invented here):
+
+1. **An existing admin whose password the owner holds.** The owner reported on 2026-10-20 that no such
+   credentials exist.
+2. **DB-level provisioning** with the owner's Neon staging credentials: a `users` row with `role='admin'`,
+   `status='active'`, `email_verified_at` set and a `password_hash` produced by the app's own
+   `VeloraHasher` — so the password policy is respected rather than bypassed. Then the login/session/RBAC
+   rows above can be executed live.
+3. **A reviewed ops script** that performs (2) with the app's own hasher. Not written here: it creates an
+   account, which is an owner decision, not an agent one.
+
+Still open, unrelated to the above: **migration 0042** is absent from Neon (bot post-edit/result screens,
+not the panel), and rebuilding the panel needs `npm run cf:build -w @velora/web` on a ≥4 GB machine followed
+by `npx wrangler deploy` from `apps/web`.
 

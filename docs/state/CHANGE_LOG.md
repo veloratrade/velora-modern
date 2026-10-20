@@ -1664,3 +1664,17 @@ the same command succeed. `wrangler ≥4.140` also requires Node ≥22 (the depl
 need a verified staging account. None was created and none was guessed. The non-admin denial and session
 expiry are proven at the API layer by tests (`adminConsoleRoutes.test.ts`, `apps/api/src/auth/*`) but were
 **not** re-run live for want of a session. Migration 0042 remains absent from Neon (bot screens only).
+
+### AC-D2a — the gap the deployment exposed: no first-admin path
+
+Deploying the panel made one thing undeniable: **staging has no admin account, and nothing in the product
+can create the first one.** `OwnershipService.claim` requires the acting row to be `role = 'admin'` already
+(precondition 4) — it transfers ownership *of* an existing admin, it does not mint one. `AdminUserService`
+needs an authenticated admin to call it. Registration produces an unverified `normal` user, and this
+Worker's mail port is the log provider, so no verification link is sent. No ops script seeds an admin.
+
+Consequence: `/admin` is correctly reachable only after login, login is correctly refused without a verified
+account, and there is no way in. Recorded as a **capability gap**, not a defect, and not worked around: no
+account, password, token or role was created, and nothing was written to the staging database. The
+unblocking options are owner-side (existing admin, DB-level provisioning with the app's own `VeloraHasher`,
+or a reviewed ops script) and are listed in `docs/deployment/web-admin-staging-recovery.md` §D5.

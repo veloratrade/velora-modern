@@ -128,28 +128,38 @@
       },
       {
         "test": "valid login creates a session",
-        "evidence": "NOT RUN \u2014 needs a verified staging account whose password is not in this session's hands",
-        "verdict": "BLOCKED"
+        "verdict": "BLOCKED",
+        "evidence": "the owner reported on 2026-10-20 that no staging account credentials exist ('\u0631\u0645\u0632 \u0646\u0627\u0645 \u06a9\u0627\u0631\u0628\u0631\u06cc \u0646\u062f\u0627\u0631\u0645'). No account was created and no password guessed."
       },
       {
         "test": "authorized admin opens the panel and performs main operations",
-        "evidence": "NOT RUN \u2014 same reason; no account was created or fabricated",
-        "verdict": "BLOCKED"
+        "verdict": "BLOCKED",
+        "evidence": "same \u2014 and there is no supported way to create the FIRST admin through the product: OwnershipService.claim requires the acting row to ALREADY have role exactly 'admin' (apps/api/src/auth/ownershipService.ts \u00a74), AdminUserService requires an authenticated admin to invite, and no ops script seeds one. See first_admin_gap."
       },
       {
-        "test": "non-admin blocked from the admin panel",
-        "evidence": "NOT RUN live (the API layer already proves it: adminConsoleRoutes.test.ts \u2014 anonymous 401, plain user 403 on every console route); the live half needs a non-admin session",
-        "verdict": "NOT VERIFIED"
+        "test": "non-admin blocked from the admin panel (live)",
+        "verdict": "NOT VERIFIED live",
+        "evidence": "needs a non-admin session (which needs a verified account). Proven at the API layer: apps/api/src/admin/adminConsoleRoutes.test.ts (anonymous 401, plain user 403 on every console route, mutations included)"
       },
       {
         "test": "logout / session expiry with a live session",
-        "evidence": "NOT RUN \u2014 needs a live session; the API-layer rotation/expiry tests pass",
-        "verdict": "NOT VERIFIED"
+        "verdict": "NOT VERIFIED live",
+        "evidence": "needs a live session; the API-layer rotation/expiry tests pass (apps/api/src/auth/*)"
       }
     ]
   },
   "ci": {
     "run": "ci @ 0c1db06 \u2014 success (GitHub Actions, public repo)",
     "note": "the push reported 'Bypassed rule violations \u2026 Required status check \"verify\" is expected', i.e. the branch ruleset was bypassed by the token's admin permission; the run then completed green, so the required check is satisfied after the fact"
+  },
+  "first_admin_gap": {
+    "finding": "There is no self-service or ops path to create the FIRST admin account. Every route that could create an admin requires an authenticated admin; the System Owner bootstrap (POST ownership claim) requires the acting row to already be role='admin' AND email-verified AND active; registration creates an unverified 'normal' user and email delivery is the LogMailProvider (nothing sent) on this Worker.",
+    "consequence": "The panel is deployed, gated and reachable, but nobody can log into it until an admin row exists in the staging database.",
+    "unblock_options_owner_side": [
+      "an existing admin whose password the owner holds (the owner reported none)",
+      "DB-level provisioning by the owner (Neon staging credentials): insert/update a users row with role='admin', status='active', email_verified_at set, and a password_hash produced by the app's own VeloraHasher so the password policy is not bypassed",
+      "a reviewed ops script that does the above with the app's own hasher (not written here \u2014 it creates an account, which is an owner decision)"
+    ],
+    "not_done_on_purpose": "no account, password, token or role was invented; nothing was written to the staging database"
   }
 }
