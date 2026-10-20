@@ -237,6 +237,16 @@ Drafts expire after 30 minutes and the sweep marks them `EXPIRED`.
   `TELEGRAM_UPDATE_MODE` to anything other than the current mode or remove
   `TELEGRAM_BOT_TOKEN` and restart. The web product is untouched; migration
   `0023` is additive and leaves existing rows alone.
+- **Database placement is a latency decision, not a billing one — choose the region and write it
+  down.** Measured on the 2026-10-18 non-production deployment (`ap-southeast-2`, chosen at project
+  creation, Worker at the Cloudflare EU edge): a *no-work* statement costs **155 ms** round trip from
+  the app runtime and **~320 ms per statement** inside a Worker invocation, while Postgres itself
+  executes it in **0.04 ms** (`tools/neon-rtt-probe.mjs`). One Telegram reply is eight of those serial
+  statements, so distance alone set a ~4 s floor under the bot; the region, not the schema, was the
+  slow part. Neon cannot move a project between regions, so pick the region nearest the users (and
+  note that every branch inherits the project's region). The same tax applies to any other far-away
+  Postgres, D1 included, and `pooling`/caching options do not cancel it — they only hide the connect,
+  not the eight round trips.
 - **Uninstalling cleanly:** `deleteWebhook` (if webhook mode) before removing the
   environment variables, so Telegram stops retrying a dead endpoint.
 
