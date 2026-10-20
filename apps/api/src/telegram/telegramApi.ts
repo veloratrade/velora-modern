@@ -38,6 +38,10 @@ export type TelegramApiErrorCode =
   | "FORBIDDEN"
   | "CONFLICT"
   | "FILE_TOO_LARGE"
+  // Raised HERE, before any request is made: the caller asked for something Telegram cannot accept
+  // (an oversized caption, a photo reference that is not a file id or an https URL). It exists so a
+  // bad argument is a named local refusal instead of a confusing `API_ERROR` from a round trip.
+  | "INVALID_REQUEST"
   | "API_ERROR";
 
 /** A safe, loggable failure. Never contains the token, a URL or a raw body. */
@@ -58,7 +62,33 @@ export class TelegramApiError extends Error {
 
 export interface SendMessageResult {
   readonly messageId: string;
+  /**
+   * The `file_id` of the photo in the message that was just sent, when this call sent a photo.
+   *
+   * WHY IT IS WORTH RETURNING. The Bot API has no "upload only" method: the only way to obtain a
+   * `file_id` for an image the bot itself produced is to send it somewhere and read the id back. So
+   * the publish path that uploads rasterized banner bytes captures the id here, and a later re-send
+   * (a retry, or the same card on another channel) can go out as a plain JSON `sendPhoto` without
+   * rasterizing or uploading a second time. Absent when Telegram did not include it.
+   */
+  readonly photoFileId?: string | undefined;
 }
+
+/**
+ * Image BYTES to upload, as opposed to a `file_id`/URL that already exists on Telegram's side.
+ *
+ * `filename` is the name Telegram shows in a forwarded file's metadata. It is validated to a bare
+ * name because it lands inside a multipart part header — `..`, a slash or a CR would be a header
+ * injection opportunity in a field the caller controls.
+ */
+export interface PhotoUpload {
+  readonly bytes: Buffer;
+  readonly filename: string;
+}
+
+/** Telegram's own limit for a bot upload. Enforced here so the answer is local, not a 400. */
+export const TELEGRAM_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const UPLOAD_FILENAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}\.png$/u;
 /**
  * One inline-keyboard button.
  *
@@ -72,11 +102,37 @@ export type InlineKeyboardButton =
   | { readonly text: string; readonly callbackData: string }
   | { readonly text: string; readonly url: string };
 
+/** Telegram's own caption limit, restated here so the transport can refuse instead of failing remotely. */
+export const TELEGRAM_CAPTION_LIMIT = 1024;
+
 export interface SentMessageOptions {
   readonly replyToMessageId?: string | undefined;
   readonly inlineKeyboard?: readonly (readonly InlineKeyboardButton[])[] | undefined;
   readonly disableNotification?: boolean | undefined;
 }
+/**
+ * `sendPhoto` options: the send options plus a caption.
+ *
+ * `photo` is NOT part of this shape — see `sendPhoto`. A file reference is a separate argument
+ * precisely so a caller cannot accidentally put an arbitrary string where a destination belongs.
+ */
+export interface SendPhotoOptions extends SentMessageOptions {
+  readonly caption?: string | undefined;
+}
+
+/**
+ * What `sendPhoto` accepts as an image reference, and why nothing else does.
+ *
+ * A Telegram `file_id` (opaque, `[0-9A-Za-z_-]{20,}`) or an absolute `https` URL. Deliberately NOT
+ * accepted: a `data:` URI (the transport is JSON-only, and a 5 MiB base64 blob in a webhook response
+ * is a timeout waiting to happen), an `http:` URL (a cleartext fetch from Telegram's servers to a
+ * host we chose), and anything else — because the only reason to pass a string here is "Telegram
+ * already has this file", and a string that is not that is a bug worth naming at the call site.
+ */
+export function isSendablePhotoRef(value: string): boolean {
+  return /^[0-9A-Za-z_-]{20,}$/.test(value) || /^https:\/\/[^\s]+$/u.test(value);
+}
+
 export interface TelegramFileRef {
   readonly fileId: string;
   readonly filePath: string | null;
@@ -93,7 +149,15 @@ export interface TelegramMemberRef {
   readonly canPostMessages: boolean;
 }
 
-type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal }) => Promise<{
+/** The request shape this client is willing to make: JSON or one multipart upload, nothing else. */
+export interface TelegramRequestInit {
+  readonly method: string;
+  readonly headers?: Record<string, string> | undefined;
+  readonly body?: string | FormData | undefined;
+  readonly signal?: AbortSignal | undefined;
+}
+
+type FetchLike = (url: string, init?: TelegramRequestInit) => Promise<{
   ok: boolean;
   status: number;
   json(): Promise<unknown>;
@@ -102,6 +166,19 @@ type FetchLike = (url: string, init?: { method?: string; headers?: Record<string
 
 export interface TelegramBotApi {
   sendMessage(chatId: string, text: string, options?: SentMessageOptions): Promise<SendMessageResult>;
+  /**
+   * Photo post: the image plus an HTML caption, with the same inline-keyboard support as
+   * `sendMessage`. A caption is limited to 1024 characters by Telegram, so the caller renders to
+   * that budget (`TELEGRAM_CAPTION_LIMIT` in the domain) and this transport REFUSES a longer one
+   * rather than discovering it remotely.
+   */
+  /**
+   * `photo` is either a reference Telegram already holds (a `file_id` or an https URL — sent as JSON)
+   * or bytes to upload (sent as `multipart/form-data`). The two shapes exist because a chart the user
+   * forwarded and a banner Velora just rasterized are different situations: only the second one has a
+   * reference to name.
+   */
+  sendPhoto(chatId: string, photo: string | PhotoUpload, options?: SendPhotoOptions): Promise<SendMessageResult>;
   answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void>;
   getFile(fileId: string): Promise<TelegramFileRef>;
   downloadFile(filePath: string, maxBytes?: number): Promise<Buffer>;
@@ -118,6 +195,28 @@ export interface TelegramBotApi {
   getUpdates(offset: number | null, timeoutSeconds?: number): Promise<TelegramUpdate[]>;
 }
 
+/** The one inline-keyboard encoder. Both `sendMessage` and `sendPhoto` go through it. */
+/**
+ * The largest size Telegram says it will re-serve without re-uploading. A bot's `sendPhoto` result
+ * carries one `photo[].file_id` per rendered size; the LAST is the biggest, and the biggest is what a
+ * later post wants. Nothing is invented when the array is missing: the id stays absent and the next
+ * publish rasterizes again.
+ */
+function lastPhotoFileId(photo: unknown): string | undefined {
+  if (!Array.isArray(photo) || photo.length === 0) return undefined;
+  const last = photo[photo.length - 1];
+  if (!isRecord(last) || typeof last["file_id"] !== "string") return undefined;
+  return last["file_id"];
+}
+
+function keyboardOf(rows: readonly (readonly InlineKeyboardButton[])[]): Record<string, unknown> {
+  return {
+    inline_keyboard: rows.map((row) =>
+      row.map((b) => ("url" in b ? { text: b.text, url: b.url } : { text: b.text, callback_data: b.callbackData })),
+    ),
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -132,26 +231,48 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export class HttpTelegramBotApi implements TelegramBotApi {
   constructor(
     private readonly token: SecretValue,
-    private readonly fetchImpl: FetchLike = fetch as unknown as FetchLike,
+    // Bound deliberately. `fetch` on its own is a detached reference: node tolerates it, workerd
+    // throws `TypeError: Illegal invocation`, and the catch below would report that as
+    // `NETWORK` for every call — indistinguishable from a real network failure. Measured on a
+    // deployed Worker on 2026-10-18, which is why the default is an arrow rather than the global.
+    private readonly fetchImpl: FetchLike = ((url: string, init?: RequestInit) =>
+      globalThis.fetch(url, init)) as unknown as FetchLike,
     private readonly timeoutMs: number = TELEGRAM_REQUEST_TIMEOUT_MS,
+    // Portability: the Cloudflare Workers host needs to point the client at a
+    // staging/stub origin to verify the outbound path without touching a real bot.
+    // Defaults to the production Bot API, so every existing call site and test is
+    // unchanged.
+    private readonly apiBase: string = API_BASE,
   ) {}
 
   /** The single call site of `reveal()`. Never logged. */
   private url(method: string): string {
-    return `${API_BASE}/bot${this.token.reveal()}/${method}`;
+    return `${this.apiBase === "" ? API_BASE : this.apiBase}/bot${this.token.reveal()}/${method}`;
   }
 
   private async call<T>(method: string, payload: Record<string, unknown>): Promise<T> {
+    return this.perform<T>(method, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  /**
+   * A `multipart/form-data` POST. Used for an upload, because that is the only body shape the Bot API
+   * accepts for bytes — and the reason the request carries NO `content-type` header of our own: the
+   * boundary has to be generated by the fetch implementation, and a hand-written one would mismatch it.
+   */
+  private async callForm<T>(method: string, form: FormData): Promise<T> {
+    return this.perform<T>(method, { method: "POST", body: form });
+  }
+
+  private async perform<T>(method: string, init: TelegramRequestInit): Promise<T> {
     let response: Awaited<ReturnType<FetchLike>>;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      response = await this.fetchImpl(this.url(method), {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
+      response = await this.fetchImpl(this.url(method), { ...init, signal: controller.signal });
     } catch (err) {
       // An aborted request and a socket failure are different failures: the first
       // is a timeout the caller may retry later, the second may be a DNS/TLS
@@ -181,17 +302,49 @@ export class HttpTelegramBotApi implements TelegramBotApi {
     return body["result"] as T;
   }
 
+  async sendPhoto(chatId: string, photo: string | PhotoUpload, options?: SendPhotoOptions): Promise<SendMessageResult> {
+    const caption = options?.caption;
+    // The caption limit is checked before the request for both shapes: a 4000-character caption
+    // rejected remotely would already have cost the upload of a 200 KB image.
+    if (caption !== undefined && caption.length > TELEGRAM_CAPTION_LIMIT) {
+      throw new TelegramApiError("INVALID_REQUEST", null, null, null);
+    }
+    const keyboard = options?.inlineKeyboard === undefined ? null : keyboardOf(options.inlineKeyboard);
+
+    if (typeof photo === "object" && photo !== null) {
+      const bytes = photo.bytes;
+      if (bytes.length === 0 || bytes.length > TELEGRAM_MAX_UPLOAD_BYTES) {
+        throw new TelegramApiError(bytes.length === 0 ? "INVALID_REQUEST" : "FILE_TOO_LARGE", null, null, null);
+      }
+      // A filename goes into a `Content-Disposition` part header, so it is a bare name or nothing.
+      if (!UPLOAD_FILENAME.test(photo.filename)) throw new TelegramApiError("INVALID_REQUEST", null, null, null);
+      const form = new FormData();
+      form.set("chat_id", chatId);
+      form.set("photo", new Blob([bytes], { type: "image/png" }), photo.filename);
+      // HTML parsing for a caption, the same as the JSON path: the banner body carries <b>/<i> from the
+      // template renderer, and a caption that lost its markup would show the tags as literal text.
+      form.set("parse_mode", "HTML");
+      if (caption !== undefined && caption !== "") form.set("caption", caption);
+      if (options?.disableNotification === true) form.set("disable_notification", "true");
+      if (keyboard !== null) form.set("reply_markup", JSON.stringify(keyboard));
+      const sent = await this.callForm<Record<string, unknown>>("sendPhoto", form);
+      return { messageId: String(sent["message_id"] ?? ""), photoFileId: lastPhotoFileId(sent["photo"]) };
+    }
+
+    if (!isSendablePhotoRef(photo)) throw new TelegramApiError("INVALID_REQUEST", null, null, null);
+    const payload: Record<string, unknown> = { chat_id: chatId, photo, parse_mode: "HTML" };
+    if (caption !== undefined && caption !== "") payload["caption"] = caption;
+    if (options?.disableNotification === true) payload["disable_notification"] = true;
+    if (keyboard !== null) payload["reply_markup"] = keyboard;
+    const result = await this.call<Record<string, unknown>>("sendPhoto", payload);
+    return { messageId: String(result["message_id"] ?? ""), photoFileId: lastPhotoFileId(result["photo"]) };
+  }
+
   async sendMessage(chatId: string, text: string, options?: SentMessageOptions): Promise<SendMessageResult> {
     const payload: Record<string, unknown> = { chat_id: chatId, text, parse_mode: "HTML" };
     if (options?.replyToMessageId !== undefined) payload["reply_to_message_id"] = Number(options.replyToMessageId);
     if (options?.disableNotification === true) payload["disable_notification"] = true;
-    if (options?.inlineKeyboard !== undefined) {
-      payload["reply_markup"] = {
-        inline_keyboard: options.inlineKeyboard.map((row) =>
-          row.map((b) => ("url" in b ? { text: b.text, url: b.url } : { text: b.text, callback_data: b.callbackData })),
-        ),
-      };
-    }
+    if (options?.inlineKeyboard !== undefined) payload["reply_markup"] = keyboardOf(options.inlineKeyboard);
     const result = await this.call<Record<string, unknown>>("sendMessage", payload);
     return { messageId: String(result["message_id"] ?? "") };
   }

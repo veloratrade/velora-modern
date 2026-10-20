@@ -20,7 +20,7 @@
 //     writable, because that decision binds a user's journal to a chat.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { HttpTelegramBotApi, TELEGRAM_MAX_DOWNLOAD_BYTES, TelegramApiError } from "./telegramApi.js";
+import { HttpTelegramBotApi, TELEGRAM_CAPTION_LIMIT, TELEGRAM_MAX_DOWNLOAD_BYTES, TelegramApiError, isSendablePhotoRef } from "./telegramApi.js";
 import type { SecretValue } from "./telegramConfig.js";
 
 const TOKEN = "123456789:AAFakeTokenValueForTestsOnly_000000000000";
@@ -213,4 +213,62 @@ test("buttons are sent in the shape Telegram accepts — url XOR callback_data",
   const rows = (payload["reply_markup"] as { inline_keyboard: Record<string, unknown>[][] }).inline_keyboard;
   assert.deepEqual(rows[0]![0], { text: "تأیید", callback_data: "confirm:12" });
   assert.deepEqual(rows[1]![0], { text: "اتصال امن به Velora", url: "https://t.me/velora_bot?start=abc" });
+});
+
+// ─────────────────────────────── sendPhoto ───────────────────────────────
+// The photo path exists for the banner post, and its failure modes are the ones a caller cannot
+// see from the outside: a caption over Telegram's own 1024-character limit and a photo reference
+// that is not a file id or an https URL. Both are refused HERE, locally, because the alternative
+// is a round trip that comes back as an unclassifiable API error — and because a `data:` URI in
+// particular is a base64 image the caller meant to upload some other way.
+test("sendPhoto posts the ref, the caption and the keyboard in one payload", async () => {
+  const { calls, impl } = transport(() => ({ json: { ok: true, result: { message_id: 99 } } }));
+  const api = new HttpTelegramBotApi(secret, impl as never);
+  const sent = await api.sendPhoto("-100123", "AgACAWsAq8IAvAAAAgADaGVhZA", {
+    caption: "<b>VELORA</b> bias",
+    disableNotification: true,
+    inlineKeyboard: [[{ text: "Open", url: "https://app.veloratrade.ir/t/1" }, { text: "Edit", callbackData: "post_edit:1" }]],
+  });
+  assert.equal(sent.messageId, "99");
+  const body = JSON.parse(String(calls[0]!.init!.body)) as Record<string, unknown>;
+  assert.equal(body["photo"], "AgACAWsAq8IAvAAAAgADaGVhZA");
+  assert.equal(body["caption"], "<b>VELORA</b> bias");
+  assert.equal(body["parse_mode"], "HTML");
+  assert.equal(body["disable_notification"], true);
+  assert.deepEqual(body["reply_markup"], {
+    inline_keyboard: [[{ text: "Open", url: "https://app.veloratrade.ir/t/1" }, { text: "Edit", callback_data: "post_edit:1" }]],
+  });
+  assert.match(String(calls[0]!.url), /\/sendPhoto$/);
+  assert.ok(!String(calls[0]!.url).includes("caption"), "the token stays in the path, the payload stays in the body");
+});
+
+test("an oversized caption is refused locally, never sent", async () => {
+  const { calls, impl } = transport(() => ({ json: { ok: true, result: { message_id: 1 } } }));
+  const api = new HttpTelegramBotApi(secret, impl as never);
+  await assert.rejects(
+    () => api.sendPhoto("-100123", "AgACAWsAq8IAvAAAAgADaGVhZA", { caption: "x".repeat(TELEGRAM_CAPTION_LIMIT + 1) }),
+    (err: TelegramApiError) => err.code === "INVALID_REQUEST",
+  );
+  assert.equal(calls.length, 0);
+});
+
+test("only a file id or an https URL is a photo reference — no data: URI, no cleartext, no path traversal", () => {
+  assert.equal(isSendablePhotoRef("AgACAWsAq8IAvAAAAgADaGVhZA"), true);
+  assert.equal(isSendablePhotoRef("https://cdn.example.com/a.png"), true);
+  for (const bad of ["", "short", "http://cdn.example.com/a.png", "data:image/png;base64,AAAA", "/etc/passwd", "https://x/y\n../../z"]) {
+    assert.equal(isSendablePhotoRef(bad), false, bad);
+  }
+});
+
+test("an unsendable photo ref is refused before the request, and the token never reaches the error", async () => {
+  const { calls, impl } = transport(() => ({ json: { ok: true, result: { message_id: 1 } } }));
+  const api = new HttpTelegramBotApi(secret, impl as never);
+  const err = await api.sendPhoto("-100123", "data:image/svg+xml;base64,AAA").then(
+    () => null,
+    (e: TelegramApiError) => e,
+  );
+  assert.ok(err instanceof TelegramApiError);
+  assert.equal(err!.code, "INVALID_REQUEST");
+  assert.ok(!String(err!.message).includes(TOKEN));
+  assert.equal(calls.length, 0, "nothing left the process");
 });

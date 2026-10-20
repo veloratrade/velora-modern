@@ -14,6 +14,17 @@
 // NOT database evidence — the same label the repo's other memory stores carry.
 import { isTerminalTelegramDraftState } from "./telegramStore.js";
 import type {
+  ChecklistUpsertInput,
+  PostClaimInput,
+  PostClaimResult,
+  TelegramPostRecord,
+  TelegramTemplateRecord,
+  TemplateSaveInput,
+  TemplateSaveResult,
+  ChecklistUpsertResult,
+  TelegramChecklistRecord,
+} from "./telegramStore.js";
+import type {
   IdentityInsert,
   LinkConsumption,
   TelegramChannelRecord,
@@ -44,7 +55,20 @@ interface UpdateRow {
   errorCode: string | null;
 }
 
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+
 export class MemoryTelegramStore implements TelegramStore {
+  /** Day-keyed checklists, mirroring the (user_id, report_date) unique key. */
+  private readonly checklists: Record<string, TelegramChecklistRecord> = {};
+  /**
+   * Every version ever saved, current or superseded, exactly as 0037 stores them: this store is the
+   * one the bot tests run against, so it must reproduce the append-only behaviour (including the
+   * lost-update conflict) rather than offer a convenient last-write-wins map.
+   */
+  private readonly templates: Mutable<TelegramTemplateRecord>[] = [];
+  private readonly outbox: Mutable<TelegramPostRecord>[] = [];
+  private templateSeq = 0;
+  private postSeq = 0;
   readonly updates = new Map<string, UpdateRow>();
   readonly identities: TelegramIdentityRecord[] = [];
   readonly tokens: MutableToken[] = [];
@@ -297,6 +321,49 @@ export class MemoryTelegramStore implements TelegramStore {
 
   // ── Channels ──────────────────────────────────────────────────────────────
 
+  async listChannels(userId: string): Promise<readonly TelegramChannelRecord[]> {
+    return [...this.channels.values()]
+      .filter((c) => c.userId === userId)
+      .sort((a, b) => (a.status === "ACTIVE" ? -1 : 1) - (b.status === "ACTIVE" ? -1 : 1));
+  }
+
+  /** The same order as the adapter: demote first, then promote, so one ACTIVE is invariant. */
+  async activateChannel(
+    userId: string,
+    chatId: string,
+    at: Date,
+  ): Promise<
+    | { readonly ok: true; readonly activated: TelegramChannelRecord; readonly demoted: TelegramChannelRecord | null }
+    | { readonly ok: false; readonly reason: "NOT_FOUND" | "NOT_VERIFIED" }
+  > {
+    const target = [...this.channels.values()].find((c) => c.userId === userId && c.chatId === chatId);
+    if (target === undefined) return { ok: false, reason: "NOT_FOUND" };
+    if (target.canPost !== true || target.verifiedAt === null || target.status === "PENDING_VERIFICATION" || target.status === "REVOKED") {
+      return { ok: false, reason: "NOT_VERIFIED" };
+    }
+    // `TelegramChannelRecord` carries no `updatedAt`: the record type is the shape the bot reads,
+    // and the timestamp lives in the database. So the memory store mutates in place the way the
+    // adapter's UPDATE does, and `at` below is only used for the STANDBY/ACTIVE bookkeeping tests
+    // that care about ordering.
+    void at;
+    let demoted: TelegramChannelRecord | null = null;
+    for (const [key, c] of [...this.channels.entries()]) {
+      if (c.userId === userId && c.status === "ACTIVE" && c.chatId !== chatId) {
+        const next: TelegramChannelRecord = { ...c, status: "STANDBY" };
+        this.channels.set(key, next);
+        demoted = next;
+        break;
+      }
+    }
+    const activated: TelegramChannelRecord = { ...target, status: "ACTIVE", revokedAt: null };
+    this.channels.set(this.keyOf(target), activated);
+    return { ok: true, activated, demoted };
+  }
+
+  private keyOf(channel: TelegramChannelRecord): string {
+    return `${channel.userId}:${channel.chatId}`;
+  }
+
   async upsertChannel(input: {
     userId: string;
     chatId: string;
@@ -369,4 +436,228 @@ export class MemoryTelegramStore implements TelegramStore {
   async listPublishedTradeIds(channelId: string): Promise<readonly string[]> {
     return this.posts.filter((p) => p.channelId === channelId && p.status === "PUBLISHED").map((p) => p.tradeId);
   }
+
+  // ── Daily checklist (0036) ──────────────────────────────────────────────
+  // Mirrors the PostgreSQL UPSERT's rules exactly — merge over the stored items, counts derived
+  // from the merged object — so a unit test cannot pass against a rule the real store lacks.
+  async upsertDailyChecklist(input: ChecklistUpsertInput): Promise<ChecklistUpsertResult> {
+    const key = `${input.userId}:${input.reportDate}`;
+    const stored = this.checklists[key];
+    const items: Record<string, unknown> = { ...(stored?.items ?? {}) };
+    for (const [name, value] of Object.entries(input.items)) if (value !== undefined) items[name] = value;
+    const count = (state: string) =>
+      Object.values(items).filter((v) => (v as { state?: string })?.state === state).length;
+    const confirmed = count("CONFIRMED");
+    const unknown = count("UNKNOWN");
+    const at = input.at.toISOString();
+    const record: TelegramChecklistRecord = {
+      id: stored?.id ?? `cl-${Object.keys(this.checklists).length + 1}`,
+      userId: input.userId,
+      reportDate: input.reportDate,
+      timezone: stored?.timezone ?? input.timezone,
+      items,
+      confirmedItems: confirmed,
+      unreviewedItems: Math.max(0, 11 - confirmed - unknown),
+      unknownItems: unknown,
+      stopLoss: input.stopLoss ?? stored?.stopLoss ?? null,
+      riskValue: input.riskValue ?? stored?.riskValue ?? null,
+      riskUnit: input.riskValue !== null ? input.riskUnit : (stored?.riskUnit ?? "UNSPECIFIED"),
+      notes: input.notes ?? stored?.notes ?? null,
+      reviewState: confirmed === 11 ? "CONFIRMED" : confirmed > 0 ? "PARTIAL" : "UNREVIEWED",
+      sourceKind: input.sourceKind,
+      reviewedAt: confirmed === 11 ? (stored?.reviewedAt ?? at) : null,
+      createdAt: stored?.createdAt ?? at,
+      updatedAt: at,
+    };
+    this.checklists[key] = record;
+    return { created: stored === undefined, record };
+  }
+
+  async findDailyChecklist(userId: string, reportDate: string): Promise<TelegramChecklistRecord | null> {
+    return this.checklists[`${userId}:${reportDate}`] ?? null;
+  }
+
+  async listDailyChecklists(userId: string, limit: number): Promise<readonly TelegramChecklistRecord[]> {
+    const bound = Math.max(1, Math.min(60, Math.floor(limit) || 1));
+    return Object.values(this.checklists)
+      .filter((r) => r.userId === userId)
+      .sort((a, b) => (a.reportDate < b.reportDate ? 1 : a.reportDate > b.reportDate ? -1 : 0))
+      .slice(0, bound);
+  }
+
+  // ── Post templates (0037) ─────────────────────────────────────────────────
+
+  private currentTemplate(userId: string, name: string): Mutable<TelegramTemplateRecord> | undefined {
+    const key = name.trim();
+    return this.templates.find((t) => t.userId === userId && t.name === key && t.supersededAt === null);
+  }
+
+  async saveTemplate(input: TemplateSaveInput): Promise<TemplateSaveResult> {
+    const name = input.name.trim();
+    const current = this.currentTemplate(input.userId, name);
+    if (input.expectedVersion === null) {
+      if (current !== undefined) return { status: "conflict", current: { ...current } };
+      // A retired name is reusable; its new row continues the sequence so no version is ever
+      // reused for one name (the pg adapter's COALESCE(MAX(version) + 1) is the same rule).
+    } else {
+      if (current === undefined || current.version !== input.expectedVersion) {
+        return { status: "conflict", current: current === undefined ? null : { ...current } };
+      }
+      current.supersededAt = input.at.toISOString();
+      current.updatedAt = input.at.toISOString();
+    }
+    const record: Mutable<TelegramTemplateRecord> = {
+      id: `tpl-${(this.templateSeq += 1)}`,
+      userId: input.userId,
+      name,
+      body: input.body,
+      version:
+        current === undefined
+          ? this.templates.filter((t) => t.userId === input.userId && t.name === name).reduce((top, t) => Math.max(top, t.version), 0) + 1
+          : current.version + 1,
+      supersededAt: null,
+      createdAt: input.at.toISOString(),
+      updatedAt: input.at.toISOString(),
+    };
+    this.templates.push(record);
+    return { status: "saved", record: { ...record } };
+  }
+
+  async findCurrentTemplate(userId: string, name: string): Promise<TelegramTemplateRecord | null> {
+    const found = this.currentTemplate(userId, name);
+    return found === undefined ? null : { ...found };
+  }
+
+  async listTemplates(userId: string): Promise<readonly TelegramTemplateRecord[]> {
+    const byName = new Map<string, TelegramTemplateRecord>();
+    for (const t of this.templates) {
+      if (t.userId !== userId || t.supersededAt !== null) continue;
+      const seen = byName.get(t.name);
+      if (seen === undefined || seen.version < t.version) byName.set(t.name, { ...t });
+    }
+    return [...byName.values()].sort((a, b) => (a.name < b.name ? -1 : 1));
+  }
+
+  async retireTemplate(userId: string, name: string, at: Date): Promise<boolean> {
+    const current = this.currentTemplate(userId, name);
+    if (current === undefined) return false;
+    current.supersededAt = at.toISOString();
+    current.updatedAt = at.toISOString();
+    return true;
+  }
+
+  // ── Prepared posts (0037) ─────────────────────────────────────────────────
+
+  async claimPost(input: PostClaimInput): Promise<PostClaimResult> {
+    const existing = this.outbox.find((r) => r.userId === input.userId && r.dedupeKey === input.dedupeKey);
+    if (existing !== undefined) return { status: "duplicate", post: { ...existing } };
+    const post: Mutable<TelegramPostRecord> = {
+      id: `post-${(this.postSeq += 1)}`,
+      userId: input.userId,
+      channelId: input.channelId,
+      chatId: input.chatId,
+      body: input.body,
+      contentHash: input.contentHash,
+      approvedHash: null,
+      approvedAt: null,
+      bannerSvg: input.bannerSvg,
+      imageFileId: input.imageFileId,
+      templateKey: input.templateKey,
+      templateVersion: input.templateVersion,
+      status: "DRAFT",
+      dedupeKey: input.dedupeKey,
+      telegramMessageId: null,
+      publishedAt: null,
+      errorCode: null,
+      attempts: 0,
+      createdAt: input.at.toISOString(),
+      updatedAt: input.at.toISOString(),
+    };
+    this.outbox.push(post);
+    return { status: "claimed", post: { ...post } };
+  }
+
+  async revisePost(input: {
+    userId: string;
+    postId: string;
+    body: string;
+    contentHash: string;
+    bannerSvg: string | null;
+    at: Date;
+  }): Promise<TelegramPostRecord | null> {
+    const row = this.outbox.find((r) => r.id === input.postId && r.userId === input.userId);
+    if (row === undefined) return null;
+    if (row.status !== "DRAFT" && row.status !== "APPROVED" && row.status !== "FAILED" && row.status !== "CANCELLED") return null;
+    row.body = input.body;
+    row.contentHash = input.contentHash;
+    row.bannerSvg = input.bannerSvg;
+    // Editing revokes approval — the same rule the adapter's UPDATE encodes in one statement.
+    row.approvedHash = null;
+    row.approvedAt = null;
+    row.status = "DRAFT";
+    row.updatedAt = input.at.toISOString();
+    return { ...row };
+  }
+
+  async findPost(userId: string, postId: string): Promise<TelegramPostRecord | null> {
+    const found = this.outbox.find((r) => r.id === postId && r.userId === userId);
+    return found === undefined ? null : { ...found };
+  }
+
+  async listRecentPosts(userId: string, limit: number): Promise<readonly TelegramPostRecord[]> {
+    const bound = Math.max(1, Math.min(50, Math.floor(limit) || 1));
+    return this.outbox
+      .filter((r) => r.userId === userId)
+      .slice()
+      .reverse()
+      .slice(0, bound)
+      .map((r) => ({ ...r }));
+  }
+
+  async approvePost(input: { userId: string; postId: string; contentHash: string; at: Date }): Promise<TelegramPostRecord | null> {
+    const row = this.outbox.find((r) => r.id === input.postId && r.userId === input.userId);
+    // Same three conditions as the adapter's single UPDATE: owner, exact bytes, sendable state.
+    if (row === undefined || row.contentHash !== input.contentHash) return null;
+    if (row.status !== "DRAFT" && row.status !== "APPROVED" && row.status !== "FAILED") return null;
+    row.status = "APPROVED";
+    row.approvedHash = input.contentHash;
+    row.approvedAt = input.at.toISOString();
+    row.updatedAt = input.at.toISOString();
+    return { ...row };
+  }
+
+  async claimPublish(input: { userId: string; postId: string; maxAttempts: number; at: Date }): Promise<boolean> {
+    const row = this.outbox.find((r) => r.id === input.postId && r.userId === input.userId);
+    if (row === undefined) return false;
+    const max = Math.max(1, Math.min(5, Math.floor(input.maxAttempts) || 1));
+    if (row.attempts >= max) return false;
+    if (row.status !== "APPROVED" && row.status !== "FAILED") return false;
+    row.status = "PUBLISHING";
+    row.attempts += 1;
+    row.updatedAt = input.at.toISOString();
+    return true;
+  }
+
+  async finishPost(input: {
+    userId: string;
+    postId: string;
+    status: "PUBLISHED" | "FAILED";
+    message_id?: string | null;
+    errorCode: string | null;
+    at: Date;
+    imageFileId?: string | null | undefined;
+  }): Promise<TelegramPostRecord | null> {
+    const row = this.outbox.find((r) => r.id === input.postId && r.userId === input.userId);
+    if (row === undefined || row.status !== "PUBLISHING") return null;
+    // Same rule as the SQL path: an absent id keeps the stored one, so a text-card retry after a
+    // successful upload does not lose the reference the upload earned.
+    if (input.imageFileId !== undefined && input.imageFileId !== null) row.imageFileId = input.imageFileId;
+    row.status = input.status;
+    row.telegramMessageId = input.status === "PUBLISHED" ? (input.message_id ?? null) : null;
+    row.publishedAt = input.status === "PUBLISHED" ? input.at.toISOString() : null;
+    row.errorCode = input.status === "FAILED" ? (input.errorCode ?? "SEND_FAILED") : null;
+    row.updatedAt = input.at.toISOString();
+    return { ...row };
+  }
+
 }

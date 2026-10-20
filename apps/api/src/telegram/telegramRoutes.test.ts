@@ -56,6 +56,12 @@ class FakeBotApi implements TelegramBotApi {
     this.sent.push({ chatId, text });
     return { messageId: String(this.sent.length) };
   }
+  async sendPhoto(chatId: string, photo: string, options?: { readonly caption?: string }) {
+    void chatId;
+    void photo;
+    void options;
+    return { messageId: "1" };
+  }
   async answerCallbackQuery(): Promise<void> {}
   async getFile(fileId: string) {
     return { fileId, filePath: `path/${fileId}`, fileSizeBytes: 8 };

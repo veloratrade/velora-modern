@@ -66,7 +66,7 @@ export interface TelegramDraftRecord {
   readonly confirmedTradeId: string | null;
 }
 
-export type TelegramChannelStatus = "PENDING_VERIFICATION" | "ACTIVE" | "REVOKED" | "INSUFFICIENT_PERMISSIONS";
+export type TelegramChannelStatus = "PENDING_VERIFICATION" | "ACTIVE" | "REVOKED" | "INSUFFICIENT_PERMISSIONS" | "STANDBY";
 
 export interface TelegramChannelRecord {
   readonly id: string;
@@ -199,4 +199,243 @@ export interface TelegramStore {
   finishChannelPost(postId: string, status: "PUBLISHED" | "FAILED", messageId: string | null, errorCode: string | null, at: Date): Promise<void>;
   /** Trades already mirrored to this channel, for history rendering. */
   listPublishedTradeIds(channelId: string): Promise<readonly string[]>;
+  /**
+   * Every channel this user has ever registered, ACTIVE first then newest verification. Selection is
+   * meaningless without the list, and the list is meaningless without the state each row is in —
+   * including STANDBY (0038: verified, bound, deliberately not the current target).
+   */
+  listChannels(userId: string): Promise<readonly TelegramChannelRecord[]>;
+  /**
+   * Choose which registered channel is ACTIVE. Exactly one may be, so the demotion of the previous
+   * one and the promotion of the chosen one happen in ONE transaction — two active rows are not a
+   * transient state this store can produce.
+   *
+   * Refuses (without writing) when the target is not the user's own, or is not verified for posting:
+   * selection is a routing decision, never a way to skip verification.
+   */
+  activateChannel(
+    userId: string,
+    chatId: string,
+    at: Date,
+  ): Promise<
+    | { readonly ok: true; readonly activated: TelegramChannelRecord; readonly demoted: TelegramChannelRecord | null }
+    | { readonly ok: false; readonly reason: "NOT_FOUND" | "NOT_VERIFIED" }
+  >;
+
+  /**
+   * Record a day's review. MERGE, not replace: a report naming two items must not un-answer the
+   * nine it did not mention, and two devices reviewing the same day must not lose each other.
+   * `created` says whether this was the day's first row.
+   */
+  upsertDailyChecklist(input: ChecklistUpsertInput): Promise<ChecklistUpsertResult>;
+  findDailyChecklist(userId: string, reportDate: string): Promise<TelegramChecklistRecord | null>;
+  /** Newest first, for "what have I reviewed lately". Bounded by the caller. */
+  listDailyChecklists(userId: string, limit: number): Promise<readonly TelegramChecklistRecord[]>;
+
+  // ── Post templates (0037) ─────────────────────────────────────────────────
+  /**
+   * Save a template as a NEW VERSION. Never an overwrite: `expectedVersion` is the version the
+   * user was shown, and if the stored current version has moved on, the caller gets
+   * `{ status: "conflict", current }` and nothing is written. A trader's wording is theirs; a lost
+   * update is reported, not silently applied.
+   *
+   * `expectedVersion: null` means "this name must not exist yet" — an existing name is a conflict,
+   * never a rename or an implicit replace.
+   */
+  saveTemplate(input: TemplateSaveInput): Promise<TemplateSaveResult>;
+  findCurrentTemplate(userId: string, name: string): Promise<TelegramTemplateRecord | null>;
+  /** The current template of every name this user owns, newest version first per name. */
+  listTemplates(userId: string): Promise<readonly TelegramTemplateRecord[]>;
+  /**
+   * Retire a name. Tombstone, not DELETE — a post that was rendered from version 3 must still be
+   * explainable after the user retires it. False when the name is not theirs or not current.
+   */
+  retireTemplate(userId: string, name: string, at: Date): Promise<boolean>;
+
+  // ── Prepared posts (0037) ─────────────────────────────────────────────────
+  /**
+   * Idempotent preview write. The dedupe key is what makes a re-delivered Telegram update, a
+   * double-tapped button and a retried job produce ONE previewable post rather than several: a
+   * second claim of the same key returns the existing row with `status: "duplicate"` and the
+   * caller must not send again.
+   *
+   * `contentHash` is a sha256 of `body`. It is stored, not trusted: approval and publication are
+   * both compared against it, so editing the text revokes the approval in the database rather than
+   * in somebody's memory.
+   */
+  claimPost(input: PostClaimInput): Promise<PostClaimResult>;
+  /**
+   * Replace a previewed post's text and re-hash it, CLEARING the approval in the same statement.
+   * Only a not-yet-published row is editable (the state list says so), so a user cannot rewrite what
+   * has already gone out, and an edit always revokes consent rather than relying on a caller to
+   * remember that it should. Null when the row is not the user's or is past the editable states.
+   */
+  revisePost(input: {
+    readonly userId: string;
+    readonly postId: string;
+    readonly body: string;
+    readonly contentHash: string;
+    readonly bannerSvg: string | null;
+    readonly at: Date;
+  }): Promise<TelegramPostRecord | null>;
+  findPost(userId: string, postId: string): Promise<TelegramPostRecord | null>;
+  listRecentPosts(userId: string, limit: number): Promise<readonly TelegramPostRecord[]>;
+  /**
+   * APPROVE the exact bytes. Returns the row when `contentHash` still matches what is stored and
+   * null when it does not (the preview the user is approving is stale — re-render, re-approve).
+   * Conditional in one statement: two approvals of one post cannot both land on a send.
+   */
+  approvePost(input: { readonly userId: string; readonly postId: string; readonly contentHash: string; readonly at: Date }): Promise<TelegramPostRecord | null>;
+  /**
+   * CLAIM the send: APPROVED or FAILED → PUBLISHING, atomically, and only while `attempts` is
+   * below the bound. True means this caller may call the Bot API; false means somebody else is
+   * already sending it, it is already published, or it is out of retries.
+   */
+  claimPublish(input: { readonly userId: string; readonly postId: string; readonly maxAttempts: number; readonly at: Date }): Promise<boolean>;
+  /**
+   * Record the outcome of the send that was claimed. PUBLISHED requires the message id.
+   *
+   * `imageFileId` is written in the SAME statement, not by a follow-up: it is the id Telegram gave for
+   * the photo this send carried, so the fact and its evidence belong to one transition. Omitting it
+   * leaves the stored value alone (COALESCE in the SQL path) — a retry that fell back to the text card
+   * must not erase an id an earlier attempt already obtained.
+   */
+  finishPost(input: {
+    readonly userId: string;
+    readonly postId: string;
+    readonly status: "PUBLISHED" | "FAILED";
+    readonly message_id?: string | null;
+    readonly errorCode: string | null;
+    readonly at: Date;
+    readonly imageFileId?: string | null | undefined;
+  }): Promise<TelegramPostRecord | null>;
+
 }
+
+// ── Daily checklist (0036) ────────────────────────────────────────────────
+/**
+ * One trader's review of one calendar day.
+ *
+ * `items` is deliberately an opaque JSON value here: the VOCABULARY of the checklist belongs to
+ * `packages/domain/src/journalChecklist.ts`, and the store must not grow a second, weaker copy of
+ * it. What the store does guarantee is the arithmetic that makes a report trustworthy — one row
+ * per (user, day), a sparse write MERGED over the stored one rather than replacing it, and counts
+ * derived from the items, so no caller can assert a review is complete.
+ */
+export interface TelegramChecklistRecord {
+  readonly id: string;
+  readonly userId: string;
+  readonly reportDate: string;
+  readonly timezone: string;
+  readonly items: Record<string, unknown>;
+  readonly confirmedItems: number;
+  readonly unreviewedItems: number;
+  readonly unknownItems: number;
+  readonly stopLoss: string | null;
+  readonly riskValue: string | null;
+  readonly riskUnit: "PERCENT" | "AMOUNT" | "UNSPECIFIED";
+  readonly notes: string | null;
+  readonly reviewState: "UNREVIEWED" | "PARTIAL" | "CONFIRMED";
+  readonly sourceKind: "TEXT" | "VOICE" | "PHOTO" | "MANUAL";
+  readonly reviewedAt: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ChecklistUpsertInput {
+  readonly userId: string;
+  readonly telegramUserId: string | null;
+  readonly reportDate: string;
+  readonly timezone: string;
+  readonly sourceKind: "TEXT" | "VOICE" | "PHOTO" | "MANUAL";
+  /** Only the items this report names; anything absent keeps the stored answer (or stays unreviewed). */
+  readonly items: Readonly<Record<string, { state: string; value: string | null; normalised: boolean }>>;
+  /** null means "this report said nothing about notes"; it never clears a stored note. */
+  readonly notes: string | null;
+  readonly stopLoss: string | null;
+  readonly riskValue: string | null;
+  readonly riskUnit: "PERCENT" | "AMOUNT" | "UNSPECIFIED";
+  readonly at: Date;
+}
+
+export interface ChecklistUpsertResult {
+  readonly created: boolean;
+  readonly record: TelegramChecklistRecord;
+}
+
+// ── Post templates (0037) ───────────────────────────────────────────────
+/**
+ * One version of one user's template.
+ *
+ * `version` is monotonically increasing per (user, name) and `supersededAt` is the only currency
+ * marker: exactly one row per name has it NULL. There is no `isCurrent` boolean, because two sources
+ * of truth about currency is how a UI ends up publishing a stale body.
+ */
+export interface TelegramTemplateRecord {
+  readonly id: string;
+  readonly userId: string;
+  readonly name: string;
+  readonly body: string;
+  readonly version: number;
+  readonly supersededAt: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface TemplateSaveInput {
+  readonly userId: string;
+  readonly name: string;
+  readonly body: string;
+  /** The version the user was shown; null when they are creating the name. */
+  readonly expectedVersion: number | null;
+  readonly at: Date;
+}
+
+export type TemplateSaveResult =
+  | { readonly status: "saved"; readonly record: TelegramTemplateRecord }
+  /** `current` is what is actually stored, so the caller can show the user what they would have overwritten. */
+  | { readonly status: "conflict"; readonly current: TelegramTemplateRecord | null };
+
+// ── Prepared posts (0037) ───────────────────────────────────────────────
+export type TelegramPostStatus = "DRAFT" | "APPROVED" | "PUBLISHING" | "PUBLISHED" | "FAILED" | "CANCELLED";
+
+export interface TelegramPostRecord {
+  readonly id: string;
+  readonly userId: string;
+  readonly channelId: string;
+  readonly chatId: string;
+  readonly body: string;
+  readonly contentHash: string;
+  readonly approvedHash: string | null;
+  readonly approvedAt: string | null;
+  readonly bannerSvg: string | null;
+  readonly imageFileId: string | null;
+  readonly templateKey: string | null;
+  readonly templateVersion: number | null;
+  readonly status: TelegramPostStatus;
+  readonly dedupeKey: string;
+  readonly telegramMessageId: string | null;
+  readonly publishedAt: string | null;
+  readonly errorCode: string | null;
+  readonly attempts: number;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface PostClaimInput {
+  readonly userId: string;
+  readonly channelId: string;
+  readonly chatId: string;
+  readonly body: string;
+  readonly contentHash: string;
+  readonly dedupeKey: string;
+  readonly bannerSvg: string | null;
+  readonly imageFileId: string | null;
+  readonly templateKey: string | null;
+  readonly templateVersion: number | null;
+  readonly at: Date;
+}
+
+export type PostClaimResult =
+  | { readonly status: "claimed"; readonly post: TelegramPostRecord }
+  | { readonly status: "duplicate"; readonly post: TelegramPostRecord };

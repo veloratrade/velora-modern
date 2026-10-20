@@ -14,8 +14,46 @@
 // render as text, and a note containing a tag must not become markup.
 import { TELEGRAM_MAX_MESSAGE_CHARS } from "@velora/contracts";
 import type { JournalDraftView } from "../journal/journalApplicationService.js";
+import type { ChecklistCoverage, ChecklistItem, DailyChecklist, JournalStats } from "@velora/domain";
 
 export type Locale = "fa" | "en";
+
+/**
+ * What this runtime can actually do, as far as the copy is concerned. `media` is true only when a
+ * real `MediaInterpreter` is wired. On the Cloudflare Worker `apps/worker-cf/src/runtime.ts` installs
+ * `UnconfiguredMediaInterpreter`, whose every call throws `MediaInterpreterNotConfiguredError`, so
+ * advertising "or send a voice message" there is a promise the build cannot keep. Text journaling is
+ * unaffected either way. A `GEMINI_API_KEY` on the Worker does NOT imply this: no AI manager, relay or
+ * tesseract is constructed there, so the interpreter stays unconfigured regardless of the environment.
+ */
+export interface TelegramCopyOptions {
+  readonly media: boolean;
+  /**
+   * Whether channel-post publishing is wired in THIS deployment. Optional because most call sites ask
+   * for copy that does not care; `/help` and the menu are the two places that must not advertise a
+   * capability the runtime does not have, so they pass it explicitly.
+   */
+  readonly posts?: boolean;
+  /**
+   * Which agent tools THIS runtime can honour, read from the services rather than from a wish list.
+   * `undefined` means "nothing was checked", which renders the conservative answer: the free-text line
+   * says the two external tools are unavailable. Understating a capability costs a user one question they
+   * could have asked; overstating one costs them trust in everything else the help text says.
+   */
+  readonly tools?: {
+    readonly search: boolean;
+    readonly capture: boolean;
+    /**
+     * Whether a MODEL may extend a request into further steps. `/help` may only promise multi-step
+     * planning where a planner is actually wired, because a deployment without one answers the same
+     * sentence in exactly one step — and an advertised ceiling the runtime cannot reach is the kind of
+     * line this file exists to prevent.
+     */
+    readonly planner?: boolean | undefined;
+    /** The step ceiling, quoted from `MAX_AGENT_TOOL_STEPS` by the caller rather than restated here. */
+    readonly maxSteps?: number | undefined;
+  };
+}
 
 const FA = {
   menuTitle: "🏛 <b>ولورا — ژورنال معاملاتی</b>",
@@ -61,7 +99,8 @@ const FA = {
   linkFailPartner: "❌ انجام اتصال ممکن نشد. لطفاً دوباره تلاش کنید یا از طریق وب‌سایت ولورا اقدام کنید.",
 
   // ── Journal ───────────────────────────────────────────────────────────────
-  journalPrompt: "📝 معامله را با زبان خودتان بنویسید یا پیام صوتی بفرستید. مثال:\n«امروز XAUUSD خرید گرفتم، ورود ۲۶۵۰، استاپ ۲۶۴۴ و تارگت ۲۶۶۵»",
+  journalPrompt: (o: TelegramCopyOptions) =>
+    `📝 معامله را با زبان خودتان بنویسید${o.media ? " یا پیام صوتی/تصویری بفرستید" : ""}. مثال:\n«امروز XAUUSD خرید گرفتم، ورود ۲۶۵۰، استاپ ۲۶۴۴ و تارگت ۲۶۶۵»`,
   journalNoData:
     "🤔 از این پیام چیزی برای ثبت پیدا نکردم.\nنماد، جهت، ورود، خروج و حجم را ذکر کنید. مثال:\n«XAUUSD خرید، ورود ۲۶۵۰، خروج ۲۶۶۰، حجم ۰٫۵»",
   confirmTitle: "📋 <b>پیش‌نویس ژورنال</b>",
@@ -162,17 +201,49 @@ const FA = {
   unlinkNothing: "ℹ️ اتصالی برای قطع کردن وجود ندارد.",
 
   helpTitle: "❓ <b>راهنما</b>",
-  helpBody: [
+  helpBody: (o: TelegramCopyOptions) =>
+    [
     "/start — منوی اصلی",
-    "/journal — ثبت ژورنال جدید (متن یا پیام صوتی)",
+    `/journal — ثبت ژورنال جدید (متن${o.media ? " یا پیام صوتی/تصویری" : ""})`,
     "/last — آخرین معامله",
     "/history — تاریخچهٔ ژورنال",
     "/analyze — تحلیل ژورنال",
+    "/stats — آمار ساخته‌شده از رکوردهای ذخیره‌شده",
+    "/stats <today|yesterday|week|YYYY-MM-DD|jalali> — همان آمار برای یک بازه؛ تاریخ شمسی هم پذیرفته می‌شود",
+    "/checklist coverage — پوشش چک‌لیست در بازه (پیش‌فرض ۷ روز، تا ۶۰)",
+    "/checklist — چک‌لیست روزانه؛ با متن ثبت می‌شود و با گزارش بعدی ادغام می‌شود",
+    "/checklist <YYYY-MM-DD> — خواندن آن روز؛ با متن، نوشتن در همان روز",
+    "/checklist recent — پوشش چند روز اخیر",
+    "/trade <id> — جزئیات یک معامله و دکمهٔ حذف",
+    "/edit <id> <strategy|emotion|notes> <مقدار> — اصلاح برچسب/احساس/یادداشت",
     "/settings — وضعیت اتصال و کانال",
     "/link — اتصال حساب ولورا",
     "/unlink — قطع اتصال",
     "/channel — تعیین کانال ژورنال",
-  ].join("\n"),
+    // این بلوک فقط وقتی تبلیغ می‌شود که سرویس پست در این استقرار سیم‌کشی شده باشد؛ هر خط کاری را
+    // انجام می‌دهد. جست‌وجوی وب و گرفتن اسکرین‌شات چارت به‌جای سکوت، صریحاً «غیرقابل‌دسترس» اعلام
+    // می‌شوند تا کاربر با یک پاسخ ناقص روبه‌رو نشود.
+    ...(o.posts === true
+      ? [
+          "/post — پیش‌نویس پست کانال از داده‌های واقعی؛ انتشار فقط با تأیید شما",
+          "/post <قالب> <تاریخ> — مثال: /post velora.bias ۱۴۰۵-۰۷-۲۷",
+          "/template — فهرست قالب‌ها · /template save <نام> <متن> · /template delete <نام>",
+          "/channel list — کانال‌های ثبت‌شده و کانال فعال",
+          "/channel use <شناسه> — انتخاب کانال فعال از کانال‌های تأییدشده",
+          `نوشتن آزاد هم کار می‌کند: «آمار این هفته» یا «کارت بایاس دیروز را آماده کن».${
+            o.tools?.search === true ? " جست‌وجوی وب در دسترس است: «آخرین خبر X را پیدا کن»." : ""
+          }${o.tools?.capture === true ? " گرفتن تصویر چارت از میزبان‌های مورد تأیید ولورا در دسترس است." : ""}${
+            o.tools?.search === true && o.tools?.capture === true
+              ? ""
+              : ` ${[o.tools?.search === true ? null : "جست‌وجوی وب", o.tools?.capture === true ? null : "تصویر چارت"].filter((x) => x !== null).join(" و ")} در این runtime در دسترس ${o.tools?.search === true || o.tools?.capture === true ? "نیست" : "نیستند"}.`
+          }${
+            o.tools?.planner === true
+              ? ` هر جمله که جدول بشناسد یک‌بار و رایگان اجرا می‌شود؛ جمله‌ای که جدول نشناسد تا ${String(o.tools?.maxSteps ?? 0)} مرحلهٔ محدود برنامه‌ریزی می‌شود و نتیجه‌های میانی به مرحلهٔ بعد داده می‌شود. هر اثر جانبی همچنان دکمهٔ تأیید خود شما را می‌خواهد.`
+              : ""
+          }`,
+        ]
+      : []),
+    ].join("\n"),
 
   rateLimited: "⏳ تعداد درخواست‌های شما زیاد است. لطفاً کمی بعد تلاش کنید.",
   notLinkedAction: "🔐 برای این بخش باید حساب ولورا متصل باشد.",
@@ -180,6 +251,153 @@ const FA = {
   voiceNote: "🎙 پیام صوتی",
   screenshotNote: "🖼 تصویر چارت",
   alreadyAnswered: "ℹ️ پیش‌نویس جدیدی نیست؛ برای شروع دستور /journal را بفرستید.",
+
+  // ── journal maintenance surfaces (0036 round) ──
+  // Every string here is a real capability: each key below is reached by a command or a button that
+  // performs the work, so none of these lines promises an action the bot does not have.
+  btnStats: "📊 آمار",
+  btnChecklist: "✅ چک‌لیست روزانه",
+  btnPost: "📤 پست کانال",
+  statsTitle: "📊 آمار ژورنال",
+  statsEmpty: "هنوز معاملهٔ تأییدشده‌ای ثبت نشده که بتوانم از آن آمار بسازم.",
+  statsSampled: (n: number) => `⚠️ فقط ${n} معاملهٔ اخیر دیدم، نه همهٔ تاریخچه را؛ اعداد می‌توانند کم‌شده باشند.`,
+  statsFromData: "این اعداد از رکوردهای خودت حساب شده‌اند.",
+  statsClosedLabel: "بسته",
+  statsOpenLabel: "باز",
+  // A window is the user's OWN calendar day, resolved by the journal service through the profile
+  // timezone — so these labels name a period without ever implying the server's clock.
+  statsWindowToday: "امروز",
+  statsWindowYesterday: "دیروز",
+  statsWindowWeek: "۷ روز اخیر",
+  statsWindowLabel: "بازه",
+  statsEmptyWindow: (label: string) => `📭 در بازهٔ «${label}» رکورد تأییدشده‌ای نیست. برای همهٔ تاریخچه /stats را بدون پارامتر بفرستید.`,
+  statsBadWindow: (arg: string) => `⚠️ «${arg}» را به‌عنوان بازه نمی‌شناسم. گزینه‌ها: today · yesterday · week · ۱۴۰۵-۰۷-۲۷ · YYYY-MM-DD · all`,
+  // ── HONESTY ABOUT WHAT WAS AND WAS NOT READ (added by the correctness patch) ───────────────
+  // A sample is not a population and a bounded fetch is not a full one. Where a figure cannot be
+  // computed from what this build actually holds, the card prints `—` (the marker this file already
+  // uses for "not available") and says WHY, instead of printing a confident number over 200 rows or
+  // over a clamped fetch. No new category is introduced anywhere in these lines.
+  statsSampledWinRate: "نسبت برد از نمونهٔ ۲۰۰تایی حساب می‌شد و نسبتی از کل نیست؛ برای عدد درست، گزارش کامل را بگیرید.",
+  statsSampledProfitFactor: "ضریب سود از نمونهٔ ۲۰۰تایی به دست نمی‌آید؛ این دو مبلغ را می‌توانید از جمع نمونه بخوانید، نسبت را نه.",
+  statsSampledExtremes: "بهترین/بدترین از همین نمونه است؛ ممکن است معاملهٔ بهتری بیرون از ۲۰۰ ردیف اخیر باشد.",
+  coverageTruncated: (n: number) => `⚠️ بازه کامل خوانده نشد: ${String(n)} روز بررسی شدنی نبود. روزهای جدول معتبرند، ولی «بدون رکورد» برای آن ${String(n)} روز حکم نیست.`,
+  coverageRecords: "رکورد خوانده‌شده / روزهای بازه (سقف فروشگاه)",
+  statsWindowGarbage: (arg: string) => `⚠️ «${arg}» در هیچ دو تقویمی یک روز واقعی نیست. جلالی: j:1405-07-27 · میلادی: g:2026-10-19`,
+  statsWindowAmbiguous: (arg: string) => `⚠️ «${arg}» را نمی‌توانم از روی عدد تقویم بفهمم. تقویم را بنویسید: j: یا g:. تاریخ را حدس نمی‌زنم.`,
+  checklistWindowAmbiguous: (arg: string) => `⚠️ «${arg}» ممکن است جلالی یا میلادی باشد. j: یا g: را اولش بگذارید؛ روز را حدس نمی‌زنم.`,
+  checklistWindowGarbage: (arg: string) => `⚠️ «${arg}» یک روز واقعی نیست (ماه ۱ تا ۱۲ و روز موجود در همان ماه، با در نظر گرفتن سال کبیسه).`,
+  journalDateUnclear: (arg: string) => `⚠️ تاریخ «${arg}» را قطعی نخواندم؛ برای اینکه معامله روی روز اشتباه ثبت نشود، تقویم را مشخص کن: j:1405-07-27 یا g:2026-10-19.`,
+  // Coverage of the DAILY CHECKLIST — an aggregate of RECORDED states, nothing more. "unreviewed"
+  // means the row does not mention that item; it is not a broken rule. This build has no
+  // mistake/violation model (audited: none exists in the schema or domain), and the copy says so.
+  coverageTitle: "🗓 پوشش چک‌لیست",
+  coveragePeriod: (days: number, range: string) => `بازه: ${String(days)} روز · ${range}`,
+  coverageDaysReviewed: "روزهای دارای رکورد",
+  coverageComplete: "کامل (۱۱ از ۱۱ تأییدشده)",
+  coveragePartial: "ناتمام",
+  coverageNoRecord: "بدون رکورد",
+  coverageUnreviewedLabel: "بیشترین بررسی‌نشده",
+  coverageUnknownLabel: "«نمی‌دانم» ثبت‌شده",
+  coverageEmpty: "در این بازه هیچ چک‌لیستی ثبت نشده. این «بررسی‌نشده» است، نه نقض قاعده‌ای.",
+  coverageDaysBad: (arg: string) => `⚠️ «${arg}» عدد روز نیست. مثال: /checklist coverage 14 (۱ تا ۶۰)`,
+  checklistTitle: "✅ چک‌لیست معامله",
+  checklistIntro: "📝 آیتم‌هایی که بررسی کردی را بنویسید؛ هرچه ننویسید «بررسی‌نشده» می‌ماند.",
+  checklistExampleLabel: "نمونه — کپی کن و پر کن",
+  checklistSavedNew: "✅ چک‌لیست این روز برای اول‌بار ساخته شد.",
+  checklistSavedMerge: "✅ چک‌لیست به‌روزرسانی شد؛ آیتم‌های نام‌برده‌شده دست‌نخورده ماندند.",
+  checklistUnparsed: "⚠️ این کلیدها را نشناختم و ذخیره نکردم:",
+  checklistUnknownHint: "برای «ندارم» بنویسید none و برای «بررسی‌نشده» بنویسید ?.",
+  checklistNone: "—",
+  tradeDetailTitle: "🧾 معامله",
+  tradeEditHelp: (id: string) => `فیلدهای ژورنالینگ را این‌طور اصلاح کنید:\n/edit ${id} strategy <متن>\n/edit ${id} emotion <1 تا 5>\n/edit ${id} notes <متن>`,
+  tradeEditDone: "✏️ اصلاح شد.",
+  tradeDeleteAsk: "🗑 این معامله حذف (tombstone) شود؟ رکورد در ledger می‌ماند و در لیست‌ها دیده نمی‌شود.",
+  btnTradeDelete: "🗑 حذف معامله",
+  btnTradeEdit: "✏️ اصلاح یادداشت",
+  btnTradeDeleteYes: "بله، حذف کن",
+  btnTradeDeleteNo: "نه",
+  tradeDeleteDone: "🗑 معامله حذف شد (tombstone).",
+  tradeNotFound: "این معامله را پیدا نکردم یا متعلق به شما نیست.",
+  tradeStale: "⚠️ این معامله از وقتی دیدی تغییر کرده؛ دوباره /last یا /history را بزن.",
+  fieldsImmutable: "قیمت‌ها و اندازهٔ معامله قابل ویرایش نیست (ADR-002). باید معامله را حذف و دوباره ثبت کنید.",
+  editUsage: "استفاده: /edit <شناسه> <strategy|emotion|notes> <مقدار>",
+  checklistBadDate: "📅 تاریخ باید YYYY-MM-DD و یک روز واقعی باشد.",
+  checklistRecentTitle: "🗓 روزهای اخیر",
+  checklistEmptyDay: "برای این روز چیزی ثبت نشده؛ هر یازده آیتم بررسی‌نشده است.",
+  emotionPrompt: "🙂 هنگام این معامله چه حسی داشتی؟ (۱ آرام تا ۵ بسیار مضطرب)",
+  btnTradeEmotion: "🙂 ثبت احساس",
+  // ── قالب و پست آماده (0037/0038) ──
+  postNoService: "🚫 ساخت پست آماده در این استقرار فعال نیست.",
+  postUsage: "استفاده: /post [قالب] — مثال: /post velora.bias",
+  postPreviewTitle: "📋 پیش‌نویس پست برای کانال",
+  postNoChannel: "کانال فعالی نداری. با /channel کانالت را ببند و تأیید کن.",
+  postChannelNotOurs: "این کانال را نمی‌شناسم یا متعلق به شما نیست.",
+  postGaps: (n: number) => `⚠️ ${n} فیلد ثبت‌نشده دارد؛ همان‌طور که هست نمایش داده می‌شود.`,
+  postTruncated: "✂️ متن طولانی بود و بریده شد.",
+  postUnknownFields: (names: readonly string[]) => `قالب این فیلدها را نمی‌شناسد و آن‌ها را حذف نمی‌کنم: ${names.join("، ")}`,
+  postUnsupportedExpr: "محاسبه در قالب مجاز نیست؛ عبارت را عیناً نگه داشتم.",
+  postMarkupDropped: "⚠️ برای رعایت محدودیت طول، قالب‌بندی حذف شد.",
+  btnPublish: "✅ انتشار در کانال",
+  btnDismiss: "لغو",
+  postPublished: (messageId: string) => `✅ منتشر شد (پیام ${messageId}).`,
+  postAlreadyPublished: "این پست قبلاً منتشر شده؛ دوباره ارسال نمی‌کنم.",
+  postInFlight: "⏳ این پست در حال ارسال است؛ برای جلوگیری از انتشار تکراری صبر کنید.",
+  postNotApproved: "متن پس از پیش‌نمایش تغییر کرده — باید دوباره تأیید شود.",
+  postBlocked: (reason: string) => `⛔ انتشار مسدود است: ${reason}`,
+  postFailed: (code: string, retryAfter: number | null) =>
+    retryAfter === null ? `❌ ارسال نشد (${code}).` : `❌ ارسال نشد (${code}). حدود ${retryAfter} ثانیه بعد دوباره تلاش کنید.`,
+  postNeedsApproval: "برای انتشار، دکمهٔ «انتشار در کانال» را بزن — این یعنی همین متن به همین کانال.",
+  postDismissed: "لغو شد؛ چیزی ارسال نشد.",
+  postReused: "این همان پیش‌نویس قبلی است (تازیده نشد).",
+  postBannerPreview: (shown: number, dropped: number) =>
+    `بنر آماده شد: ${shown} ردیف${dropped > 0 ? `، ${dropped} ردیف جا افتاد` : ""}. تصویر در این پیام نیست؛ هنگام انتشار ضمیمه می‌شود.`,
+  postNoBanner: "بنری ساخته نشد؛ فقط متن ارسال می‌شود.",
+  postBannerImage: "پیش‌نمایش بنر",
+  postBannerNotRendered: "بنر متنی است: این محیط تصویرساز ندارد، پس پیش‌نمایش/ارسال تصویر ساخته نشد.",
+  searchHeader: (count: number, provider: string, latency: string) =>
+    `جست‌وجوی وب — ${count} نتیجه از ${provider} (${latency}). این‌ها منبع‌های بیرونی‌اند؛ ولورا آن‌ها را راستی‌آزمایی نکرده است.`,
+  searchNoDate: "تاریخ: نامشخص",
+  searchNoResults: "جست‌وجوی وب نتیجه‌ای نداشت.",
+  searchFooter: "متن نتیجه‌ها عیناً از سرویس جست‌وجو است، نه تحلیل ولورا و نه توصیهٔ معاملاتی.",
+  chartCaptured: (source: string) => `تصویر چارت گرفته شد — ${source}`,
+  chartObserved: (observed: string, missing: string) => `خوانده‌شده از تصویر: ${observed}. ${missing}`,
+  chartMissing: (fields: string) => `خوانده‌نشده: ${fields}.`,
+  chartNothingMissing: "فیلد دیگری در تصویر نبود.",
+  chartNothingReadable: "از تصویر چیزی به‌طور قطعی خوانده نشد؛ هیچ مقداری حدس زده نمی‌شود.",
+  chartNotStored: "هیچ چیزی در ژورنال ثبت نشد: خواندنِ تصویر، تأییدِ کاربر نیست.",
+  templateUsage: "دستورها: /template (لیست) · /template save <نام> <متن> · /template delete <نام>",
+  templateListTitle: "🧩 قالب‌های شما",
+  templateEmpty: "قالب شخصی نداری؛ قالب‌های آماده: velora.bias، velora.setup، velora.weekly",
+  templateSaved: (name: string, version: number) => `✅ قالب «${name}» نسخهٔ ${version} ذخیره شد.`,
+  templateConflict: "⚠️ این قالب هم‌زمان ویرایش شده؛ فهرست را دوباره ببینید تا نسخهٔ فعلی را ببینید.",
+  templateExists: "این نام قبلاً ذخیره شده. برای ویرایش، اول /template را ببینید و شمارهٔ نسخه را بدهید.",
+  templateDeleted: (name: string) => `🗑 قالب «${name}» بایگانی شد (نسخه‌ها می‌مانند).`,
+  templateNotFound: "چنین قالبی نداری.",
+  templateEmptyBody: "متن قالب خالی است.",
+  templateTooLong: (limit: number) => `قالب از ${limit} کاراکتر بلندتر است؛ ذخیره نشد.`,
+  templateUnknown: (names: readonly string[]) => `این‌ها را نمی‌شناسم (در متن می‌مانند): ${names.join("، ")}`,
+  templateExpr: "«{{ }}» فقط اسم فیلد است؛ فرمول و کد پشتیبانی نمی‌شود.",
+  channelListTitle: "📡 کانال‌های ثبت‌شده",
+  channelUseUsage: "استفاده: /channel use <شناسهٔ کانال> — شناسه را از /channel بگیرید.",
+  channelActivated: (chatId: string) => `✅ کانال ${chatId} فعال شد؛ کانال قبلی در حالت انتظار است.`,
+  channelStandbyNow: "کانال فعال قبلی به حالت انتظار رفت (تأییدشده باقی می‌ماند).",
+  channelNotVerified: "این کانال تأییدشده نیست یا اجازهٔ ارسال ندارد؛ اول /channel آن را تأیید کنید.",
+  channelStatusActive: "فعال",
+  channelStatusStandby: "در انتظار",
+  agentBlocked: (reason: string) => `این در دسترس نیست: ${reason}. وابستگی لازم در این runtime نصب/پیکربندی نشده است.`,
+  agentAmbiguous: (question: string) => `برای ادامه: ${question}`,
+  agentDid: (tool: string) => `انجام شد: ${tool}`,
+  // سه جمله‌ای که حلقهٔ چندمرحله‌ای لازم دارد. «کامل نشد» دلیل نگه‌داشتن را می‌گوید و تعداد مراحلی که
+  // واقعاً اجرا شده — نتیجه‌های بالاتر در این حالت ناقص‌اند و گفتنِ ناقص‌بودن وظیفهٔ ماست، نه کاربر.
+  agentStopped: (reason: string, steps: number) =>
+    steps > 0
+      ? `این درخواست کامل نشد (${reason}). ${String(steps)} مرحله اجرا شد و نتیجه‌هایشان بالا هست.`
+      : `این درخواست اجرا نشد (${reason}).`,
+  agentNeedsApproval: (tool: string) =>
+    `«${tool}» را خودکار انجام نمی‌دهم: به دکمهٔ تأیید شما نیاز دارد. اول پیش‌نویس را ببینید، سپس تأیید کنید.`,
+  agentUnverifiedTarget: (arg: string) =>
+    `مرحلهٔ بعد نشانی/شناسه‌ای خواست («${arg}») که در این گفت‌وگو و در نتیجه‌های ابزارها دیده نشده بود، پس اجرا نشد. مقصد را خودتان بنویسید.`,
+  mediaUnavailable: "در این runtime پردازش رسانهٔ زنده فعال نیست؛ متن به‌عنوان یادداشت ثبت می‌شود.",
 };
 
 const EN: typeof FA = {
@@ -224,7 +442,8 @@ const EN: typeof FA = {
   linkFailAccountTaken: "❌ Your Velora account is already linked to a different Telegram account. Disconnect the current one first.",
   linkFailPartner: "❌ The connection could not be completed. Please try again or use the Velora website.",
 
-  journalPrompt: "📝 Describe your trade in your own words, or send a voice message. Example:\n“XAUUSD buy, entry 2650, stop 2644, target 2665”",
+  journalPrompt: (o: TelegramCopyOptions) =>
+    `📝 Describe your trade in your own words${o.media ? ", or send a voice message" : ""}. Example:\n“XAUUSD buy, entry 2650, stop 2644, target 2665”`,
   journalNoData:
     "🤔 I could not find anything to record in that message.\nInclude symbol, direction, entry, exit and volume. Example:\n“XAUUSD buy, entry 2650, exit 2660, volume 0.5”",
   confirmTitle: "📋 <b>Journal draft</b>",
@@ -322,17 +541,48 @@ const EN: typeof FA = {
   unlinkNothing: "ℹ️ There is no connection to remove.",
 
   helpTitle: "❓ <b>Help</b>",
-  helpBody: [
+  helpBody: (o: TelegramCopyOptions) =>
+    [
     "/start — main menu",
-    "/journal — record a new entry (text or voice)",
+    `/journal — record a new entry (text${o.media ? " or voice/image" : ""})`,
     "/last — last trade",
     "/history — journal history",
     "/analyze — analyze the journal",
+    "/stats — statistics computed from your stored records",
+    "/stats <today|yesterday|week|YYYY-MM-DD|jalali> — the same numbers for one period (Jalali accepted)",
+    "/checklist coverage — checklist coverage for a period (default 7 days, up to 60)",
+    "/checklist — daily checklist; with text it is stored and MERGED into that day",
+    "/checklist <YYYY-MM-DD> — read that day; with text, write that day",
+    "/checklist recent — coverage of the last days",
+    "/trade <id> — one trade with its delete action",
+    "/edit <id> <strategy|emotion|notes> <value> — fix a tag, emotion or note",
     "/settings — connection and channel",
     "/link — connect a Velora account",
     "/unlink — disconnect",
     "/channel — set the journal channel",
-  ].join("\n"),
+    // Mirrors the Farsi block: lines exist only for what this deployment can do, and the two blocked
+    // capabilities are named as absent rather than left for the user to discover by a non-answer.
+    ...(o.posts === true
+      ? [
+          "/post — draft a channel post from recorded data; it is published only when you confirm",
+          "/post <template> <date> — e.g. /post velora.bias 2026-10-19",
+          "/template — list · /template save <name> <text> · /template delete <name>",
+          "/channel list — your registered channels and which one is active",
+          "/channel use <id> — pick the active channel among the verified ones",
+          `Free text works too: “stats for this week” or “prepare yesterday’s bias card” are handled as commands.${
+            o.tools?.search === true ? " Web research is available: “find the latest news on X”." : ""
+          }${o.tools?.capture === true ? " Chart capture is available for Velora's approved chart hosts." : ""}${
+            o.tools?.search === true && o.tools?.capture === true
+              ? ""
+              : ` ${[o.tools?.search === true ? null : "Web search", o.tools?.capture === true ? null : "chart capture"].filter((x) => x !== null).join(" and ")} ${[o.tools?.search === true ? null : "chart capture", o.tools?.capture === true ? null : "web search"].filter((x) => x !== null).length > 1 ? "are" : "is"} not available in this runtime.`
+          }${
+            o.tools?.planner === true
+              ? ` A sentence the table recognises runs once, for free. One it does not may be planned in up to ${String(o.tools?.maxSteps ?? 0)} bounded steps, each fed by the results before it. Every side effect still needs your own approval button.`
+              : ""
+          }`,
+        ]
+      : []),
+    ].join("\n"),
 
   rateLimited: "⏳ Too many requests. Please try again shortly.",
   notLinkedAction: "🔐 This requires a connected Velora account.",
@@ -340,7 +590,147 @@ const EN: typeof FA = {
   voiceNote: "🎙 Voice message",
   screenshotNote: "🖼 Chart image",
   alreadyAnswered: "ℹ️ No draft is open; send /journal to start.",
+
+  // ── journal maintenance surfaces (0036 round) — English twin of the block above ──
+  btnStats: "📊 Statistics",
+  btnChecklist: "✅ Daily checklist",
+  btnPost: "📤 Channel post",
+  statsTitle: "📊 Journal statistics",
+  statsEmpty: "There are no confirmed trades yet for me to build statistics from.",
+  statsSampled: (n: number) => `⚠️ I saw only the ${n} most recent trades, not the whole history; these totals can be short.`,
+  statsFromData: "These numbers are computed from your own records.",
+  statsClosedLabel: "closed",
+  statsOpenLabel: "open",
+  statsWindowToday: "today",
+  statsWindowYesterday: "yesterday",
+  statsWindowWeek: "last 7 days",
+  statsWindowLabel: "Window",
+  statsEmptyWindow: (label: string) => `📭 No confirmed records in "${label}". Send /stats with no argument for the whole history.`,
+  statsBadWindow: (arg: string) => `⚠️ I don't read "${arg}" as a window. Options: today · yesterday · week · 1405-07-27 (Jalali) · YYYY-MM-DD · all`,
+  coverageTruncated: (n: number) => `⚠️ This period was not read whole: ${String(n)} day(s) could not be checked. The days in the table stand; 'no record' is not a verdict for those ${String(n)}.`,
+  coverageRecords: "records read / days in period (store bound)",
+  statsSampledWinRate: "Win rate would need every trade; this was a 200-row sample, so it is not shown. Take a full export for the real ratio.",
+  statsSampledProfitFactor: "Profit factor is not computable from a sample. Read the summed amounts, not a ratio built on them.",
+  statsSampledExtremes: "Best/worst come from this sample; a better trade may sit outside the newest 200 rows.",
+  statsWindowGarbage: (arg: string) => `⚠️ \"${arg}\" is not a real day in either calendar. Jalali: j:1405-07-27 · Gregorian: g:2026-10-19`,
+  statsWindowAmbiguous: (arg: string) => `⚠️ I cannot tell which calendar \"${arg}\" is written in. Name it: j: or g:. I will not guess a date.`,
+  checklistWindowAmbiguous: (arg: string) => `⚠️ \"${arg}\" could be Jalali or Gregorian. Put j: or g: in front of it; I will not guess the day.`,
+  checklistWindowGarbage: (arg: string) => `⚠️ \"${arg}\" is not a real day (month 1-12, and a day that exists in that month, leap years included).`,
+  journalDateUnclear: (arg: string) => `⚠️ I could not read the date \"${arg}\" with certainty. To keep this trade off the wrong day, name the calendar: j:1405-07-27 or g:2026-10-19.`,
+  coverageTitle: "🗓 Checklist coverage",
+  coveragePeriod: (days: number, range: string) => `Period: ${String(days)} days · ${range}`,
+  coverageDaysReviewed: "days with a record",
+  coverageComplete: "complete (11 of 11 confirmed)",
+  coveragePartial: "partial",
+  coverageNoRecord: "no record",
+  coverageUnreviewedLabel: "left unreviewed most often",
+  coverageUnknownLabel: "recorded as \"I don't know\"",
+  coverageEmpty: "No checklist was filed in this period. That is unreviewed, not a broken rule.",
+  coverageDaysBad: (arg: string) => `⚠️ "${arg}" is not a number of days. Example: /checklist coverage 14 (1 to 60)`,
+  checklistTitle: "✅ Trade checklist",
+  checklistIntro: "📝 Write the items you actually reviewed; anything you leave out stays unreviewed.",
+  checklistExampleLabel: "Example — copy and fill it in",
+  checklistSavedNew: "✅ Checklist created for that day.",
+  checklistSavedMerge: "✅ Checklist updated; items you did not name were left as they were.",
+  checklistUnparsed: "⚠️ I did not recognise these keys and did not store them:",
+  checklistUnknownHint: 'Write "none" for "I checked, there was nothing" and "?" for "not reviewed".',
+  checklistNone: "—",
+  tradeDetailTitle: "🧾 Trade",
+  tradeEditHelp: (id: string) => `Correct a journaling field like this:\n/edit ${id} strategy <text>\n/edit ${id} emotion <1 to 5>\n/edit ${id} notes <text>`,
+  tradeEditDone: "✏️ Updated.",
+  tradeDeleteAsk: "🗑 Delete this trade (tombstone)? The record stays in the ledger but leaves every list.",
+  btnTradeDelete: "🗑 Delete trade",
+  btnTradeEdit: "✏️ Edit notes",
+  btnTradeDeleteYes: "Yes, delete",
+  btnTradeDeleteNo: "Cancel",
+  tradeDeleteDone: "🗑 Trade deleted (tombstoned).",
+  tradeNotFound: "I could not find that trade, or it is not yours.",
+  tradeStale: "⚠️ That trade changed since you saw it; run /last or /history again.",
+  fieldsImmutable: "Prices and size cannot be edited (ADR-002). Delete the trade and create it again.",
+  editUsage: "Usage: /edit <id> <strategy|emotion|notes> <value>",
+  checklistBadDate: "📅 A date must be YYYY-MM-DD and a real calendar day.",
+  checklistRecentTitle: "🗓 Recent days",
+  checklistEmptyDay: "Nothing was filed for that day; all eleven items are unreviewed.",
+  emotionPrompt: "🙂 How did you feel during this trade? (1 calm to 5 very anxious)",
+  btnTradeEmotion: "🙂 Log emotion",
+  // ── prepared posts and templates (0037/0038) ──
+  postNoService: "🚫 Prepared posts are not enabled in this deployment.",
+  postUsage: "Usage: /post [template] — e.g. /post velora.bias",
+  postPreviewTitle: "📋 Draft post for your channel",
+  postNoChannel: "You have no active channel. Bind and verify one with /channel first.",
+  postChannelNotOurs: "I do not know that channel, or it is not yours.",
+  postGaps: (n: number) => `⚠️ ${n} field(s) were never recorded; they stay shown as such.`,
+  postTruncated: "✂️ The text was too long and has been cut.",
+  postUnknownFields: (names: readonly string[]) => `The template uses fields I do not know; I left them in place: ${names.join(", ")}`,
+  postUnsupportedExpr: "Templates cannot compute. I kept the expression as plain text.",
+  postMarkupDropped: "⚠️ Formatting was dropped to respect the length limit.",
+  btnPublish: "✅ Publish to the channel",
+  btnDismiss: "Cancel",
+  postPublished: (messageId: string) => `✅ Published (message ${messageId}).`,
+  postAlreadyPublished: "That post is already published; I will not send it twice.",
+  postInFlight: "⏳ That post is being sent right now. Waiting avoids a duplicate publication.",
+  postNotApproved: "The text changed after the preview — it has to be approved again.",
+  postBlocked: (reason: string) => `⛔ Publishing is blocked: ${reason}`,
+  postFailed: (code: string, retryAfter: number | null) =>
+    retryAfter === null ? `❌ Send failed (${code}).` : `❌ Send failed (${code}). Try again in about ${retryAfter} seconds.`,
+  postNeedsApproval: "To publish, press “Publish to the channel” — that means exactly this text to exactly this channel.",
+  postDismissed: "Dismissed; nothing was sent.",
+  postReused: "This is the same draft as before (nothing was re-created).",
+  postBannerPreview: (shown: number, dropped: number) =>
+    `Banner ready: ${shown} row(s)${dropped > 0 ? `, ${dropped} dropped` : ""}. The image is not in this message; it is attached when the post is published.`,
+  postNoBanner: "No banner was composed; only the text will be posted.",
+  postBannerImage: "Banner preview",
+  postBannerNotRendered: "The banner stays text: this runtime has no rasterizer, so no image was previewed or sent.",
+  searchHeader: (count: number, provider: string, latency: string) =>
+    `Web search — ${count} results from ${provider} (${latency}). These are external sources; Velora has not verified them.`,
+  searchNoDate: "date: not given",
+  searchNoResults: "The web search returned nothing.",
+  searchFooter: "The result text is verbatim from the search service — not Velora's analysis and not trade advice.",
+  chartCaptured: (source: string) => `Chart captured — ${source}`,
+  chartObserved: (observed: string, missing: string) => `Read from the image: ${observed}. ${missing}`,
+  chartMissing: (fields: string) => `Not read: ${fields}.`,
+  chartNothingMissing: "No other field was visible.",
+  chartNothingReadable: "Nothing could be read from the image with confidence; no value is guessed.",
+  chartNotStored: "Nothing was written to the journal: a model reading an image is not a confirmation from you.",
+  templateUsage: "Commands: /template (list) · /template save <name> <text> · /template delete <name>",
+  templateListTitle: "🧩 Your templates",
+  templateEmpty: "No personal templates. Built-in cards: velora.bias, velora.setup, velora.weekly",
+  templateSaved: (name: string, version: number) => `✅ Saved “${name}” as version ${version}.`,
+  templateConflict: "⚠️ That template changed while you were editing. Run /template again to see the current version.",
+  templateExists: "That name is already saved. Run /template first, then pass the version you saw.",
+  templateDeleted: (name: string) => `🗑 Template “${name}” archived (its versions are kept).`,
+  templateNotFound: "You do not have a template by that name.",
+  templateEmptyBody: "The template body is empty.",
+  templateTooLong: (limit: number) => `Templates are limited to ${limit} characters; nothing was saved.`,
+  templateUnknown: (names: readonly string[]) => `Unknown fields (kept in the text, not removed): ${names.join(", ")}`,
+  templateExpr: "A {{placeholder}} is a field name only. Formulas and code are not supported.",
+  channelListTitle: "📡 Registered channels",
+  channelUseUsage: "Usage: /channel use <chat id> — take the id from /channel.",
+  channelActivated: (chatId: string) => `✅ Channel ${chatId} is now active; the previous one is on standby.`,
+  channelStandbyNow: "The previously active channel moved to standby (it stays verified).",
+  channelNotVerified: "That channel is not verified or cannot post; verify it with /channel first.",
+  channelStatusActive: "active",
+  channelStatusStandby: "standby",
+  agentBlocked: (reason: string) => `Not available: ${reason}. The dependency it needs is not installed or configured in this runtime.`,
+  agentAmbiguous: (question: string) => `To continue: ${question}`,
+  agentDid: (tool: string) => `Done: ${tool}`,
+  // The three sentences a multi-step loop needs. "Did not finish" names WHY the run stopped and how many
+  // steps really ran: the results above are partial in that case, and saying so is our job, not the
+  // user's inference.
+  agentStopped: (reason: string, steps: number) =>
+    steps > 0
+      ? `This request did not finish (${reason}). ${String(steps)} step(s) ran and their results are above.`
+      : `This request was not run (${reason}).`,
+  agentNeedsApproval: (tool: string) =>
+    `I do not run “${tool}” on my own: it needs your approval button. Look at the draft first, then confirm.`,
+  agentUnverifiedTarget: (arg: string) =>
+    `The next step asked for a “${arg}” that never appeared in this conversation or in a tool result, so it was not run. Please give the target yourself.`,
+  mediaUnavailable: "Live media processing is not enabled in this runtime; the text is recorded as a note.",
 };
+
+/** The copy object's type. Both locales are this shape — `EN` is annotated `typeof FA`, so a key added
+ * for one language and not the other is a compile error rather than a runtime hole in one locale. */
+export type TelegramCopy = typeof FA;
 
 export const COPY: Readonly<Record<Locale, typeof FA>> = { fa: FA, en: EN };
 
@@ -430,4 +820,126 @@ export function renderTrade(copy: typeof FA, trade: Record<string, unknown>): st
   if (notes !== null) rows.push(`${copy.labelNotes}: <i>${esc(notes.length > 400 ? `${notes.slice(0, 400)}…` : notes)}</i>`);
   rows.push(`${copy.labelTime}: ${esc((value("openTime") ?? "").slice(0, 16).replace("T", " "))}`);
   return rows.join("\n");
+}
+
+/** "0.6000" -> "60.00", "-0.5" -> "-50.00", "0" -> "0.00". String-only: no float in the path. */
+function shiftPercent(value: string): string {
+  const sign = value.startsWith("-") ? "-" : "";
+  const digits = value.startsWith("-") || value.startsWith("+") ? value.slice(1) : value;
+  const [whole = "0", frac = ""] = digits.split(".");
+  const padded = `${whole}${frac.padEnd(2, "0")}`;
+  const moved = `${padded.slice(0, Math.max(0, whole.length + 2)) || "0"}.${padded.slice(Math.max(0, whole.length + 2)).padEnd(2, "0").slice(0, 2)}`;
+  return `${sign}${moved}`;
+}
+
+/**
+ * Statistics for the chat, built ONLY from the numbers the domain derived. A percent is formatted
+ * here by shifting the decimal point of the exact decimal string `computeSummary` produced — never
+ * through a float — so a win rate cannot arrive in the chat as a different fact.
+ *
+ * Nothing is added to these figures. `flags` is the domain's machine-readable statement of what could
+ * NOT be computed (e.g. "NO_CLOSED_TRADES"), and it is shown rather than turned into a friendly zero,
+ * because a user deciding whether to trust a profit factor needs to know it had no losses to divide by.
+ */
+/**
+ * The stats card. `sampledOf` is the TOTAL number of rows when the store could not read them all
+ * (it is `null` when every row was read), and it changes WHAT MAY BE PRINTED, not just the footer:
+ *
+ *   • a SUM over the newest 200 rows is a LOWER BOUND on the real sum — a legitimate, true statement;
+ *   • a RATIO over that same sample (win rate, profit factor) is not a lower bound of anything. It is
+ *     a different number from the population's, with no stated error bar, and next to a caveat line
+ *     it still reads as a fact about the account. So both ratio lines print `—` — the marker this
+ *     file already uses for "not available", the same one the fee line uses — followed by the reason.
+ *
+ * Nothing here is computed differently; only what is DISPLAYED changes, and only while `sampledOf`
+ * is non-null. An unsampled card renders exactly as it did before this patch (pinned by a test).
+ */
+export function renderStats(copy: typeof FA, stats: JournalStats, sampledOf: number | null): string {
+  const sampled = sampledOf !== null;
+  const line = (label: string, value: string): string => `${label}: ${value}`;
+  const pct = (value: string | null): string => (value === null ? copy.checklistNone : `${shiftPercent(value)} %`);
+  const rows = [
+    line("🪙", `${String(stats.tradeCount)} · ${copy.statsClosedLabel} ${String(stats.closedCount)} · ${copy.statsOpenLabel} ${String(stats.openCount)}`),
+    line("✅/❌/➖", `${String(stats.wins)} / ${String(stats.losses)} / ${String(stats.breakeven)}`),
+    // A sample's COUNT of wins is still a count of real wins; its RATE is not a rate of the account.
+    sampled
+      ? line("📈", `${copy.checklistNone} — ${copy.statsSampledWinRate}`)
+      : line("📈", `${pct(stats.winRate)}`),
+    line("💰", stats.totalPnl),
+    line("🧾", `${stats.totalFees} (${stats.averageFee})`),
+    sampled
+      ? line("⚖️", `${copy.checklistNone} — ${copy.statsSampledProfitFactor}`)
+      : line("⚖️", stats.profitFactor ?? copy.checklistNone),
+    line("R", `${stats.averageR} · ${stats.averageWin} / ${stats.averageLoss}`),
+    sampled
+      ? line("↕️", `${stats.bestTrade} / ${stats.worstTrade} — ${copy.statsSampledExtremes}`)
+      : line("↕️", `${stats.bestTrade} / ${stats.worstTrade}`),
+  ];
+  if (sampledOf !== null) rows.push(copy.statsSampled(sampledOf));
+  // The fee/PnL relation is a business rule this repository has not decided, so the card says so
+  // instead of letting "realized" and "fees" sitting next to each other imply one.
+  rows.push(`ℹ️ ${stats.feesCombinedWithPnl ? "fees included in P/L" : "fees NOT included in P/L"}`);
+  for (const flag of stats.flags) rows.push(`• ${flag}`);
+  rows.push("");
+  rows.push(copy.statsFromData);
+  return rows.join("\n");
+}
+
+/**
+ * One day's review, read back exactly as it was stored. The difference between "I checked and there
+ * was nothing" and "I did not look" is the entire value of this card, so both get their own glyph and
+ * neither is ever rendered as the other.
+ */
+export function renderChecklist(
+  copy: typeof FA,
+  list: DailyChecklist,
+  coverage: ChecklistCoverage,
+  itemLabels: readonly string[],
+): string {
+  const glyph = (state: string): string => (state === "CONFIRMED" ? "✅" : state === "UNKNOWN" ? "⬜" : "➖");
+  const rows = itemLabels.map((label) => {
+    const entry = list.values[label as ChecklistItem];
+    if (entry === undefined) return `➖ ${label}: ${copy.checklistNone}`;
+    return `${glyph(entry.state)} ${label}: ${entry.value ?? copy.checklistNone}`;
+  });
+  if (list.notes !== null) rows.push(`🗒 ${list.notes}`);
+  const sl = list.values.stopLoss.value === null ? "" : ` · SL ${list.values.stopLoss.value}`;
+  const risk = list.values.risk.value === null ? "" : ` · ${list.values.risk.value}${list.riskUnit}`;
+  rows.push(
+    `✅ ${String(coverage.confirmed)} · ⬜ ${String(coverage.unknown)} · ➖ ${String(coverage.unreviewed)}/${String(coverage.total)}${sl}${risk}`,
+  );
+  return rows.join("\n");
+}
+
+/**
+ * The example block of the checklist form. THE KEYS ARE THE DOMAIN'S OWN — `CHECKLIST_PROMPT_LINES`
+ * is generated from the same alias table `parseChecklistText` reads, so a user who copies this template
+ * cannot be handed a key that will not parse back. A test asserts every line below round-trips, which
+ * is the only reason a prompt like this can be trusted to still work next month.
+ */
+export const CHECKLIST_EXAMPLE_VALUES: Readonly<Record<string, string>> = {
+  bias: "bullish",
+  leg: "bullish",
+  location: "premium",
+  h4: "fvg",
+  h1: "none",
+  m15: "none",
+  cisd: "yes",
+  smt: "no",
+  macro: "09:30",
+  sl: "2655",
+  risk: "0.5%",
+} as const;
+
+export function renderChecklistPrompt(copy: typeof FA, promptLines: readonly string[]): string {
+  const example = promptLines
+    .map((line) => {
+      const key = line.replace(/:\s*$/, "");
+      const value = CHECKLIST_EXAMPLE_VALUES[key];
+      return value === undefined ? line.trimEnd() : `${key}: ${value}`;
+    })
+    .join("\n");
+  // The example block only: the hint line below the block would read as prose the parser has to
+  // ignore, and a copy of the form must parse cleanly on its own.
+  return `${copy.checklistIntro}\n\n${copy.checklistExampleLabel}\n${example}`;
 }

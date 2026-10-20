@@ -232,14 +232,31 @@ export const CALLBACK_ACTIONS = [
   "history_more", // paginate history — subject is the page number
   "channel_test", // send a test post to the bound channel
   "connect", // re-show the secure-connection instructions
+  // ── added with the journal maintenance surfaces (0036 round) ──
+  // `trade` subjects are trade ids; `trade_edit` subjects are `<id>-<field>`; `trade_delete`
+  // subjects carry the ADR-002 concurrency token as `<id>-v<version>` so the confirm button is a
+  // compare-and-set, not a blind delete. All three stay inside the same 48-char grammar, and an
+  // unknown subject is still simply not found — the vocabulary is a closed set on both sides.
+  "trade", // one trade's details plus the actions this build allows on it
+  "trade_arm", // ask "really delete?" — the yes button carries the version, this one does not
+  "trade_edit", // apply one journaling-field edit (strategy | emotion | notes only)
+  "trade_delete", // tombstone a trade at the version the user was shown
+  // ── added with prepared channel posts (0037) ──
+  // Both subjects are POST IDS, never template names or chat ids: a callback payload is ASCII-only
+  // by grammar, so a Persian template name cannot travel in one — and a destination must never be
+  // carried in a button a user could edit, which is why the post row (and the channel it already
+  // records) is what the handler reads. `post_no` dismisses the preview; it writes nothing.
+  "post_pub", // publish the APPROVED preview — the consent tap for this exact content
+  "post_no", // dismiss the preview; nothing was and nothing will be sent
 ] as const;
 export type CallbackAction = (typeof CALLBACK_ACTIONS)[number];
 
 /** Destinations a `menu:` callback may name. A closed set — never free text. */
-export const MENU_TARGETS = ["journal", "last", "history", "analyze", "settings"] as const;
+export const MENU_TARGETS = ["journal", "last", "history", "analyze", "settings", "stats", "checklist", "post"] as const;
 export type MenuTarget = (typeof MENU_TARGETS)[number];
 
-const CALLBACK_RE = /^(confirm|cancel|edit|menu|unlink|history_more|channel_test|connect):([A-Za-z0-9_-]{1,48})$/;
+const CALLBACK_RE =
+  /^(confirm|cancel|edit|menu|unlink|history_more|channel_test|connect|trade|trade_arm|trade_edit|trade_delete|post_pub|post_no):([A-Za-z0-9_-]{1,48})$/;
 
 export function parseCallbackData(data: string): { action: CallbackAction; subject: string } | null {
   const match = CALLBACK_RE.exec(data.trim());
