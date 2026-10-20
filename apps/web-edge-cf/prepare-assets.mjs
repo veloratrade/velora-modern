@@ -8,7 +8,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const web = join(here, "..", "..", "web");
+// `here` is apps/web-edge-cf, so the web app is its SIBLING: apps/web. The previous form climbed two
+// levels and resolved to <repo>/web, which never exists — so this script could only ever exit 1 and
+// the edge could never be rebuilt from the repository (found 2026-10-20 while staging the assets).
+const web = join(here, "..", "web");
 const out = join(here, "dist-assets");
 
 const nextStatic = join(web, ".next", "static");

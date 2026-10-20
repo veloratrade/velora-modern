@@ -114,3 +114,63 @@ test("a malformed origin is a loud 503, not a silent pass-through", async () => 
   const body = (await res.json()) as { message: string };
   assert.match(body.message, /edge_misconfigured/);
 });
+
+// ── a dead origin is not a missing route ───────────────────────────────────
+//
+// Observed live on 2026-10-20: every `/api/*` call, and the login POST itself, came back as
+// `{"status":"error","code":404,"message":"Application not found","request_id":…}` — the fronting
+// platform's envelope for a service that is not running. Passed through unchanged it reads as "this
+// route does not exist", which is the wrong diagnosis and hides the actual blocker (no API origin).
+test("the host's 'Application not found' envelope becomes a 503 that names the real cause", async () => {
+  const platformBody = JSON.stringify({
+    status: "error",
+    code: 404,
+    message: "Application not found",
+    request_id: "abc123",
+  });
+  const fetchImpl = async () =>
+    new Response(platformBody, { status: 404, headers: { "content-type": "application/json" } });
+
+  const res = await routeEdgeRequest(
+    new Request("https://staging.example/api/v1/auth/login", { method: "POST", body: "{}" }),
+    env,
+    { assets: makeAssets(false), fetch: fetchImpl },
+  );
+  assert.equal(res.status, 503);
+  assert.equal(res.headers.get("x-velora-edge"), "origin-unavailable");
+  const body = (await res.json()) as { error: string; message: string };
+  assert.equal(body.error, "edge_app_origin_unavailable");
+  assert.ok(body.message.includes("not running"), "the sentence says what is wrong");
+});
+
+test("the app's OWN 404 keeps its status, its body and its headers", async () => {
+  // The distinction is the whole point: a route the app does not have is the app's answer, and the
+  // edge must not launder it into an infrastructure error.
+  const appBody = JSON.stringify({ status: "error", code: 404, message: "NOT_FOUND", request_id: "r1" });
+  const fetchImpl = async () =>
+    new Response(appBody, { status: 404, headers: { "content-type": "application/json" } });
+
+  const res = await routeEdgeRequest(
+    new Request("https://staging.example/api/v1/nope"),
+    env,
+    { assets: makeAssets(false), fetch: fetchImpl },
+  );
+  assert.equal(res.status, 404);
+  assert.equal(await res.text(), appBody);
+});
+
+test("a server-rendered page still reaches the browser untouched", async () => {
+  // Nothing above may touch a healthy origin: the no-index rule adds one header and changes nothing else.
+  const html = "<!doctype html><html><body>login</body></html>";
+  const fetchImpl = async () =>
+    new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+
+  const res = await routeEdgeRequest(
+    new Request("https://staging.example/login"),
+    env,
+    { assets: makeAssets(false), fetch: fetchImpl },
+  );
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("x-robots-tag"), "noindex, nofollow");
+  assert.equal(await res.text(), html);
+});

@@ -71,6 +71,32 @@ export async function routeEdgeRequest(
   if (request.method !== "GET" && request.method !== "HEAD") init.body = request.body;
   const upstream = await deps.fetch(origin + url.pathname + url.search, init);
 
+  // 2b. A DEAD ORIGIN MUST NOT DISGUISE ITSELF AS A MISSING ROUTE.
+  //
+  // The host this Worker fronts answers every path with its own platform envelope
+  // `{"status":"error","code":404,"message":"Application not found","request_id":…}` when the service
+  // is stopped. Forwarded verbatim, that reads to a browser — and to anyone debugging from a terminal
+  // — as "this route does not exist", which is the wrong conclusion and sends the reader looking for a
+  // routing bug that is not there. The app itself never emits that sentence, so it is a safe signature;
+  // matching on it lets the edge say what is actually true (503, origin unavailable) while every real
+  // 404 the app produces keeps its own body and status.
+  if (upstream.status === 404) {
+    const probe = await upstream.clone().text().catch(() => "");
+    if (probe.includes("Application not found")) {
+      return Response.json(
+        {
+          status: "error",
+          code: 503,
+          error: "edge_app_origin_unavailable",
+          message:
+            "The web app origin behind this staging edge is not running. The static shell is up; the " +
+            "API and server-rendered routes are not. See docs/deployment/web-admin-staging-recovery.md.",
+        },
+        { status: 503, headers: { "x-velora-edge": "origin-unavailable" } },
+      );
+    }
+  }
+
   // 3. Only HTML gets the staging no-index contract; add it if (and only if) absent, so an
   //    app-emitted value is never silently overridden.
   if (env.VELORA_NOINDEX === "true") {
