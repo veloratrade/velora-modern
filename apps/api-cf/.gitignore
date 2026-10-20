@@ -1,0 +1,3 @@
+# Deploy-time configs carry the real Hyperdrive id (same policy as apps/worker-cf).
+wrangler.deploy*.jsonc
+dist/

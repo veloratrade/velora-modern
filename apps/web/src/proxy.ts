@@ -31,8 +31,16 @@ import {
  *    role. Refusals are 302 + no-store; an unavailable answer fails closed.
  */
 
-/** Same default the Next rewrite uses for /api (next.config.ts). */
-const API_ORIGIN = process.env.VELORA_API_ORIGIN ?? "http://127.0.0.1:8080";
+/**
+ * The API origin, read PER REQUEST.
+ *
+ * It used to be a module-level constant. On Workers `process.env` is populated per request, so a
+ * module-level read is empty on the first request and the gate then probes `127.0.0.1:8080` — which on
+ * anything but a developer's laptop means "unavailable", which means every protected page 302s to
+ * /login with no explanation. This is the same bug class as the wrong-origin rewrite, one layer up, so
+ * it is pinned by `proxy.headers.test.ts`.
+ */
+import { resolveApiOrigin } from "./lib/apiOrigin";
 /** A page render must not wait on a hung probe; expiry fails closed. */
 const SESSION_PROBE_TIMEOUT_MS = 1500;
 
@@ -48,7 +56,9 @@ async function probeSession(
 ): Promise<{ ok: true; authenticated: boolean; role: string | null } | { ok: false }> {
   const cookie = request.headers.get("cookie");
   try {
-    const res = await fetch(`${API_ORIGIN}/api/v1/auth/session`, {
+    const origin = resolveApiOrigin();
+    if (origin === null) return { ok: false };
+    const res = await fetch(`${origin}/api/v1/auth/session`, {
       method: "GET",
       headers: cookie === null ? {} : { cookie },
       cache: "no-store",
@@ -218,6 +228,11 @@ export async function proxy(request: NextRequest) {
   // (`max-age=31536000`, no includeSubDomains/preload). Browsers ignore it over
   // plain HTTP, so it can only ever affect a TLS deployment.
   response.headers.set("Strict-Transport-Security", "max-age=31536000");
+  // Staging must never be indexed — the same `x-robots-tag` the edge shim injected, now owned by the
+  // real proxy so it survives the move to OpenNext. Read at request time, so production is unaffected.
+  if (process.env.VELORA_NOINDEX === "true") {
+    response.headers.set("X-Robots-Tag", "noindex, nofollow");
+  }
 
   return response;
 }

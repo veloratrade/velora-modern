@@ -1,0 +1,15 @@
+{
+  "name": "@velora/api-cf",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Workers host for the existing Velora API kernel. Reuses apps/api; adds no new routing, auth or RBAC logic.",
+  "scripts": {
+    "types": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test src/*.test.ts",
+    "bundle": "wrangler deploy --dry-run --outdir dist -c wrangler.jsonc"
+  },
+  "dependencies": {
+    "postgres": "^3.4.9"
+  }
+}

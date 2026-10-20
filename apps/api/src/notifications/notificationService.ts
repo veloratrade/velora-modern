@@ -85,9 +85,26 @@ const ICON_FILES: Readonly<Record<string, string>> = Object.freeze({
   achievement: "achievement.png",
 });
 
+/**
+ * Where the email icons live next to the source — resolved LAZILY, on purpose.
+ *
+ * This used to run in the constructor, and that was a whole-API outage in a Cloudflare Worker: a
+ * bundled Worker has no `import.meta.url` and no filesystem, `fileURLToPath(undefined)` throws, the
+ * composition root throws with it, and EVERY route answers 500 — including `/health` and the panel's
+ * login — because building the notification service is part of building the app. Measured in
+ * `wrangler dev` (workerd) before this change; see `apps/api-cf/README.md`.
+ *
+ * Resolving it here instead keeps the documented contract intact: a send whose icons cannot be loaded
+ * still FAILS and is recorded as `icon-missing` ("the brand identity is part of the capability, not
+ * decoration" — Legacy sendWithIcon). What changes is the blast radius: one email fails, the API runs.
+ */
 function defaultIconsDir(): string {
+  const moduleUrl: string | undefined = import.meta.url;
+  if (moduleUrl === undefined || !moduleUrl.startsWith("file:")) {
+    throw new Error("email icon assets are not reachable in this runtime (no file:// module URL)");
+  }
   // src/notifications → apps/api/assets/email-icons (tsx runs from src).
-  return join(dirname(fileURLToPath(import.meta.url)), "..", "..", "assets", "email-icons");
+  return join(dirname(fileURLToPath(moduleUrl)), "..", "..", "assets", "email-icons");
 }
 
 /**
@@ -105,7 +122,8 @@ export class NotificationService {
   private readonly appOrigin: string;
   private readonly supportDeskEmail: string;
   private readonly now: () => Date;
-  private readonly iconsDir: string;
+  /** `null` ⇒ resolve the built-in directory on first use (and fail the send if it cannot be). */
+  private readonly iconsDir: string | null;
   private iconCache: ReadonlyMap<string, MailInlineImage> | null = null;
 
   constructor(deps: NotificationServiceDeps) {
@@ -114,19 +132,22 @@ export class NotificationService {
     this.appOrigin = deps.appOrigin.replace(/\/+$/, "");
     this.supportDeskEmail = (deps.supportDeskEmail ?? "support@veloratrade.ir").trim();
     this.now = deps.now ?? (() => new Date());
-    this.iconsDir = deps.iconsDir ?? defaultIconsDir();
+    this.iconsDir = deps.iconsDir ?? null;
   }
 
   /** Load + cache the icon set; a missing file throws HERE (caller decides). */
   private async icons(): Promise<ReadonlyMap<string, MailInlineImage>> {
     if (this.iconCache !== null) return this.iconCache;
+    // Throws when the assets are unreachable; the caller turns that into `icon-missing` (see
+    // `defaultIconsDir`). This is the one place the directory is resolved.
+    const dir = this.iconsDir ?? defaultIconsDir();
     const entries = await Promise.all(
       Object.entries(ICON_FILES).map(async ([name, file]) => {
-        const content = await readFile(join(this.iconsDir, file));
+        const content = await readFile(join(dir, file));
         return [name, { cid: `velora-${name}`, filename: file, contentBase64: content.toString("base64") }] as const;
       }),
     );
-    const logo = await readFile(join(this.iconsDir, "velora-email-logo.png"));
+    const logo = await readFile(join(dir, "velora-email-logo.png"));
     entries.push([
       "logo",
       { cid: "velora-logo", filename: "velora-email-logo.png", contentBase64: logo.toString("base64") },

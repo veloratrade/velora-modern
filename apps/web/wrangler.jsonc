@@ -1,0 +1,46 @@
+{
+  // The Velora admin panel on Cloudflare Workers, built by OpenNext.
+  //
+  // The Worker NAME is deliberately the one staging already answers on
+  // (`velora-modern-staging.yadgar-s-ict.workers.dev`): the API's `APP_ORIGIN` and its origin allowlist
+  // name that host, so keeping it means no DNS change, no new hostname, and no second origin to allow.
+  // What changes is what sits behind the name — the hand-uploaded edge shim (`apps/web-edge-cf`, still in
+  // the repo, no longer the deploy target) becomes the real Next app, so `/admin` is now gated by
+  // `src/proxy.ts` rather than merely rendered.
+  "name": "velora-modern-staging",
+  "main": ".open-next/worker.js",
+  // Kept at the value the LIVE version reports (`settings.compatibility_date`). Raising it changes
+  // runtime semantics; it must be a deliberate, verified change, never a side effect of a deploy.
+  "compatibility_date": "2026-09-01",
+  // `nodejs_compat` is required by OpenNext (the Next server runs on the Node API surface inside workerd).
+  // `global_fetch_strictly_public` keeps the shim's hardening: a `fetch()` from this Worker cannot address
+  // another Worker by internal name/zone — only public hosts, which is what the API hop below is.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "send_metrics": false,
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+
+  "assets": {
+    "binding": "ASSETS",
+    "directory": ".open-next/assets"
+  },
+
+  "vars": {
+    // THE one value that decides where `/api/*` goes (read per request by
+    // `src/app/api/[...path]/route.ts`; the same value the session gate probes). It points at the API
+    // Worker in this same account — the same kernel that runs on the Node server, reached over its own
+    // Cloudflare origin. NOT a Railway host, NOT a localhost, NOT a rewrite baked into the bundle.
+    "VELORA_API_ORIGIN": "https://velora-api-staging.yadgar-s-ict.workers.dev",
+    // Staging must never be indexed (read per request in `src/proxy.ts`).
+    "VELORA_NOINDEX": "true",
+    "VELORA_SITE_ORIGIN": "https://velora-modern-staging.yadgar-s-ict.workers.dev"
+  },
+
+  "routes": []
+
+  // LATER, NOT NOW: a service binding to the API Worker
+  //   "services": [{ "binding": "API", "service": "velora-api-staging" }]
+  // would skip the public hop and preserve the caller's address exactly. It is not configured yet on
+  // purpose: a service binding refuses to deploy while the named Worker does not exist, and the API
+  // Worker has not been deployed. Enabling it is a one-line change in `resolveApiOrigin` plus this
+  // block, after the API is live.
+}

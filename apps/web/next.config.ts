@@ -25,11 +25,8 @@ const nextConfig: NextConfig = {
   transpilePackages: ["@velora/contracts", "@velora/domain"],
   poweredByHeader: false,
   reactStrictMode: true,
-  // W1: API proxy for local dev and same-origin contract.
-  // In production Railway's reverse proxy handles TLS/HSTS and routes /api to the API service.
-  // In dev, Next rewrites /api to the API process (VELORA_API_ORIGIN or default 8080).
-  // This keeps the browser same-origin (no CORS) while allowing the web dev server
-  // to run separately from the API (ADR-010). No business-logic coupling.
+  // The browser stays same-origin (no CORS, no third-party cookies) while the web app and the API run
+  // as separate processes (ADR-010): `/api/*` is forwarded by a route handler, not by a rewrite.
   // `.js` in an import specifier may be a TypeScript file on disk (TS ESM).
   webpack(config) {
     config.resolve = config.resolve ?? {};
@@ -39,10 +36,12 @@ const nextConfig: NextConfig = {
     };
     return config;
   },
-  async rewrites() {
-    const origin = process.env.VELORA_API_ORIGIN ?? "http://127.0.0.1:8080";
-    return [{ source: "/api/:path*", destination: `${origin}/api/:path*` }];
-  },
+  // NO `rewrites()` FOR /api — deliberately. There used to be one here, `source: "/api/:path*"` to
+  // `${VELORA_API_ORIGIN}/api/:path*`, and it was the bug: a rewrite is baked at BUILD time, so the
+  // staging bundle carried whatever origin the build machine had (a Railway host that no longer
+  // exists), the browser followed it, and Cloudflare answered `404 Application not found` — a platform
+  // error, not the API's. `src/app/api/[...path]/route.ts` forwards the same paths instead, reading the
+  // origin at REQUEST time, so changing the origin is a variable change and never a rebuild.
 };
 
 export default nextConfig;

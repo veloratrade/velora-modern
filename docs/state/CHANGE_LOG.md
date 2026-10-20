@@ -1590,3 +1590,44 @@ clearing a flow must clear its post id.
 
 **Gates:** typecheck 0 · `npm test` **exit 0** (general 1771: 1770 pass / 0 fail / 1 named skip; PGlite 87/87)
 · secret-scan 0. Still not deployed (no credential this session) and still not migrated to the live database.
+
+## AC-D — 2026-10-20 · Objective D: the API gets a Cloudflare origin; the panel's `/api` hop stops guessing
+
+- **Commits:** this commit (Objective D). Previous HEAD `5809665`.
+- **Migration impact:** none (no schema change).
+- **Deployed:** **nothing.** No Cloudflare credential was held this session; none was requested in chat.
+
+**Why.** `POST /api/v1/auth/login` on staging answered `404 {"message":"Application not found"}` — an
+envelope the Velora API never emits (its own is `{"status":"error","error":{"code":"NOT_FOUND","requestId":…}}`).
+The panel was reaching **no API at all**: `next.config.ts` rewrote `/api/:path*` at build time to
+`VELORA_API_ORIGIN`, which in the deployed bundle was the retired Railway host.
+
+**What changed.**
+
+1. `apps/api/src/kernel/server.ts` — `createRequestListener(config)` is now the exported entry point;
+   `createApp` wraps it. One dispatch, two hosts (Node + Worker), no duplicated routing/auth/RBAC.
+2. `apps/api-cf/` — new Worker host: `nodeHttpBridge.ts` (the six members the kernel reads; multi-value
+   `set-cookie`; `cf-connecting-ip` → `remoteAddress`), `runtime.ts` (capabilities for the panel over
+   Hyperdrive, `assertBootable` reused, `DATABASE_URL`/`PERSISTENCE` derived rather than duplicated,
+   `BootError` → `503 BOOT_BLOCKED` with codes only), `index.ts` (3 lines), `wrangler.jsonc`,
+   `wrangler.deploy.jsonc` (git-ignored, real Hyperdrive id), tests.
+3. `apps/web` — Next 16.4.1 + `@opennextjs/cloudflare` 1.20.12 + `open-next.config.ts` + `wrangler.jsonc`
+   (Worker name unchanged: `velora-modern-staging`, so no DNS change). `/api/*` is now a route handler
+   that reads `VELORA_API_ORIGIN` **per request**; the build-time rewrite is gone. `src/proxy.ts` reads its
+   probe origin per request too (a module-level read is empty on Workers and would have failed every page
+   closed to `/login`).
+4. `apps/api/src/notifications/notificationService.ts` — real bug found by running the Worker in workerd:
+   `fileURLToPath(import.meta.url)` in the constructor threw in a bundle, so **every** route answered 500.
+   The icon directory is now resolved lazily, where a missing asset already fails only that email.
+
+**Gates:** typecheck 0 (six projects; `apps/api-cf` added) · `npm test` **exit 0** (general 1790: 1789
+pass / 0 fail / 1 named skip `NO_TESSERACT_BINARY`; PGlite 87/87) · secret-scan **PASS** · API Worker
+`wrangler deploy --dry-run` **bundles** (800 KiB / 180 KiB gzip) · `wrangler dev --local`: `/health` 200,
+unknown route → the API's own 404 envelope, missing secret → `503 BOOT_BLOCKED (SC-001)` · panel `next
+build` ok (`ƒ /api/[...path]`, `ƒ Proxy (Middleware)`).
+
+**Blocked:** `opennextjs-cloudflare build` OOMs in this 2 GB sandbox (killed at `Building server function:
+default`, ~1.0–1.2 GB RSS, no swap; same with `--noMinify` and lowered heap caps) — must run on a ≥4 GB
+machine or in CI. Deployment and the Objective-D live tests are **NOT RUN**: no credential, nothing
+deployed, and a rendered login page is not accepted as success. Migration 0042 is still absent from Neon
+(bot post-edit screens, not the panel).

@@ -1,0 +1,48 @@
+{
+  // The Velora API on Cloudflare Workers — the SAME kernel the Node server runs, reached through
+  // `createRequestListener`. Staging only; there is no production configuration here.
+  //
+  // WHY A HYPERDRIVE BINDING AND NOT A CONNECTION STRING. Workers have no TCP stack. Hyperdrive
+  // (`velora-pg-nonprod`, ap-southeast-2, query caching disabled) fronts the staging Neon database and
+  // is the documented way to reach PostgreSQL from Workers. The placeholder id below is intentional:
+  // the real one is supplied at deploy time (`--var`) or by the operator's deploy shell, never
+  // committed — the same rule the Telegram Worker follows.
+  "name": "velora-api-staging",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-03",
+  // nodejs_compat is required for Buffer (the kernel's body reader) and node:crypto (JWT signing);
+  // `nodejs_als` keeps AsyncLocalStorage available for the postgres driver's internal state.
+  "compatibility_flags": ["nodejs_compat"],
+  "send_metrics": false,
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "vars": {
+    // The environment identity and its canonical origin. `assertBootable` REFUSES a mismatch, so this
+    // is the one place that has to be right: staging intent + staging origin, or the Worker answers
+    // nothing at all.
+    "APP_ENV": "staging",
+    "APP_ORIGIN": "https://velora-modern-staging.yadgar-s-ict.workers.dev",
+    "CANONICAL_STAGING_ORIGINS": "https://velora-modern-staging.yadgar-s-ict.workers.dev",
+    // The ONE browser origin this API will answer for. The panel is served from the web Worker below,
+    // so that is the only value a real client ever sends; the API's own workers.dev host is NOT in the
+    // list (nothing should call it cross-origin) and neither is any localhost.
+    "API_ALLOWED_ORIGINS": "https://velora-modern-staging.yadgar-s-ict.workers.dev",
+    // Explicit, matching the derived default in `runtime.ts`. Written out so the deploy diff shows the
+    // persistence decision rather than leaving it implicit.
+    "PERSISTENCE": "postgres"
+    // NOT declared here, ever:
+    //   DATABASE_URL     — derived from the HYPERDRIVE binding at request time (see runtime.ts).
+    //   JWT_SECRET       — a Worker secret (`wrangler secret put`), never a var, never in git.
+  },
+  // The pooler in front of Neon staging. The ID is a resource identifier, not a credential (it appears in
+  // the dashboard and in every deploy artefact), but it is per-deployment, so the placeholder here is
+  // substituted by the deploy shell exactly as `apps/worker-cf` does it:
+  //   wrangler hyperdrive create velora-pg-nonprod --connection-string "postgres://…"
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "REPLACE_WITH_HYPERDRIVE_ID"
+    }
+  ],
+
+  "routes": []
+}

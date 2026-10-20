@@ -1,0 +1,65 @@
+{
+  "objective": "D",
+  "title": "Run the Velora admin panel on Cloudflare staging and fix auth/API at the root",
+  "recorded_at": "2026-10-20",
+  "railway": "not used anywhere in the path (the rewrite that pointed there was removed)",
+  "root_cause": {
+    "symptom": "POST /api/v1/auth/login → 404 {\"status\":\"error\",\"code\":404,\"message\":\"Application not found\"}",
+    "why_not_the_api": "the kernel's own 404 is {\"status\":\"error\",\"error\":{\"code\":\"NOT_FOUND\",\"requestId\":\"<uuid>\"}} (apps/api/src/kernel/server.ts); the observed envelope is a platform envelope and carries no requestId from the API",
+    "why_it_happened": "apps/web/next.config.ts rewrote /api/:path* at BUILD time to VELORA_API_ORIGIN, which in the deployed bundle was https://velora-modern-staging.up.railway.app (see apps/web-edge-cf/wrangler.jsonc). That host no longer exists, so no API was ever reached",
+    "fix_direction": "give the API a Cloudflare origin (apps/api-cf) and route /api/* to it at REQUEST time from a route handler"
+  },
+  "architecture": {
+    "single_dispatch": "apps/api/src/kernel/server.ts exports createRequestListener(config); createApp is a 4-line wrapper. Node and Worker call the same function",
+    "api_host": "apps/api-cf (nodeHttpBridge + runtime + 3-line fetch entry) on Worker velora-api-staging, Hyperdrive velora-pg-nonprod → Neon staging",
+    "panel_host": "apps/web built by @opennextjs/cloudflare 1.20.12 (next 16.4.1) on Worker velora-modern-staging (origin preserved, so no DNS change)",
+    "api_hop": "apps/web/src/app/api/[...path]/route.ts forwards same-origin /api/* to VELORA_API_ORIGIN resolved per request via apps/web/src/lib/apiOrigin.ts",
+    "gate": "apps/web/src/proxy.ts SEC-04 gate unchanged in behaviour; its probe origin is now read per request instead of at module load"
+  },
+  "gates": {
+    "typecheck_6_projects": "exit 0 (apps/api-cf added to the root typecheck)",
+    "full_tests": "exit 0 — general 1790 (1789 pass / 0 fail / 1 named skip NO_TESSERACT_BINARY), PGlite 87/87",
+    "api_cf_tests": "19/19 (13 nodeHttpBridge, 6 runtime)",
+    "secret_scan": "PASS (0 findings)",
+    "api_cf_wrangler_dry_run": "exit 0 — 800.35 KiB / 179.91 KiB gzip, Hyperdrive binding resolved",
+    "web_next_build": "exit 0 — route table has ƒ /api/[...path] and ƒ Proxy (Middleware)",
+    "web_opennext_build": "BLOCKED — OOM in this sandbox at 'Building server function: default' (node ~1.0-1.2 GB RSS on a 2 GB machine, no swap). Reproduced with --noMinify, NODE_OPTIONS=--max-old-space-size=420/600/700, MALLOC_ARENA_MAX=2",
+    "workerd_local": "GET /health → 200 {\"status\":\"success\"}; GET /api/v1/nope → API's own 404 NOT_FOUND + requestId; no JWT_SECRET → 503 BOOT_BLOCKED (SC-001) for every path"
+  },
+  "bug_found_by_running_it": {
+    "file": "apps/api/src/notifications/notificationService.ts",
+    "symptom": "every route 500 in workerd: TypeError: The \"path\" argument must be of type string or an instance of URL. Received undefined, at fileURLToPath (defaultIconsDir)",
+    "cause": "the icon directory was resolved eagerly in the constructor from import.meta.url, which a bundled Worker does not have",
+    "fix": "resolve lazily inside icons(); a failure is already recorded as icon-missing and fails only that email",
+    "regression": "apps/api/src/notifications/*.test.ts 13/13"
+  },
+  "deployed": {
+    "api_worker": "NOT DEPLOYED — does not exist in the account yet",
+    "panel_worker": "unchanged (versions #1-#3; the last hand-uploaded one still fronts the dead Railway origin)",
+    "bot_worker": "unchanged — 6f15c6dc-dc6f-4895-9162-85af8936b2f0 (v41)",
+    "reason": "no Cloudflare credential was held this session; none was requested in chat"
+  },
+  "live_tests_objective_d_item_5": "NOT RUN — nothing was deployed, so there is no staging surface to test. A rendered login page or a green local gate is explicitly not accepted as success",
+  "blockers_in_order": [
+    "credentials: CF_TOKEN + CF_ACCOUNT_ID=9ef5ad5202a5e9db190bf3ecb83e3eff",
+    "bundle the panel on a ≥4 GB machine (npm run cf:build -w @velora/web)",
+    "wrangler secret put JWT_SECRET on velora-api-staging (≥32 chars) or the Worker answers 503 BOOT_BLOCKED SC-001 by design",
+    "deploy order: apps/api-cf first, then apps/web",
+    "migration 0042 still absent from Neon (gates the bot's post-edit screens, not the panel)",
+    "admin provisioning: no account created, none fabricated; the existing System Owner bootstrap + AdminUserService are the only secure paths"
+  ],
+  "files_changed": [
+    "apps/api/src/kernel/server.ts",
+    "apps/api/src/notifications/notificationService.ts",
+    "apps/api-cf/{README.md,.gitignore,package.json,tsconfig.json,wrangler.jsonc,src/index.ts,src/nodeHttpBridge.ts,src/nodeHttpBridge.test.ts,src/runtime.ts,src/runtime.test.ts}",
+    "apps/web/{next.config.ts,package.json,open-next.config.ts,wrangler.jsonc,.gitignore(removed; rules moved to root .gitignore)}",
+    "apps/web/src/app/api/[...path]/route.ts",
+    "apps/web/src/lib/apiOrigin.ts",
+    "apps/web/src/proxy.ts",
+    ".gitignore",
+    "package.json",
+    "package-lock.json",
+    "docs/deployment/web-admin-staging-recovery.md",
+    "apps/api-cf/README.md"
+  ]
+}

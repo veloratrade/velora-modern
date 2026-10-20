@@ -1469,14 +1469,24 @@ async function readRawBody(req: IncomingMessage, maxBytes = DEFAULT_JSON_BODY_BY
   return Buffer.concat(chunks);
 }
 
-export function createApp(config: ApiConfig): Server {
+/**
+ * The request listener, separated from `createApp` so the SAME dispatch runs on a second host.
+ *
+ * WHY THIS IS A REFACTOR AND NOT A FORK. The Cloudflare Worker host (`apps/api-cf`) has no listening
+ * socket: it receives a `Request` and must return a `Response`. Everything interesting — routing,
+ * auth, RBAC, the JSON envelope, the security headers — lives inside this listener, so the Worker
+ * adapts the two Node-shaped objects rather than re-implementing any of it. `createApp` below is now
+ * four lines over this function, and the whole existing suite (which drives `createApp` through
+ * `node:http`) is the regression test for the split.
+ */
+export function createRequestListener(config: ApiConfig): (req: IncomingMessage, res: ServerResponse) => void {
   // Always-on throttling (PHP dispatch evidence): a default per-app limiter
   // when none is injected; per-app instance = per-test-server isolation.
   const effective: EffectiveApiConfig = {
     ...config,
     rateLimiter: config.rateLimiter ?? new FixedWindowRateLimiter(new MemoryRateLimitStore()),
   };
-  return httpCreateServer((req: IncomingMessage, res: ServerResponse) => {
+  return (req: IncomingMessage, res: ServerResponse): void => {
     const sec = newSecurityContext();
     void route(req, effective, sec)
       .then((r) => {
@@ -1521,7 +1531,11 @@ export function createApp(config: ApiConfig): Server {
         res.writeHead(500, { "Content-Type": "application/json; charset=utf-8", "X-Request-Id": sec.requestId });
         res.end(JSON.stringify(fail("INTERNAL", "internal error", sec.requestId)));
       });
-  });
+  };
+}
+
+export function createApp(config: ApiConfig): Server {
+  return httpCreateServer(createRequestListener(config));
 }
 
 export function listen(app: Server, port = 0, host = "127.0.0.1"): Promise<number> {

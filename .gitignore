@@ -22,3 +22,8 @@ backups/
 # Python bytecode (ops/backup tooling)
 __pycache__/
 *.py[cod]
+
+# Cloudflare / OpenNext build output and local artefacts (never committed).
+.open-next/
+.wrangler/
+.dev.vars
