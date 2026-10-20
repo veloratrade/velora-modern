@@ -1173,3 +1173,87 @@ test("0041 audit vocabulary: an operator's tool validation is writable, and noth
     await engine.close();
   }
 });
+
+// ── 0042: the menu's persisted settings ──────────────────────────────────────
+//
+// The table exists so the menu's choices survive a restart, and the constraints exist so a half-open
+// guided prompt cannot be stored. Both halves are asserted here against real PostgreSQL semantics:
+// a CHECK that is never exercised is a comment.
+test("0042: one preferences row per user, with defaults by absence and a coherent flow cursor", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    const userId = (await engine.query(
+      "INSERT INTO users(email, password_hash) VALUES ($1,$2) RETURNING id",
+      ["prefs@velora.ir", "x"],
+    )).rows[0]?.id;
+    assert.ok(userId !== undefined);
+
+    // Absence is the default: no row is a valid state, not a missing one.
+    assert.equal((await engine.query("SELECT * FROM telegram_post_preferences WHERE user_id = $1", [userId])).rows.length, 0);
+
+    await engine.query(
+      `INSERT INTO telegram_post_preferences (user_id, default_template_name, banner_enabled, banner_title)
+       VALUES ($1, $2, TRUE, $3)`,
+      [userId, "morning", "عنوان"],
+    );
+    // One row per user, enforced by the primary key rather than by a caller's discipline.
+    await assert.rejects(
+      engine.query("INSERT INTO telegram_post_preferences (user_id) VALUES ($1)", [userId]),
+      /duplicate key|unique/i,
+    );
+
+    // A banner title the renderer would silently truncate is refused by the database.
+    await assert.rejects(
+      engine.query("UPDATE telegram_post_preferences SET banner_title = $2 WHERE user_id = $1", [userId, "x".repeat(61)]),
+      /check constraint/i,
+    );
+    // An empty name is not a name.
+    await assert.rejects(
+      engine.query("UPDATE telegram_post_preferences SET default_template_name = $2 WHERE user_id = $1", [userId, "  "]),
+      /check constraint/i,
+    );
+
+    // The coherence rule: a kind with no start time would never expire, so it cannot be written…
+    await assert.rejects(
+      engine.query("UPDATE telegram_post_preferences SET flow_kind = 'tpl_new_name' WHERE user_id = $1", [userId]),
+      /check constraint/i,
+    );
+    // …the body step cannot exist without its name…
+    await assert.rejects(
+      engine.query(
+        "UPDATE telegram_post_preferences SET flow_kind = 'tpl_new_body', flow_started_at = now() WHERE user_id = $1",
+        [userId],
+      ),
+      /check constraint/i,
+    );
+    // …and the name step must not carry a body (that would be two stages at once).
+    await assert.rejects(
+      engine.query(
+        "UPDATE telegram_post_preferences SET flow_kind = 'tpl_new_name', flow_started_at = now(), flow_body = 'x' WHERE user_id = $1",
+        [userId],
+      ),
+      /check constraint/i,
+    );
+
+    // The step the bot actually opens is accepted, and clearing it in one statement is accepted too.
+    await engine.query(
+      "UPDATE telegram_post_preferences SET flow_kind = 'tpl_new_name', flow_started_at = now() WHERE user_id = $1",
+      [userId],
+    );
+    await engine.query(
+      "UPDATE telegram_post_preferences SET flow_kind = NULL, flow_started_at = NULL WHERE user_id = $1",
+      [userId],
+    );
+    // An unknown kind is not a future step; it is a typo, and the vocabulary is closed.
+    await assert.rejects(
+      engine.query(
+        "UPDATE telegram_post_preferences SET flow_kind = 'something_else', flow_started_at = now() WHERE user_id = $1",
+        [userId],
+      ),
+      /check constraint/i,
+    );
+  } finally {
+    await engine.close();
+  }
+});

@@ -248,15 +248,39 @@ export const CALLBACK_ACTIONS = [
   // records) is what the handler reads. `post_no` dismisses the preview; it writes nothing.
   "post_pub", // publish the APPROVED preview — the consent tap for this exact content
   "post_no", // dismiss the preview; nothing was and nothing will be sent
+  // ── added with the navigable menu (round 7) ──
+  // The user asked not to memorise slash commands. Every one of these is a REAL handler — none is a
+  // decorative button — and each subject is either a template/post id or the closed literal below, so
+  // the payload stays inside the 48-char ASCII grammar and cannot carry free text (a Persian template
+  // NAME can never travel in a button; the id does).
+  "tpl_list", // the user's templates, paginated
+  "tpl_new", // start the guided "name → body" creation flow
+  "tpl_edit", // subject is a template id: replace its body (a NEW version, never an overwrite)
+  "tpl_del", // subject is a template id: ask "really retire it?" and change nothing yet
+  "tpl_delok", // subject is a template id: the confirmation tap that retires it
+  "tpl_def", // subject is a template id: make it the default for `/post` with no argument
+  "tpl_pv", // subject is a template id: render it against this user's real data
+  "bn_toggle", // subject `on` | `off`: whether a prepared post also builds the banner card
+  "bn_title", // subject `ask` | `clear`: the banner's title override (the text arrives as a message)
+  "ai_status", // read-only: which tools are wired, and which env var is missing when one is not
+  "flow_cancel", // subject `none`: close the open guided prompt and write nothing
 ] as const;
 export type CallbackAction = (typeof CALLBACK_ACTIONS)[number];
 
 /** Destinations a `menu:` callback may name. A closed set — never free text. */
-export const MENU_TARGETS = ["journal", "last", "history", "analyze", "settings", "stats", "checklist", "post"] as const;
+export const MENU_TARGETS = [
+  // round-7 navigation: the six sections the user asked for, plus `home` (the way back) and the
+  // three journal shortcuts that were already here and stay reachable from the journal section.
+  "home", "journal", "last", "history", "analyze", "stats", "checklist", "post",
+  "posts", "templates", "banner", "ai", "settings", "help",
+] as const;
 export type MenuTarget = (typeof MENU_TARGETS)[number];
 
+// Longest action names first is not required (the engine backtracks on `:`), but ORDER IS DOCUMENTED:
+// `post_pub`/`post_no` must never be reachable by a payload that meant `post`. The subject class stays
+// ASCII-only and 48 chars, which is what keeps a button from ever carrying user-authored text.
 const CALLBACK_RE =
-  /^(confirm|cancel|edit|menu|unlink|history_more|channel_test|connect|trade|trade_arm|trade_edit|trade_delete|post_pub|post_no):([A-Za-z0-9_-]{1,48})$/;
+  /^(confirm|cancel|edit|menu|unlink|history_more|channel_test|connect|trade|trade_arm|trade_edit|trade_delete|post_pub|post_no|tpl_list|tpl_new|tpl_edit|tpl_del|tpl_delok|tpl_def|tpl_pv|bn_toggle|bn_title|ai_status|flow_cancel):([A-Za-z0-9_-]{1,48})$/;
 
 export function parseCallbackData(data: string): { action: CallbackAction; subject: string } | null {
   const match = CALLBACK_RE.exec(data.trim());

@@ -33,6 +33,19 @@ test("every declared action round-trips, including a trade id with hyphens", () 
     // cannot survive this grammar, and a name would also select whatever the CURRENT version is).
     post_pub: "post-7",
     post_no: "post-7",
+    // Round 7: the menu's own actions. Every subject is an id or a closed literal — a template NAME
+    // can never travel here (Persian text is not in the grammar), which is why the buttons carry ids.
+    tpl_list: "2",
+    tpl_new: "none",
+    tpl_edit: "17",
+    tpl_del: "17",
+    tpl_delok: "17",
+    tpl_def: "17",
+    tpl_pv: "17",
+    bn_toggle: "on",
+    bn_title: "ask",
+    ai_status: "none",
+    flow_cancel: "none",
   };
   for (const action of CALLBACK_ACTIONS) {
     const subject = subjects[action];
@@ -47,7 +60,12 @@ test("the menu targets the bot can render are exactly the ones the keyboard can 
   // exists to prevent. The bot's own tests cover the handlers; this covers the vocabulary.
   // "post" joins the list WITH its handler: the bot-level test that walks every minted keyboard
   // refuses a button whose target has no case, so an entry here and no `case "post"` fails that one.
-  assert.deepEqual([...MENU_TARGETS], ["journal", "last", "history", "analyze", "settings", "stats", "checklist", "post"]);
+  // Round 7 adds the six sections the menu is built from, plus `home` (the way back). The journal
+  // destinations are unchanged, which is the compatibility promise: every old button keeps working.
+  assert.deepEqual(
+    [...MENU_TARGETS],
+    ["home", "journal", "last", "history", "analyze", "stats", "checklist", "post", "posts", "templates", "banner", "ai", "settings", "help"],
+  );
 });
 
 test("an unknown action or a malformed subject is not parsed at all", () => {

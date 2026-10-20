@@ -74,6 +74,7 @@ test("0023: the telegram tables exist and the widened vocabularies accept exactl
       "telegram_journal_drafts",
       "telegram_link_tokens",
       "telegram_outbox_posts",
+      "telegram_post_preferences",
       "telegram_post_templates",
       "telegram_updates",
     ]);

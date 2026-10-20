@@ -23,6 +23,10 @@ import type {
   TemplateSaveResult,
   ChecklistUpsertResult,
   TelegramChecklistRecord,
+  PostPreferencesPatch,
+  PostPreferencesSaveResult,
+  TelegramPendingFlow,
+  TelegramPostPreferences,
 } from "./telegramStore.js";
 import type {
   IdentityInsert,
@@ -69,6 +73,8 @@ export class MemoryTelegramStore implements TelegramStore {
   private readonly outbox: Mutable<TelegramPostRecord>[] = [];
   private templateSeq = 0;
   private postSeq = 0;
+  /** 0042's one row per user; absent = the defaults, exactly as the table's absence does. */
+  private readonly preferences = new Map<string, Mutable<TelegramPostPreferences>>();
   readonly updates = new Map<string, UpdateRow>();
   readonly identities: TelegramIdentityRecord[] = [];
   readonly tokens: MutableToken[] = [];
@@ -487,6 +493,49 @@ export class MemoryTelegramStore implements TelegramStore {
 
   // ── Post templates (0037) ─────────────────────────────────────────────────
 
+  /**
+   * 0042 — defaults when there is no row, so a caller never has to distinguish "never configured" from
+   * "configured to the default" (the table says the same thing by storing nothing).
+   */
+  async getPostPreferences(userId: string): Promise<TelegramPostPreferences> {
+    const row = this.preferences.get(userId);
+    if (row === undefined) {
+      return {
+        userId,
+        defaultTemplateName: null,
+        bannerEnabled: true,
+        bannerTitle: null,
+        pendingFlow: null,
+        updatedAt: null,
+      };
+    }
+    return { ...row, pendingFlow: row.pendingFlow === null ? null : { ...row.pendingFlow } };
+  }
+
+  async savePostPreferences(input: PostPreferencesPatch): Promise<PostPreferencesSaveResult> {
+    // Validated against CURRENT templates, mirroring the reason 0042 has no foreign key: the
+    // authoritative row is the partial "not superseded" one.
+    if (input.defaultTemplateName !== undefined && input.defaultTemplateName !== null) {
+      const named = this.currentTemplate(input.userId, input.defaultTemplateName);
+      if (named === undefined) return { status: "unknown-template", name: input.defaultTemplateName };
+    }
+    const before = await this.getPostPreferences(input.userId);
+    const row: Mutable<TelegramPostPreferences> = {
+      ...before,
+      ...(input.defaultTemplateName === undefined ? {} : { defaultTemplateName: input.defaultTemplateName }),
+      ...(input.bannerEnabled === undefined ? {} : { bannerEnabled: input.bannerEnabled }),
+      ...(input.bannerTitle === undefined ? {} : { bannerTitle: input.bannerTitle }),
+      updatedAt: new Date(),
+    };
+    this.preferences.set(input.userId, row);
+    return { status: "saved", preferences: await this.getPostPreferences(input.userId) };
+  }
+
+  async setPendingFlow(input: { readonly userId: string; readonly flow: TelegramPendingFlow | null; readonly at: Date }): Promise<void> {
+    const before = await this.getPostPreferences(input.userId);
+    this.preferences.set(input.userId, { ...before, pendingFlow: input.flow, updatedAt: input.at });
+  }
+
   private currentTemplate(userId: string, name: string): Mutable<TelegramTemplateRecord> | undefined {
     const key = name.trim();
     return this.templates.find((t) => t.userId === userId && t.name === key && t.supersededAt === null);
@@ -525,6 +574,11 @@ export class MemoryTelegramStore implements TelegramStore {
 
   async findCurrentTemplate(userId: string, name: string): Promise<TelegramTemplateRecord | null> {
     const found = this.currentTemplate(userId, name);
+    return found === undefined ? null : { ...found };
+  }
+
+  async findTemplateById(userId: string, id: string): Promise<TelegramTemplateRecord | null> {
+    const found = this.templates.find((t) => t.userId === userId && t.id === id && t.supersededAt === null);
     return found === undefined ? null : { ...found };
   }
 

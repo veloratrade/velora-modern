@@ -31,6 +31,10 @@ import type {
   TelegramIdentityRecord,
   TelegramStore,
   TelegramTokenRecord,
+  PostPreferencesPatch,
+  PostPreferencesSaveResult,
+  TelegramPendingFlow,
+  TelegramPostPreferences,
 } from "./telegramStore.js";
 
 type Row = Record<string, unknown>;
@@ -798,6 +802,16 @@ export class PgTelegramStore implements TelegramStore {
     return rows[0] === undefined ? null : toTemplate(rows[0]);
   }
 
+  async findTemplateById(userId: string, id: string): Promise<TelegramTemplateRecord | null> {
+    const rows = await this.q(
+      `SELECT * FROM telegram_post_templates
+        WHERE user_id = $1::bigint AND id = $2::bigint AND superseded_at IS NULL LIMIT 1`,
+      [userId, id],
+    );
+    const row = rows[0];
+    return row === undefined ? null : toTemplate(row);
+  }
+
   async listTemplates(userId: string): Promise<readonly TelegramTemplateRecord[]> {
     const rows = await this.q(
       `SELECT DISTINCT ON (name) * FROM telegram_post_templates
@@ -816,6 +830,115 @@ export class PgTelegramStore implements TelegramStore {
       [userId, name.trim(), at.toISOString()],
     );
     return rows.length > 0;
+  }
+
+  // ── Menu preferences and the guided-flow cursor (0042) ────────────────────
+
+  /**
+   * Defaults when there is no row.
+   *
+   * The SELECT returns the joined row or nothing; the defaults are then applied in ONE place (below),
+   * because a caller that had to apply them itself would eventually disagree with the other caller.
+   */
+  async getPostPreferences(userId: string): Promise<TelegramPostPreferences> {
+    const rows = await this.q(
+      `SELECT default_template_name, banner_enabled, banner_title, updated_at,
+              flow_kind, flow_name, flow_body, flow_template_id, flow_started_at
+         FROM telegram_post_preferences WHERE user_id = $1::bigint`,
+      [userId],
+    );
+    const row = rows[0];
+    if (row === undefined) return defaultPreferences(userId);
+    const flow = toPendingFlow(row);
+    return {
+      userId,
+      defaultTemplateName: (row["default_template_name"] as string | null) ?? null,
+      bannerEnabled: row["banner_enabled"] !== false,
+      bannerTitle: (row["banner_title"] as string | null) ?? null,
+      pendingFlow: flow,
+      updatedAt: (row["updated_at"] as Date | null) ?? null,
+    };
+  }
+
+  /**
+   * One UPSERT, with the template check inside the same statement family.
+   *
+   * The check is a SELECT before the write rather than an FK because 0042 stores a NAME that must
+   * resolve to a CURRENT template row (a partial index, which no foreign key can reference). The write
+   * that follows is `COALESCE`-safe: an absent patch key passes the column's own value back rather
+   * than NULL, so a partial update cannot silently clear a setting it never mentioned.
+   */
+  async savePostPreferences(input: PostPreferencesPatch): Promise<PostPreferencesSaveResult> {
+    if (input.defaultTemplateName !== undefined && input.defaultTemplateName !== null) {
+      const named = await this.q(
+        `SELECT 1 FROM telegram_post_templates
+          WHERE user_id = $1::bigint AND name = $2 AND superseded_at IS NULL LIMIT 1`,
+        [input.userId, input.defaultTemplateName.trim()],
+      );
+      if (named.length === 0) return { status: "unknown-template", name: input.defaultTemplateName };
+    }
+    const rows = await this.q(
+      `INSERT INTO telegram_post_preferences (user_id, default_template_name, banner_enabled, banner_title, updated_at)
+            VALUES ($1::bigint, $2, COALESCE($3::boolean, TRUE), $4, now())
+       ON CONFLICT (user_id) DO UPDATE SET
+            default_template_name = CASE WHEN $5::boolean THEN EXCLUDED.default_template_name ELSE telegram_post_preferences.default_template_name END,
+            banner_enabled        = COALESCE($3::boolean, telegram_post_preferences.banner_enabled),
+            banner_title          = CASE WHEN $6::boolean THEN EXCLUDED.banner_title ELSE telegram_post_preferences.banner_title END,
+            updated_at            = now()
+         RETURNING default_template_name, banner_enabled, banner_title, updated_at,
+                   flow_kind, flow_name, flow_body, flow_template_id, flow_started_at`,
+      [
+        input.userId,
+        input.defaultTemplateName === undefined ? null : input.defaultTemplateName,
+        input.bannerEnabled === undefined ? null : input.bannerEnabled,
+        input.bannerTitle === undefined ? null : input.bannerTitle,
+        input.defaultTemplateName !== undefined,
+        input.bannerTitle !== undefined,
+      ],
+    );
+    const row = rows[0] ?? {};
+    return {
+      status: "saved",
+      preferences: {
+        userId: input.userId,
+        defaultTemplateName: (row["default_template_name"] as string | null) ?? null,
+        bannerEnabled: row["banner_enabled"] !== false,
+        bannerTitle: (row["banner_title"] as string | null) ?? null,
+        pendingFlow: toPendingFlow(row),
+        updatedAt: (row["updated_at"] as Date | null) ?? null,
+      },
+    };
+  }
+
+  /**
+   * Upsert the flow cursor, or clear it.
+   *
+   * A `null` flow writes NULL into all four flow columns in ONE statement — the coherence CHECK in 0042
+   * refuses a half-cleared row, so a bug that cleared only `flow_kind` would fail loudly here instead of
+   * leaving a prompt that never expires.
+   */
+  async setPendingFlow(input: { readonly userId: string; readonly flow: TelegramPendingFlow | null; readonly at: Date }): Promise<void> {
+    const f = input.flow;
+    await this.q(
+      `INSERT INTO telegram_post_preferences
+              (user_id, flow_kind, flow_name, flow_body, flow_template_id, flow_started_at, updated_at)
+            VALUES ($1::bigint, $2, $3, $4, $5::bigint, $6::timestamptz, $6::timestamptz)
+       ON CONFLICT (user_id) DO UPDATE SET
+              flow_kind = EXCLUDED.flow_kind,
+              flow_name = EXCLUDED.flow_name,
+              flow_body = EXCLUDED.flow_body,
+              flow_template_id = EXCLUDED.flow_template_id,
+              flow_started_at = EXCLUDED.flow_started_at,
+              updated_at = EXCLUDED.updated_at`,
+      [
+        input.userId,
+        f === null ? null : f.kind,
+        f === null ? null : f.name,
+        f === null ? null : f.body,
+        f === null || f.templateId === null ? null : f.templateId,
+        f === null ? null : f.startedAt.toISOString(),
+      ],
+    );
   }
 
   // ── Prepared posts (0037) ─────────────────────────────────────────────────
@@ -949,4 +1072,32 @@ export class PgTelegramStore implements TelegramStore {
     return rows[0] === undefined ? null : toPost(rows[0]);
   }
 
+}
+
+/** 0042's defaults, in ONE place so both callers agree (see `getPostPreferences`). */
+function defaultPreferences(userId: string): TelegramPostPreferences {
+  return {
+    userId,
+    defaultTemplateName: null,
+    bannerEnabled: true,
+    bannerTitle: null,
+    pendingFlow: null,
+    updatedAt: null,
+  };
+}
+
+/** Rebuild the flow cursor from a preferences row, or null when no flow is open. */
+function toPendingFlow(row: Record<string, unknown>): TelegramPendingFlow | null {
+  const kind = row["flow_kind"];
+  const startedAt = row["flow_started_at"];
+  if (typeof kind !== "string" || !(startedAt instanceof Date)) return null;
+  if (kind !== "tpl_new_name" && kind !== "tpl_new_body" && kind !== "tpl_edit_body" && kind !== "banner_title") return null;
+  const templateId = row["flow_template_id"];
+  return {
+    kind,
+    name: (row["flow_name"] as string | null) ?? null,
+    body: (row["flow_body"] as string | null) ?? null,
+    templateId: templateId === null || templateId === undefined ? null : String(templateId),
+    startedAt,
+  };
 }

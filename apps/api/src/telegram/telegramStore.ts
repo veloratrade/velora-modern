@@ -244,6 +244,14 @@ export interface TelegramStore {
    */
   saveTemplate(input: TemplateSaveInput): Promise<TemplateSaveResult>;
   findCurrentTemplate(userId: string, name: string): Promise<TelegramTemplateRecord | null>;
+  /**
+   * The template a BUTTON names.
+   *
+   * A callback payload can only carry an ASCII id (a Persian name cannot travel in one), so every
+   * template button carries the id and the handler re-reads the row here — filtered to the caller's
+   * own CURRENT rows, which is why another user's id and a retired one are the same "not found".
+   */
+  findTemplateById(userId: string, id: string): Promise<TelegramTemplateRecord | null>;
   /** The current template of every name this user owns, newest version first per name. */
   listTemplates(userId: string): Promise<readonly TelegramTemplateRecord[]>;
   /**
@@ -251,6 +259,33 @@ export interface TelegramStore {
    * explainable after the user retires it. False when the name is not theirs or not current.
    */
   retireTemplate(userId: string, name: string, at: Date): Promise<boolean>;
+
+  // ── Menu preferences and the guided-flow cursor (0042) ────────────────────
+  /**
+   * The user's persisted post settings, or the DEFAULTS when they have never changed one.
+   *
+   * "No row" and "a row that says the default" are the same answer, and this method returns the
+   * latter for both: a caller must never have to distinguish them, because a screen that renders
+   * differently depending on whether an empty row exists is a bug waiting for its first user.
+   */
+  getPostPreferences(userId: string): Promise<TelegramPostPreferences>;
+  /**
+   * Merge the given settings into the user's row, leaving the others untouched.
+   *
+   * `defaultTemplateName` is validated against the user's CURRENT templates here rather than by a
+   * foreign key (the authoritative row is a partial index — see 0042's header): naming a template
+   * that does not exist, or is not theirs, is refused with `{ status: "unknown-template" }` and
+   * nothing is written.
+   */
+  savePostPreferences(input: PostPreferencesPatch): Promise<PostPreferencesSaveResult>;
+  /**
+   * Open (or replace) the one guided flow this user has in progress. `null` closes it.
+   *
+   * The started-at stamp is written by the STORE, from the caller's clock, so the expiry rule
+   * ("fifteen minutes, then the prompt stops capturing messages") is enforced against a timestamp
+   * that a restart cannot reset.
+   */
+  setPendingFlow(input: { readonly userId: string; readonly flow: TelegramPendingFlow | null; readonly at: Date }): Promise<void>;
 
   // ── Prepared posts (0037) ─────────────────────────────────────────────────
   /**
@@ -381,6 +416,45 @@ export interface TelegramTemplateRecord {
   readonly createdAt: string;
   readonly updatedAt: string;
 }
+
+/** Closed set of guided flows the menu can have open. A new step is a migration (0042), by design. */
+export type TelegramFlowKind = "tpl_new_name" | "tpl_new_body" | "tpl_edit_body" | "banner_title";
+
+/**
+ * A guided flow in progress: which question the bot last asked, and the answers so far.
+ *
+ * `startedAt` is store-owned and used ONLY for expiry; a flow never authorises anything by itself —
+ * every step re-reads the user's own templates before it writes.
+ */
+export interface TelegramPendingFlow {
+  readonly kind: TelegramFlowKind;
+  readonly name: string | null;
+  readonly body: string | null;
+  readonly templateId: string | null;
+  readonly startedAt: Date;
+}
+
+/** What a user's post settings are, with defaults filled in. */
+export interface TelegramPostPreferences {
+  readonly userId: string;
+  readonly defaultTemplateName: string | null;
+  readonly bannerEnabled: boolean;
+  readonly bannerTitle: string | null;
+  readonly pendingFlow: TelegramPendingFlow | null;
+  readonly updatedAt: Date | null;
+}
+
+/** A partial write: an absent key means "leave it as it is", `null` means "clear it". */
+export interface PostPreferencesPatch {
+  readonly userId: string;
+  readonly defaultTemplateName?: string | null | undefined;
+  readonly bannerEnabled?: boolean | undefined;
+  readonly bannerTitle?: string | null | undefined;
+}
+
+export type PostPreferencesSaveResult =
+  | { readonly status: "saved"; readonly preferences: TelegramPostPreferences }
+  | { readonly status: "unknown-template"; readonly name: string };
 
 export interface TemplateSaveInput {
   readonly userId: string;
