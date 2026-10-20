@@ -319,3 +319,270 @@ test("the channel mirror is bound per owner+chat and can post a given trade only
     await h.engine.close();
   }
 });
+
+test("templates append a version instead of overwriting one, and a stale save is a conflict not a loss", async () => {
+  const h = await harness();
+  try {
+    const alice = await h.user("tpl@example.com");
+    const bob = await h.user("tpl-bob@example.com");
+    const body = "Bias {{checklist.dailyBias}}";
+
+    assert.equal(await h.store.findCurrentTemplate(alice, "morning"), null);
+    const first = await h.store.saveTemplate({ userId: alice, name: "  morning  ", body, expectedVersion: null, at: T0 });
+    assert.equal(first.status, "saved");
+    if (first.status !== "saved") return;
+    // The name is trimmed on write, so what the user typed and what is stored agree.
+    assert.equal(first.record.name, "morning");
+    assert.equal(first.record.version, 1);
+
+    // Creating a name that already exists is a conflict, never a replace or a rename.
+    const clash = await h.store.saveTemplate({ userId: alice, name: "morning", body: "other", expectedVersion: null, at: at(1) });
+    assert.equal(clash.status, "conflict");
+
+    // The safe update: version 2 becomes current and version 1 is still readable.
+    const second = await h.store.saveTemplate({ userId: alice, name: "morning", body: `${body} v2`, expectedVersion: 1, at: at(2) });
+    assert.equal(second.status, "saved");
+    if (second.status !== "saved") return;
+    assert.equal(second.record.version, 2);
+    const current = await h.store.findCurrentTemplate(alice, "morning");
+    assert.equal(current?.version, 2);
+    const { rows: history } = await h.engine.query(
+      `SELECT version, superseded_at IS NOT NULL AS retired FROM telegram_post_templates
+        WHERE user_id = $1::bigint AND name = 'morning' ORDER BY version`,
+      [alice],
+    );
+    assert.deepEqual(
+      history.map((r) => ({ version: Number(r["version"]), retired: r["retired"] === true })),
+      [{ version: 1, retired: true }, { version: 2, retired: false }],
+      "0037 stores the whole lineage",
+    );
+
+    // A save made from a preview the user has since replaced cannot write: the version they were
+    // shown is not the stored current one, so this is reported instead of overwriting their edit.
+    const stale = await h.store.saveTemplate({ userId: alice, name: "morning", body: "lost update", expectedVersion: 1, at: at(3) });
+    assert.equal(stale.status, "conflict");
+    assert.equal(await (async () => (await h.store.findCurrentTemplate(alice, "morning"))?.version)(), 2);
+
+    // Ownership: same name, different user, two independent templates.
+    await h.store.saveTemplate({ userId: bob, name: "morning", body: "bob's", expectedVersion: null, at: at(4) });
+    assert.equal((await h.store.findCurrentTemplate(bob, "morning"))?.body, "bob's");
+    assert.equal((await h.store.findCurrentTemplate(alice, "morning"))?.body, `${body} v2`);
+    assert.deepEqual((await h.store.listTemplates(alice)).map((t) => t.name), ["morning"]);
+
+    // Retiring is a tombstone: the name stops resolving, the rows stay.
+    assert.equal(await h.store.retireTemplate(alice, "morning", at(5)), true);
+    assert.equal(await h.store.findCurrentTemplate(alice, "morning"), null);
+    assert.equal(await h.store.retireTemplate(alice, "morning", at(6)), false, "retiring twice is a no-op, not an error");
+    const { rows: still } = await h.engine.query(`SELECT count(*)::int AS n FROM telegram_post_templates WHERE user_id = $1::bigint`, [alice]);
+    assert.equal(still[0]!["n"], 2, "a retired name never deletes history");
+    // And the name is free again for a NEW template at version 1 (no current row to conflict with).
+    const again = await h.store.saveTemplate({ userId: alice, name: "morning", body: "fresh", expectedVersion: null, at: at(7) });
+    assert.equal(again.status, "saved");
+    if (again.status === "saved") assert.equal(again.record.version, 3, "versions never repeat for one name");
+  } finally {
+    await h.engine.close();
+  }
+});
+
+test("a prepared post is claimed once, approved only for its exact bytes, and published by a single claim", async () => {
+  const h = await harness();
+  try {
+    const alice = await h.user("post@example.com");
+    const bob = await h.user("post-bob@example.com");
+    const { rows: chRows } = await h.engine.query(
+      `INSERT INTO telegram_channels (user_id, chat_id, title, chat_type, status, can_post, verified_at)
+       VALUES ($1::bigint, -100123, 'Velora Journal', 'channel', 'ACTIVE', true, now()) RETURNING id::text AS id`,
+      [alice],
+    );
+    const channelId = String(chRows[0]!["id"]);
+    const hash = "a".repeat(64);
+    const claim = (over: Record<string, unknown> = {}) =>
+      h.store.claimPost({
+        userId: alice,
+        channelId,
+        chatId: "-100123",
+        body: "Bias bullish",
+        contentHash: hash,
+        dedupeKey: "update:42",
+        bannerSvg: null,
+        imageFileId: null,
+        templateKey: "velora.bias",
+        templateVersion: 1,
+        at: T0,
+        ...over,
+      });
+
+    const fresh = await claim();
+    assert.equal(fresh.status, "claimed");
+    assert.equal(fresh.post.status, "DRAFT");
+    // A re-delivered update with the same dedupe key gets the SAME row back and must not send.
+    const again = await claim({ at: at(1) });
+    assert.equal(again.status, "duplicate");
+    assert.equal(again.post.id, fresh.post.id);
+
+    // bob cannot borrow alice's channel binding: the composite (channel_id, user_id) owner FK in
+    // 0037 refuses it in the database, so a guessed channel id can never queue someone else's post.
+    await assert.rejects(
+      () => claim({ userId: bob, channelId, dedupeKey: "update:42", at: at(2) }),
+      /violates foreign key constraint/i,
+      "the channel a post is aimed at must belong to the user who prepared it",
+    );
+    // With a channel of his own, the SAME dedupe key is a different row: the key is scoped to the
+    // owner, so two users never collide on `update:42`.
+    const { rows: bobChannel } = await h.engine.query(
+      `INSERT INTO telegram_channels (user_id, chat_id, title, chat_type, status, can_post, verified_at)
+       VALUES ($1::bigint, -100456, 'Bob Journal', 'channel', 'ACTIVE', true, now()) RETURNING id::text AS id`,
+      [bob],
+    );
+    const theirs = await claim({ userId: bob, channelId: String(bobChannel[0]!["id"]), chatId: "-100456", dedupeKey: "update:42", at: at(2) });
+    assert.equal(theirs.status, "claimed");
+
+    // Approval is bound to content: a preview whose bytes moved on cannot be approved by an old tap.
+    assert.equal(await h.store.approvePost({ userId: alice, postId: fresh.post.id, contentHash: "b".repeat(64), at: at(3) }), null);
+    const approved = await h.store.approvePost({ userId: alice, postId: fresh.post.id, contentHash: hash, at: at(4) });
+    assert.equal(approved?.status, "APPROVED");
+    // Re-approving the same bytes is idempotent (a retry of the button, not a second event).
+    assert.equal((await h.store.approvePost({ userId: alice, postId: fresh.post.id, contentHash: hash, at: at(5) }))?.status, "APPROVED");
+
+    // Publication is a claim, so two simultaneous "Publish" taps produce one send.
+    assert.equal(await h.store.claimPublish({ userId: alice, postId: fresh.post.id, maxAttempts: 3, at: at(6) }), true);
+    assert.equal(await h.store.claimPublish({ userId: alice, postId: fresh.post.id, maxAttempts: 3, at: at(7) }), false, "already PUBLISHING");
+    // A different user cannot claim it even knowing the id, and cannot finish it either.
+    assert.equal(await h.store.claimPublish({ userId: bob, postId: fresh.post.id, maxAttempts: 3, at: at(8) }), false);
+    assert.equal(await h.store.finishPost({ userId: bob, postId: fresh.post.id, status: "PUBLISHED", message_id: "9", errorCode: null, at: at(9) }), null);
+
+    const published = await h.store.finishPost({ userId: alice, postId: fresh.post.id, status: "PUBLISHED", message_id: "555", errorCode: null, at: at(10) });
+    assert.equal(published?.status, "PUBLISHED");
+    assert.equal(published?.telegramMessageId, "555");
+    assert.equal(published?.publishedAt, at(10).toISOString());
+    // Published is terminal: a replay of the whole flow cannot post it a second time.
+    assert.equal(await h.store.claimPublish({ userId: alice, postId: fresh.post.id, maxAttempts: 3, at: at(11) }), false);
+    assert.equal((await h.store.findPost(alice, fresh.post.id))?.attempts, 1);
+
+    // A failure keeps the row retryable, labels WHY, and stops at the attempt bound.
+    const failed = await claim({ dedupeKey: "update:43", at: at(12) });
+    await h.store.approvePost({ userId: alice, postId: failed.post.id, contentHash: hash, at: at(13) });
+    await h.store.claimPublish({ userId: alice, postId: failed.post.id, maxAttempts: 3, at: at(14) });
+    const f = await h.store.finishPost({ userId: alice, postId: failed.post.id, status: "FAILED", message_id: null, errorCode: "CHANNEL_UNVERIFIED", at: at(15) });
+    assert.equal(f?.status, "FAILED");
+    assert.equal(f?.errorCode, "CHANNEL_UNVERIFIED");
+    assert.equal(f?.publishedAt, null, "a failure never reads as published");
+    assert.equal(await h.store.claimPublish({ userId: alice, postId: failed.post.id, maxAttempts: 3, at: at(16) }), true, "a FAILED post may be retried");
+    await h.store.finishPost({ userId: alice, postId: failed.post.id, status: "FAILED", message_id: null, errorCode: "SEND_FAILED", at: at(17) });
+    await h.store.claimPublish({ userId: alice, postId: failed.post.id, maxAttempts: 3, at: at(18) });
+    await h.store.finishPost({ userId: alice, postId: failed.post.id, status: "FAILED", message_id: null, errorCode: "SEND_FAILED", at: at(19) });
+    assert.equal(
+      await h.store.claimPublish({ userId: alice, postId: failed.post.id, maxAttempts: 3, at: at(20) }),
+      false,
+      "retries are bounded — a stuck destination is reported, not hammered",
+    );
+    const recent = await h.store.listRecentPosts(alice, 10);
+    assert.equal(recent.length, 2);
+    assert.deepEqual(recent.map((r) => r.status), ["FAILED", "PUBLISHED"], "newest first");
+    // The bound is clamped the same way the checklist reads are, whatever a caller asks for.
+    assert.equal((await h.store.listRecentPosts(alice, 10_000)).length, 2);
+  } finally {
+    await h.engine.close();
+  }
+});
+
+test("an image file id is written WITH the transition and can never be wiped by a later finish", async () => {
+  // WHY THIS IS ITS OWN TEST. `image_file_id` is the only column in the outbox that survives a state
+  // change on purpose: it is what lets a retry reuse a file Telegram already stores instead of uploading
+  // the same banner a second time, and it is what a reader would otherwise conclude was lost when a
+  // publication FAILED. So the write has to be ATOMIC with the transition (a follow-up UPDATE would leave
+  // a PUBLISHED row that briefly claims to have no image), and it has to be a COALESCE (a finish that
+  // carries no id must not erase the one already there). Both halves are pinned here.
+  const h = await harness();
+  try {
+    const alice = await h.user("img@example.com");
+    const { rows: chRows } = await h.engine.query(
+      `INSERT INTO telegram_channels (user_id, chat_id, title, chat_type, status, can_post, verified_at)
+       VALUES ($1::bigint, -100777, 'Velora Images', 'channel', 'ACTIVE', true, now()) RETURNING id::text AS id`,
+      [alice],
+    );
+    const channelId = String(chRows[0]!["id"]);
+    const hash = "c".repeat(64);
+    const claim = (over: Record<string, unknown> = {}) =>
+      h.store.claimPost({
+        userId: alice,
+        channelId,
+        chatId: "-100777",
+        body: "Bias bullish",
+        contentHash: hash,
+        dedupeKey: "update:70",
+        bannerSvg: null,
+        imageFileId: null,
+        templateKey: "velora.bias",
+        templateVersion: 1,
+        at: T0,
+        ...over,
+      });
+
+    // (1) A post created with no image learns the id in the SAME statement that publishes it.
+    const fresh = await claim();
+    assert.equal(fresh.post.imageFileId, null);
+    await h.store.approvePost({ userId: alice, postId: fresh.post.id, contentHash: hash, at: at(1) });
+    assert.equal(await h.store.claimPublish({ userId: alice, postId: fresh.post.id, maxAttempts: 3, at: at(2) }), true);
+    const sent = await h.store.finishPost({
+      userId: alice,
+      postId: fresh.post.id,
+      status: "PUBLISHED",
+      message_id: "501",
+      errorCode: null,
+      imageFileId: "AGENT-BANNER-1",
+      at: at(3),
+    });
+    assert.equal(sent?.status, "PUBLISHED", "the transition happened");
+    assert.equal(sent?.imageFileId, "AGENT-BANNER-1", "and the id arrived with it, not after it");
+    assert.equal((await h.store.findPost(alice, fresh.post.id))?.imageFileId, "AGENT-BANNER-1", "it is the row, not a projection");
+
+    // (2) A row that already has an id keeps it through a finish that names none — the retry-reuse case,
+    // and the reason `imageFileId: null` must mean "nothing to say", never "erase it".
+    const withChart = await claim({ dedupeKey: "update:71", imageFileId: "AGENT-CHART-9", at: at(4) });
+    assert.equal(withChart.post.imageFileId, "AGENT-CHART-9");
+    await h.store.approvePost({ userId: alice, postId: withChart.post.id, contentHash: hash, at: at(5) });
+    await h.store.claimPublish({ userId: alice, postId: withChart.post.id, maxAttempts: 3, at: at(6) });
+    const failed = await h.store.finishPost({
+      userId: alice,
+      postId: withChart.post.id,
+      status: "FAILED",
+      message_id: null,
+      errorCode: "SEND_FAILED",
+      at: at(7),
+    });
+    assert.equal(failed?.status, "FAILED");
+    assert.equal(failed?.imageFileId, "AGENT-CHART-9", "a failed send must not throw away the upload");
+    await h.store.claimPublish({ userId: alice, postId: withChart.post.id, maxAttempts: 3, at: at(8) });
+    const retried = await h.store.finishPost({
+      userId: alice,
+      postId: withChart.post.id,
+      status: "PUBLISHED",
+      message_id: "502",
+      errorCode: null,
+      imageFileId: null,
+      at: at(9),
+    });
+    assert.equal(retried?.imageFileId, "AGENT-CHART-9", "an explicit null is 'nothing to add'");
+
+    // (3) Only a real transition touches it: while a row is DRAFT there is nothing to finish, so a stray
+    // call must not park a file id on a post nobody approved for sending.
+    const draft = await claim({ dedupeKey: "update:72", at: at(10) });
+    assert.equal(
+      await h.store.finishPost({
+        userId: alice,
+        postId: draft.post.id,
+        status: "PUBLISHED",
+        message_id: "503",
+        errorCode: null,
+        imageFileId: "AGENT-BANNER-2",
+        at: at(11),
+      }),
+      null,
+      "a DRAFT row is not publishable, so nothing is written at all",
+    );
+    assert.equal((await h.store.findPost(alice, draft.post.id))?.imageFileId, null);
+  } finally {
+    await h.engine.close();
+  }
+});

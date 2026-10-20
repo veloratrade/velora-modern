@@ -599,3 +599,577 @@ test("0014 provisioning_operations: the database enforces idempotency and refuse
     }
   } finally { await engine.close(); }
 });
+
+test("0036 daily checklist: one row per (user, day), coherence enforced, no float, no silent completion", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    const u = await engine.query(
+      "INSERT INTO users(email, password_hash) VALUES ('checklist@0036.example','x') RETURNING id",
+    );
+    const uid = (u.rows as { id: string | number }[])[0]!.id;
+    const ITEM = '{"dailyBias":{"state":"CONFIRMED","value":"BULLISH","normalised":true}}';
+    // The store never writes `unreviewed_items`: it is generated as 11 - confirmed - unknown.
+    const ins = (
+      items: string,
+      confirmed: number,
+      unreviewed: number,
+      unknown: number,
+      state: string,
+      reviewedAt: string | null,
+      riskUnit = "UNSPECIFIED",
+      risk: string | null = null,
+      notes: string | null = null,
+      date = "2026-10-18",
+    ) =>
+      engine.query(
+        `INSERT INTO journal_daily_checklists
+           (user_id, report_date, items, confirmed_items, unknown_items,
+            review_state, reviewed_at, risk_unit, risk_value, notes)
+         VALUES ($1, $2::date, $3::jsonb, $4, $5, $6, $7, $8, $9, $10)`,
+        [uid, date, items, confirmed, unknown, state, reviewedAt, riskUnit, risk, notes],
+      );
+
+    // The ordinary write works, and decimals come back as strings at ledger scale — never a float.
+    await ins(ITEM, 1, 10, 0, "PARTIAL", null, "PERCENT", "0.50");
+    const back = await engine.query(
+      "SELECT risk_value, stop_loss, review_state FROM journal_daily_checklists WHERE user_id = $1",
+      [uid],
+    );
+    const row = (back.rows as Record<string, unknown>[])[0]!;
+    assert.equal(row["review_state"], "PARTIAL");
+    assert.equal(typeof row["risk_value"], "string", "numeric must not arrive as a JS number");
+    assert.match(String(row["risk_value"]), /^0\.50000000$/, "scale is part of the contract");
+
+    // One row per (user, day): a Telegram retry, a double-tapped confirm or a re-sent voice note
+    // all collide with the idempotency key instead of creating a second review.
+    await assert.rejects(
+      ins('{"dailyBias":{"state":"UNKNOWN","value":null,"normalised":false}}', 0, 10, 1, "UNREVIEWED", null),
+      /duplicate key|violates unique constraint/i,
+      "the same day must not be insertable twice",
+    );
+    // ...while a different day for the same user is a separate, legitimate report.
+    await ins(ITEM, 1, 10, 0, "PARTIAL", null, "UNSPECIFIED", null, null, "2026-10-19");
+
+    // Counts cannot disagree: the unreviewed figure is generated, and a writer cannot even name it.
+    await assert.rejects(
+      engine.query(
+        `INSERT INTO journal_daily_checklists (user_id, report_date, items, unreviewed_items)
+         VALUES ($1, '2026-10-20'::date, '{}'::jsonb, 3)`,
+        [uid],
+      ),
+      /generated column|non-DEFAULT value into column/i,
+      "unreviewed_items is derived, never supplied",
+    );
+    const derived = await engine.query(
+      `SELECT unreviewed_items FROM journal_daily_checklists
+        WHERE user_id = $1 AND report_date = '2026-10-19'::date`,
+      [uid],
+    );
+    assert.equal(String((derived.rows as { unreviewed_items: string }[])[0]!.unreviewed_items), "10");
+    // "Complete" is not a label a writer may apply at will.
+    await assert.rejects(
+      ins(ITEM, 1, 10, 0, "CONFIRMED", "2026-10-18T12:00:00Z"),
+      /violates check constraint/i,
+      "CONFIRMED requires every item confirmed",
+    );
+    await assert.rejects(
+      ins(ITEM, 11, 0, 0, "CONFIRMED", null),
+      /violates check constraint/i,
+      "a completed review carries its stamp",
+    );
+    // A unit claim about an absent number is refused rather than stored as noise.
+    await assert.rejects(
+      ins(ITEM, 1, 10, 0, "PARTIAL", null, "PERCENT", null),
+      /violates check constraint/i,
+      "risk_unit without a value",
+    );
+    // The JSONB gate is a shape gate only — it does not pretend to judge trading content.
+    await assert.rejects(
+      ins("[]", 0, 11, 0, "UNREVIEWED", null),
+      /violates check constraint/i,
+      "items must be a JSON object",
+    );
+    await assert.rejects(
+      ins(ITEM, 1, 10, 0, "PARTIAL", null, "UNSPECIFIED", null, "x".repeat(2001)),
+      /value too long|violates check constraint/i,
+      "notes are bounded",
+    );
+
+    // The audit vocabulary was widened, not loosened: the new action is allowed, and a
+    // free-text action is still rejected by the database.
+    await engine.query(
+      `INSERT INTO audit_log(action, actor_user_id, target_user_id, request_id)
+       VALUES ('JOURNAL_CHECKLIST_SAVED', $1, $1, '0036-test')`,
+      [uid],
+    );
+    await assert.rejects(
+      engine.query(
+        `INSERT INTO audit_log(action, actor_user_id, target_user_id, request_id)
+         VALUES ('JOURNAL_CHECKLIST_YOLO', $1, $1, '0036-test')`,
+        [uid],
+      ),
+      /violates check constraint/i,
+      "audit actions remain a closed set",
+    );
+    // `outcome` is still the single permitted value, and 0023's provider vocabulary is intact:
+    // widening one CHECK must not have quietly relaxed its neighbours.
+    await assert.rejects(
+      engine.query(
+        `INSERT INTO audit_log(action, actor_user_id, target_user_id, outcome)
+         VALUES ('JOURNAL_CHECKLIST_SAVED', $1, $1, 'failure')`,
+        [uid],
+      ),
+      /violates check constraint/i,
+      "audit outcome vocabulary unchanged",
+    );
+    await assert.rejects(
+      engine.query(
+        `INSERT INTO audit_log(action, actor_user_id, target_user_id, provider)
+         VALUES ('JOURNAL_CHECKLIST_SAVED', $1, $1, 'STRIPES')`,
+        [uid],
+      ),
+      /violates check constraint/i,
+      "audit provider vocabulary unchanged",
+    );
+  } finally {
+    await engine.close();
+  }
+});
+
+test("0040 audit vocabulary: the two restored actions are writable again, and publishing has a name", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    const uid = await seedCredUser(engine, "audit0040@example.com");
+
+    // PART 1 — the defect. These two were dropped by 0036's rewrite of the same constraint and had been
+    // unwritable ever since. Asserting them HERE (rather than trusting the list in the migration file) is
+    // the only thing that catches the next migration that rewrites the CHECK and forgets someone.
+    for (const action of [
+      "OWNERSHIP_CLAIMED", "USER_ROLE_CHANGED", "USER_STATUS_CHANGED",
+      "CREDENTIAL_CREATED", "CREDENTIAL_DELETED", "CREDENTIAL_USED", "ACCOUNT_BINDING_CHANGED",
+      "TELEGRAM_LINK_STARTED", "TELEGRAM_LINK_COMPLETED", "TELEGRAM_LINK_FAILED", "TELEGRAM_UNLINKED",
+      "TELEGRAM_CHANNEL_BOUND", "TELEGRAM_CHANNEL_UNBOUND",
+      "USER_SESSIONS_REVOKED", "USER_EMAIL_VERIFIED",
+      "JOURNAL_CHECKLIST_SAVED",
+    ]) {
+      await engine.query(`INSERT INTO audit_log(action, actor_user_id) VALUES ('${action}', ${uid})`);
+    }
+
+    // PART 2 — the addition. `after_state` carries the post and the Telegram message id: enough to
+    // correlate, and no copy of the content, which already has a row of its own.
+    await engine.query(
+      `INSERT INTO audit_log(action, actor_user_id, outcome, after_state)
+       VALUES ('TELEGRAM_POST_PUBLISHED', ${uid}, 'success', 'post:41 message:9031')`,
+    );
+    const rows = await engine.query(
+      `SELECT action, after_state FROM audit_log WHERE action = 'TELEGRAM_POST_PUBLISHED'`,
+    );
+    assert.equal((rows.rows as unknown[]).length, 1);
+
+    // The vocabulary is still a vocabulary: an action nobody declared is refused, and the outcome set is
+    // unchanged. A widening that let `NOPE` or `maybe` through would mean the constraint was replaced by
+    // a column comment.
+    await assert.rejects(
+      engine.query(`INSERT INTO audit_log(action, actor_user_id) VALUES ('TELEGRAM_POST_SENT_TO_WORLD', ${uid})`),
+      /audit_log_action_check/i,
+      "an undescribed publish action must not be inventable at runtime",
+    );
+    await assert.rejects(
+      engine.query(`INSERT INTO audit_log(action, actor_user_id, outcome) VALUES ('TELEGRAM_POST_PUBLISHED', ${uid}, 'maybe')`),
+      /audit_log_outcome_check/i,
+    );
+
+    // And the constraint is exactly one object, not a leftover plus a new one: two live CHECKs would let a
+    // future migration satisfy the wrong one.
+    const constraints = await engine.query(
+      `SELECT conname FROM pg_constraint WHERE conrelid = 'audit_log'::regclass AND contype = 'c' AND conname LIKE 'audit\_log\_action%'`,
+    );
+    assert.equal((constraints.rows as unknown[]).length, 1, "one action CHECK, replaced rather than stacked");
+  } finally {
+    await engine.close();
+  }
+});
+
+test("0039 admin-managed tool secrets: the vocabulary widened, the envelope rules did not", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    const cols = await engine.query(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'ai_platform_secrets' ORDER BY ordinal_position`,
+    );
+    const names = (cols.rows as { column_name: string }[]).map((r) => r.column_name);
+    for (const required of ["secret_key", "enc_version", "key_version", "algorithm", "iv", "auth_tag", "secret_ciphertext"]) {
+      assert.ok(names.includes(required), `the envelope columns must survive the widening: ${required}`);
+    }
+    const enc = (v: string) => Buffer.from(v, "utf8");
+    // 0010's `ai_platform_secrets_nonce_unique` is UNIQUE (key_version, iv): a GCM nonce may never be
+    // reused under one key. Every write below therefore carries its own 12-byte IV, and the LAST
+    // assertion is what proves that rule still binds the new keys.
+    let nonce = 0;
+    const freshIv = () => enc(`iv-${String(++nonce).padStart(9, "0")}`); // "iv-" + 9 chars = 12 bytes
+    const ins = (key: string, over: Partial<Record<string, unknown>> = {}) =>
+      engine.query(
+        `INSERT INTO ai_platform_secrets (secret_key, enc_version, key_version, algorithm, iv, auth_tag, secret_ciphertext)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          key,
+          over["enc_version"] ?? 1,
+          over["key_version"] ?? 1,
+          over["algorithm"] ?? "aes-256-gcm",
+          over["iv"] ?? freshIv(),
+          over["auth_tag"] ?? enc("0000000000000000"),
+          over["secret_ciphertext"] ?? enc("ciphertext"),
+        ],
+      );
+
+    // FIRST: the refusals. They are run before any happy-path write on purpose — a rejected insert
+    // leaves no row, so a key used here is still free for the writes below, and none of these can be
+    // mistaken for a primary-key collision (which would look the same and prove nothing).
+    await assert.rejects(ins("TOOL_CONFIG"), /violates check constraint/i, "no arbitrary secret names");
+    await assert.rejects(ins("OPENAI_API_KEY_2"), /violates check constraint/i, "no prefixed variants");
+    await assert.rejects(ins("BRAVE_SEARCH_API_KEY", { iv: enc("tooshort") }), /iv_check/i, "the GCM nonce stays exactly 12 bytes");
+    await assert.rejects(ins("SERPER_API_KEY", { auth_tag: enc("nope") }), /auth_tag_check/i, "the tag stays 16 bytes");
+    await assert.rejects(ins("BROWSERLESS_URL", { algorithm: "aes-256-cbc" }), /algorithm_check/i, "no algorithm downgrade for a tool key either");
+    await assert.rejects(ins("BROWSERLESS_TOKEN", { secret_ciphertext: enc("") }), /secret_ciphertext_check/i, "an empty ciphertext is not a secret");
+    await assert.rejects(ins("GEMINI_RELAY_TOKEN", { key_version: 0 }), /key_version_check/i, "key_version starts at 1");
+    await assert.rejects(ins("TAVILY_API_KEY", { enc_version: 2 }), /enc_version_check/i, "the envelope format version is pinned");
+
+    // THEN: every key writes — the four that already existed (a widening must not break a stored
+    // secret) and the five tools added by 0039 (each ONE credential, never a combined blob).
+    for (const key of [
+      "GEMINI_API_KEY", "OPENAI_API_KEY", "GEMINI_RELAY_URL", "GEMINI_RELAY_TOKEN",
+      "TAVILY_API_KEY", "BRAVE_SEARCH_API_KEY", "SERPER_API_KEY", "BROWSERLESS_URL", "BROWSERLESS_TOKEN",
+    ]) {
+      await ins(key);
+    }
+    // One envelope per name: rotation replaces, it does not accumulate history in the secret table.
+    await assert.rejects(ins("TAVILY_API_KEY"), /ai_platform_secrets_pkey/i, "one row per secret key");
+
+    // And the nonce pair is enforced for the NEW keys exactly as for the old ones — proved with an
+    // UPDATE so it cannot be confused with a fresh insert colliding on the primary key.
+    // The comparison is done entirely in SQL. Reading a BYTEA through a driver and handing it back can
+    // change its encoding (hex string vs Buffer), and a test that fails on an encoding artefact would
+    // prove nothing about the constraint.
+    await assert.rejects(
+      engine.query(
+        `UPDATE ai_platform_secrets
+            SET iv = (SELECT iv FROM ai_platform_secrets WHERE secret_key = 'GEMINI_API_KEY')
+          WHERE secret_key = 'TAVILY_API_KEY'`,
+      ),
+      /nonce_unique/i,
+      "the same (key_version, iv) may never carry a second secret",
+    );
+  } finally {
+    await engine.close();
+  }
+});
+test("0038 channel standby: a second verified channel can be kept without revoking the first", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    const u = await engine.query("INSERT INTO users(email, password_hash) VALUES ('standby@0038.example','x') RETURNING id");
+    const uid = (u.rows as { id: string | number }[])[0]!.id;
+    const ins = (chatId: number, status: string, revokedAt: string | null = null) =>
+      engine.query(
+        `INSERT INTO telegram_channels (user_id, chat_id, title, chat_type, status, can_post, verified_at, revoked_at)
+         VALUES ($1, $2, 'C', 'channel', $3, true, now(), $4)`,
+        [uid, chatId, status, revokedAt],
+      );
+
+    await ins(-1001, "ACTIVE");
+    // STANDBY is the state that lets a second verified binding exist without pretending the first
+    // was revoked — and exactly one ACTIVE per user still holds.
+    await ins(-1002, "STANDBY");
+    await assert.rejects(ins(-1003, "ACTIVE"), /violates unique constraint|violates unique index/i,
+      "one active mirror per user is unchanged by 0038");
+    // A STANDBY row that also claims a revocation is a contradiction, and the pair is refused.
+    await assert.rejects(ins(-1004, "STANDBY", "2026-10-19T00:00:00Z"), /violates check constraint/i,
+      "standby is not revoked");
+    // The old lifecycle rule still bites REVOKED, i.e. 0038 relaxed nothing beside the value list.
+    await assert.rejects(ins(-1005, "REVOKED"), /violates check constraint/i, "REVOKED needs revoked_at");
+    // And the vocabulary is still closed: an invented state is not accepted.
+    await assert.rejects(ins(-1006, "PAUSED"), /violates check constraint/i, "statuses remain a closed set");
+
+    // Re-selecting the standby channel is a state change, not a new binding: same row, same
+    // verification facts, and the previously active one moves the other way.
+    await engine.query(`UPDATE telegram_channels SET status = 'STANDBY' WHERE user_id = $1 AND chat_id = -1001`, [uid]);
+    await engine.query(`UPDATE telegram_channels SET status = 'ACTIVE' WHERE user_id = $1 AND chat_id = -1002`, [uid]);
+    const active = await engine.query(
+      `SELECT chat_id FROM telegram_channels WHERE user_id = $1 AND status = 'ACTIVE'`,
+      [uid],
+    );
+    // `String(...)` because an int8 comes back as a string from `pg` and as a number from PGlite;
+    // the assertion is about WHICH chat is active, not about the driver's numeric mapping.
+    assert.equal(String((active.rows as { chat_id: string | number }[])[0]!.chat_id), "-1002");
+    const kept = await engine.query(
+      `SELECT can_post, verified_at IS NOT NULL AS verified FROM telegram_channels WHERE user_id = $1 AND chat_id = -1001`,
+      [uid],
+    );
+    const row = (kept.rows as { can_post: boolean; verified: boolean }[])[0]!;
+    assert.equal(row.can_post, true, "a demotion must not erase the server-observed capability");
+    assert.equal(row.verified, true, "…nor the fact that it was verified");
+  } finally {
+    await engine.close();
+  }
+});
+
+test("0037 templates and outbox posts: one current version per name, approval bound to content, publication bound to a message id", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    const u = await engine.query(
+      "INSERT INTO users(email, password_hash) VALUES ('templates@0037.example','x') RETURNING id",
+    );
+    const uid = (u.rows as { id: string | number }[])[0]!.id;
+    const other = await engine.query(
+      "INSERT INTO users(email, password_hash) VALUES ('other@0037.example','x') RETURNING id",
+    );
+    const otherUid = (other.rows as { id: string | number }[])[0]!.id;
+    const ch = await engine.query(
+      `INSERT INTO telegram_channels (user_id, chat_id, title, chat_type, status, can_post, verified_at)
+       VALUES ($1, -100123, 'Velora Test', 'channel', 'ACTIVE', true, now()) RETURNING id`,
+      [uid],
+    );
+    const channelId = (ch.rows as { id: string }[])[0]!.id;
+
+    const tpl = (name: string, body: string, version = 1, supersededAt: string | null = null) =>
+      engine.query(
+        `INSERT INTO telegram_post_templates (user_id, name, body, version, superseded_at)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [uid, name, body, version, supersededAt],
+      );
+
+    await tpl("morning", "Bias {{checklist.dailyBias}}");
+    // A name addresses ONE live template…
+    await assert.rejects(tpl("morning", "different body"), /duplicate key|violates unique constraint/i,
+      "two current rows for one name must be unrepresentable");
+    // …and the safe update is an append: the old version stays readable, the bump is unique.
+    // The safe update is an APPEND: bump the version and stamp the row it replaces, atomically.
+    // Doing it in one transaction is what makes "two current rows" impossible to observe, and a
+    // lost update (two writers both believing they are version 2) has to surface as a violation.
+    await engine.query("BEGIN");
+    await engine.query(
+      `UPDATE telegram_post_templates SET superseded_at = now()
+        WHERE user_id = $1 AND name = 'morning' AND superseded_at IS NULL`,
+      [uid],
+    );
+    await tpl("morning", "Bias {{checklist.dailyBias}} v2", 2);
+    await engine.query("COMMIT");
+    await assert.rejects(tpl("morning", "dup version", 2), /duplicate key|violates unique constraint/i,
+      "version (user,name,2) already exists");
+    // Half the append — a new current row while the old one is still current — is the lost update,
+    // and the partial unique index is what refuses it.
+    await assert.rejects(tpl("morning", "racing", 3), /duplicate key|violates unique constraint/i,
+      "two current versions of one name must be unrepresentable");
+    const current = await engine.query(
+      `SELECT version, body FROM telegram_post_templates
+        WHERE user_id = $1 AND name = 'morning' AND superseded_at IS NULL`,
+      [uid],
+    );
+    const cur = (current.rows as { version: string; body: string }[])[0]!;
+    assert.equal(String(cur.version), "2");
+    assert.match(cur.body, /v2$/u);
+    // and the row that was replaced is still readable — "what did the post say yesterday?"
+    const history = await engine.query(
+      `SELECT version, body FROM telegram_post_templates
+        WHERE user_id = $1 AND name = 'morning' AND superseded_at IS NOT NULL ORDER BY version`,
+      [uid],
+    );
+    assert.deepEqual((history.rows as { version: string }[]).map((r) => String(r.version)), ["1"]);
+    // A name is addressed case-insensitively by the domain, but the two spellings stay distinct
+    // rows here — folding them in the schema would make them unaddressable apart.
+    await tpl("Morning", "another");
+    // Empty, whitespace-only and oversized bodies are refused at the door, not truncated in.
+    await assert.rejects(tpl("blank", ""), /violates check constraint/i, "empty body");
+    await assert.rejects(tpl("huge", "x".repeat(8001)), /violates check constraint/i, "oversized body");
+    await assert.rejects(tpl(" ", "x"), /violates check constraint/i, "blank name");
+    // Zero and negative versions would make "append" meaningless.
+    await assert.rejects(tpl("zero", "x", 0), /violates check constraint/i, "version > 0");
+    // Another user may keep the same name: the key is (user, name), never name alone.
+    await engine.query(
+      `INSERT INTO telegram_post_templates (user_id, name, body) VALUES ($1, 'morning', 'theirs')`,
+      [otherUid],
+    );
+
+    const H = (n: number) => n.toString(16).padStart(64, "0").slice(0, 64);
+    const post = (over: Record<string, string | number | null> = {}) => {
+      const hash = String(over["content_hash"] ?? H(1));
+      const cols: Record<string, string | number | null> = {
+        user_id: uid,
+        channel_id: channelId,
+        chat_id: -100123,
+        body: "Bias bullish",
+        content_hash: hash,
+        approved_hash: hash,
+        approved_at: "2026-10-19T09:00:00Z",
+        dedupe_key: `update-${Math.floor(Math.random() * 1e9)}`,
+        status: "APPROVED",
+        ...over,
+      };
+      const names = Object.keys(cols).join(", ");
+      const params = Object.keys(cols).map((_, i) => `$${i + 1}`).join(", ");
+      const sql = `INSERT INTO telegram_outbox_posts (${names}) VALUES (${params})`;
+      return engine.query(sql, Object.values(cols)).catch((err: unknown) => {
+        // Without this, a rejection at 4 a.m. says "violates check constraint" and nothing else.
+        throw new Error(`${(err as Error).message} :: ${names}`);
+      });
+    };
+
+    // The duplicate guard is per user: the same re-delivered update cannot post twice, while two
+    // users addressing the same channel stay independent rows.
+    await post({ dedupe_key: "update-1" });
+    await assert.rejects(post({ dedupe_key: "update-1" }), /duplicate key|violates unique constraint/i,
+      "the same dedupe key must never become a second publication");
+    // …while ANOTHER user with the same dedupe key is a separate row. Note this user gets their OWN
+    // channel: the composite owner FK makes "the same key on someone else's binding" impossible, and
+    // the cross-user insert below is the test that says so.
+    const ch2 = await engine.query(
+      `INSERT INTO telegram_channels (user_id, chat_id, title, chat_type, status, can_post, verified_at)
+       VALUES ($1, -100456, 'Other Test', 'channel', 'ACTIVE', true, now()) RETURNING id`,
+      [otherUid],
+    );
+    await engine.query(
+      `INSERT INTO telegram_outbox_posts (user_id, channel_id, chat_id, body, content_hash, approved_hash, approved_at, dedupe_key, status)
+       VALUES ($1, $2, -100456, 'other', $3, $3, now(), 'fixed-key', 'APPROVED')`,
+      [otherUid, (ch2.rows as { id: string }[])[0]!.id, H(1)],
+    );
+    // Approval is bound to the exact bytes: editing the content while approved is unrepresentable.
+    await assert.rejects(
+      engine.query(
+        `UPDATE telegram_outbox_posts SET body = 'edited after approval', content_hash = $2
+          WHERE user_id = $1 AND status = 'APPROVED'`,
+        [uid, H(2)],
+      ),
+      /violates check constraint/i,
+      "approved_hash must equal content_hash — an edit revokes the approval",
+    );
+    // A half-approval (a stamp with no hash, or a hash with no stamp) is refused.
+    await assert.rejects(post({ approved_hash: null }), /violates check constraint/i, "approved_at without approved_hash");
+    await assert.rejects(post({ approved_at: null }), /violates check constraint/i, "approved_hash without approved_at");
+    // DRAFT is the state that has not been approved at all, and it needs neither column.
+    await post({ status: "DRAFT", approved_hash: null, approved_at: null });
+    // Publication cannot be claimed without naming the message, nor claimed without approval.
+    await assert.rejects(
+      post({ status: "PUBLISHED", telegram_message_id: null, published_at: null }),
+      /violates check constraint/i,
+      "PUBLISHED requires a message id and a timestamp",
+    );
+    await assert.rejects(
+      post({ status: "CANCELLED", telegram_message_id: "12", published_at: "2026-10-19T09:01:00Z" }),
+      /violates check constraint/i,
+      "a message id means PUBLISHED and nothing else",
+    );
+    await assert.rejects(
+      post({ status: "PUBLISHED", telegram_message_id: "12", published_at: "2026-10-19T09:01:00Z", approved_hash: null, approved_at: null }),
+      /violates check constraint/i,
+      "nothing reaches a channel that its owner did not approve",
+    );
+    // A send in flight is a state, so "Publish" can be claimed exactly once — and an unapproved
+    // body still cannot sit in it.
+    await assert.rejects(
+      post({ status: "PUBLISHING", approved_hash: null, approved_at: null, dedupe_key: "publishing-no-approval" }),
+      /violates check constraint/i,
+      "nothing may enter PUBLISHING without covering its own bytes",
+    );
+    await post({ status: "PUBLISHING", dedupe_key: "publishing-ok" });
+    await assert.rejects(post({ status: "FAILED", error_code: null }), /violates check constraint/i, "FAILED requires a code");
+    await assert.rejects(post({ status: "FAILED", error_code: "Bad Request: chat not found" }), /violates check constraint/i,
+      "error_code must be a code, not a message");
+    await post({ status: "FAILED", error_code: "SEND_FAILED" });
+    // A hash that is not a sha256 is not a hash.
+    await assert.rejects(post({ content_hash: "1234" }), /violates check constraint/i, "content_hash shape");
+    // Artwork is bounded and a file id is a reference, not a token-bearing URL.
+    await assert.rejects(post({ banner_svg: "x".repeat(65537) }), /violates check constraint/i, "banner_svg bounded");
+    await assert.rejects(post({ image_file_id: "" }), /violates check constraint/i, "empty file id is not a reference");
+    // Retries are bounded, and the destination must belong to a channel row.
+    await assert.rejects(post({ attempts: 6 }), /violates check constraint/i, "attempts are bounded");
+    // A NEGATIVE destination must be storable (that is what a channel id is), and zero is not a
+    // destination at all.
+    await post({ chat_id: -100999, dedupe_key: "negative-chat-id" });
+    await assert.rejects(post({ chat_id: 0, dedupe_key: "zero-chat-id" }), /violates check constraint/i,
+      "chat_id 0 is not a destination");
+    await assert.rejects(
+      engine.query(
+        `INSERT INTO telegram_outbox_posts (user_id, channel_id, chat_id, body, content_hash, dedupe_key, status)
+         VALUES ($1, 999999, -1, 'x', $2, 'orphan', 'DRAFT')`,
+        [uid, H(3)],
+      ),
+      /violates foreign key constraint/i,
+      "a post must point at a channel this database knows",
+    );
+    // A foreign user cannot borrow this user's channel binding.
+    await assert.rejects(
+      engine.query(
+        `INSERT INTO telegram_outbox_posts (user_id, channel_id, chat_id, body, content_hash, dedupe_key, status)
+         VALUES ($1, $2, -100123, 'x', $3, 'cross-user', 'DRAFT')`,
+        [otherUid, channelId, H(4)],
+      ),
+      /violates foreign key constraint/i,
+      "the (channel, user) pair is the ownership anchor — the composite FK, not a filter",
+    );
+  } finally {
+    await engine.close();
+  }
+});
+
+test("0041 audit vocabulary: an operator's tool validation is writable, and nothing older was lost", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    const uid = await seedCredUser(engine, "audit0041@example.com");
+
+    // The full list, replayed against the FINAL schema. 0036's lesson is that a rewrite of this constraint
+    // can drop names silently, so the test for a widening is not "the new name works" — it is "every name
+    // the platform has ever recognised still works". A row for each is cheap; a lost action is a runtime
+    // error in front of an admin.
+    const everyAction = [
+      "OWNERSHIP_CLAIMED", "USER_ROLE_CHANGED", "USER_STATUS_CHANGED",
+      "CREDENTIAL_CREATED", "CREDENTIAL_DELETED", "CREDENTIAL_USED", "ACCOUNT_BINDING_CHANGED",
+      "TELEGRAM_LINK_STARTED", "TELEGRAM_LINK_COMPLETED", "TELEGRAM_LINK_FAILED", "TELEGRAM_UNLINKED",
+      "TELEGRAM_CHANNEL_BOUND", "TELEGRAM_CHANNEL_UNBOUND",
+      "USER_SESSIONS_REVOKED", "USER_EMAIL_VERIFIED",
+      "JOURNAL_CHECKLIST_SAVED",
+      "TELEGRAM_POST_PUBLISHED",
+      "AI_TOOL_VALIDATED",
+    ];
+    for (const action of everyAction) {
+      await engine.query(`INSERT INTO audit_log(action, actor_user_id) VALUES ('${action}', ${uid})`);
+    }
+    const written = await engine.query(`SELECT count(*)::int AS n FROM audit_log`);
+    assert.equal((written.rows as { n: number }[])[0]?.n, everyAction.length, "one row per action, none refused");
+
+    // The verdict shape the route writes: correlation only. A tool name and a fixed code are low
+    // cardinality; an endpoint or a provider body is not this column's business.
+    await engine.query(
+      `INSERT INTO audit_log(action, actor_user_id, outcome, after_state)
+       VALUES ('AI_TOOL_VALIDATED', ${uid}, 'success', 'tool:web_search verdict:ok')`,
+    );
+    const verdicts = await engine.query(
+      `SELECT after_state FROM audit_log WHERE action = 'AI_TOOL_VALIDATED' ORDER BY id DESC LIMIT 1`,
+    );
+    assert.match(String((verdicts.rows as { after_state: string | null }[])[0]?.after_state), /verdict:ok/u);
+
+    // `provider` is NOT widened by this migration: the search vendors are not in that vocabulary, and the
+    // row leaves it NULL. A migration that quietly accepted 'TAVILY' here would be putting a third-party
+    // name in the column that carries broker credential lifecycle.
+    await assert.rejects(
+      engine.query(`INSERT INTO audit_log(action, actor_user_id, provider) VALUES ('AI_TOOL_VALIDATED', ${uid}, 'TAVILY')`),
+      /audit_log_provider_check/i,
+      "the provider vocabulary belongs to 0023 and stays there",
+    );
+
+    // Still a closed set, and still exactly one live action CHECK.
+    await assert.rejects(
+      engine.query(`INSERT INTO audit_log(action, actor_user_id) VALUES ('AI_TOOL_SECRET_READ', ${uid})`),
+      /audit_log_action_check/i,
+    );
+    const constraints = await engine.query(
+      `SELECT conname FROM pg_constraint WHERE conrelid = 'audit_log'::regclass AND contype = 'c' AND conname LIKE 'audit\\_log\\_action%'`,
+    );
+    assert.equal((constraints.rows as unknown[]).length, 1, "one action CHECK, replaced rather than stacked");
+  } finally {
+    await engine.close();
+  }
+});

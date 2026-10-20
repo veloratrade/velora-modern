@@ -54,17 +54,29 @@ async function seedIdentity(engine: MigrationEngine, userId: string, telegramUse
   return String(rows[0]!["id"]);
 }
 
-test("0023: the six tables exist and the widened vocabularies accept exactly the new values", async () => {
+test("0023: the telegram tables exist and the widened vocabularies accept exactly the new values", async () => {
   const engine = await migrated();
   try {
     const tables = await engine.query(
       `SELECT table_name FROM information_schema.tables
         WHERE table_schema='public' AND table_name LIKE 'telegram\\_%' ORDER BY table_name`,
     );
-    assert.deepEqual(
-      tables.rows.map((r) => r["table_name"]),
-      ["telegram_channel_posts", "telegram_channels", "telegram_identities", "telegram_journal_drafts", "telegram_link_tokens", "telegram_updates"],
-    );
+    // The list is EXACT, not a subset check, and that is the point: a migration that adds a table has
+    // to be looked at here and justified. 0023 created five; 0037 added two —
+    // `telegram_post_templates` (a user's own bodies, versioned append-only under an owner) and
+    // `telegram_outbox_posts` (the content hash, the approval that binds it, the destination, the
+    // attempts). Both exist because publishing needs durability a CHECK cannot be bolted onto
+    // afterwards, not because a second place to keep state is nice to have.
+    assert.deepEqual(tables.rows.map((r) => r["table_name"]), [
+      "telegram_channel_posts",
+      "telegram_channels",
+      "telegram_identities",
+      "telegram_journal_drafts",
+      "telegram_link_tokens",
+      "telegram_outbox_posts",
+      "telegram_post_templates",
+      "telegram_updates",
+    ]);
 
     // audit_log: the SIX telegram actions and the second provider are vocabulary,
     // not free text — a typo in a service must be rejected by the database.
@@ -321,7 +333,18 @@ test("0035: completed update markers are backfilled and an unstarted update cann
     await engine.query("INSERT INTO telegram_updates(update_id, update_kind) VALUES (9005,'message')");
 
     const applied = await migrate(engine, MIGRATIONS);
-    assert.deepEqual(applied, ["0035_telegram_update_processing_guard.sql"]);
+    // What this pins is 0035's POSITION and SINGLENESS, not that it is the newest file in the
+    // repository. The original `deepEqual(applied, [0035])` broke the day 0036 landed for a reason that
+    // has nothing to do with the update-processing guard: a test that fails whenever the project
+    // legitimately grows is a snapshot of the tree, not a property of the migration.
+    assert.deepEqual(
+      applied.slice(0, 1),
+      ["0035_telegram_update_processing_guard.sql"],
+      "0035 must be the first thing this run applies",
+    );
+    for (const name of applied) {
+      assert.ok(name >= "0035_", `an older migration was re-applied on top of the prior state: ${name}`);
+    }
     const completed = (await engine.query("SELECT processing_started_at, processed_at FROM telegram_updates WHERE update_id=9004")).rows[0]!;
     assert.equal(new Date(String(completed["processing_started_at"])).toISOString(), processedAt.toISOString());
     const pending = (await engine.query("SELECT processing_started_at, processed_at FROM telegram_updates WHERE update_id=9005")).rows[0]!;
