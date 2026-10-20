@@ -1487,3 +1487,34 @@ runner's TS6305 guard did its job of refusing a half-built tree.)
 **Still open, honestly:** Railway staging is down (owner infra); the edge swap awaits owner confirmation;
 the Worker admin token is not held in this sandbox so `/stats`-class content checks are `BLOCKED` there;
 production does not exist and nothing was created toward it.
+
+---
+
+## 2026-10-20 (later) — `d0c0a31` fix(worker-cf): the round-3/4 surface reaches the deployed bot
+
+**The finding.** `apps/worker-cf` deployed and healthy was *not* the same as shipped. `TelegramBotDeps.posts`
+and `.tools` are optional by design ("ABSENT is a supported configuration"), so the host compiled, passed its
+60 tests, served `/health` and `/ready`, and journaled messages — while `/post`, `/template`, the inline publish
+buttons and the agent loop answered "that capability is not configured". `media` was
+`UnconfiguredMediaInterpreter`, so voice notes and screenshots were inert too. The round-3/4 work lived only in
+`apps/api`; the Workers composition root never handed it over. Proven mechanically: the new
+`src/runtimeWiring.test.ts` **fails against `594cd2c`'s runtime.ts** and passes against this one.
+
+**Migration impact:** none (no schema change; the 0036–0041 tables were already applied behind these services).
+
+**What changed.** `TelegramPostService` + `createPostDataPort` over the existing journal service; `AiSearchService`,
+`AiBrowserService`, `AiAgentPlanner` over the same Hyperdrive pool; `AiManagerMediaInterpreter` replacing the stub.
+`EnvironmentAiSecretResolver` keeps the D-2 rule intact — the worker still reads no admin-encrypted secret and no
+`CREDENTIAL_MASTER_KEY`. Banner rasterization stays declared-absent (`renderBannerPng` → `null`, no native resvg in
+workerd), so a publish posts the text card **and says so** rather than substituting an image.
+
+**Deploy evidence (live, this session).** Worker `velora-telegram-bot`,
+`https://velora-telegram-bot.yadgar-s-ict.workers.dev`, version id **`6f15c6dc-dc6f-4895-9162-85af8936b2f0`**
+(API version number 41; the previous deploy `9ba84512-…` reads as 40 — the id, not the number, is the identity).
+Post-checks: `/health` 200 `storage:postgres, access:armed` · `/ready` 200 `database:ok, telegram:enabled` ·
+`POST /api/v1/webhooks/telegram` 401 with no secret and 401 with a wrong one · `GET /api/v1/telegram/diagnostics`
+401 without a bearer. Gates before deploy: `tsc -p` 0, `tsx --test` **65/65**, wrangler dry-run bundle 854 KiB.
+
+**Still open, honestly.** `/post`, templates and the agent loop are now *wired* and *deployed*, but no end-to-end
+message was sent (the webhook secret and an admin bearer are not held in this sandbox) — so the functional label is
+`NOT VERIFIED (live)`, not PASS. The three-message check is in `docs/state/evidence/round6-staging/bot-wiring-v41.json`.

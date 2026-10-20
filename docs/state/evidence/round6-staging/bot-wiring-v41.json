@@ -1,0 +1,42 @@
+{
+  "round": 6,
+  "addendum": "worker-cf capability wiring",
+  "recorded_at": "2026-10-20",
+  "commit": "d0c0a31",
+  "previous_state": {
+    "commit": "594cd2c",
+    "defect": "composeRuntime built TelegramBot without `posts` or `tools`, and with UnconfiguredMediaInterpreter",
+    "why_it_was_invisible": "both deps are optional by contract; typecheck, /health, /ready and the 60 unit tests all pass with them absent",
+    "mechanical_proof": "runtimeWiring.test.ts fails against 594cd2c runtime.ts (posts=false, tools=false, stub=true) and passes against d0c0a31"
+  },
+  "gates": {
+    "worker_cf_tsc": "exit 0",
+    "worker_cf_tests": "65 pass / 0 fail (60 pre-existing + 5 wiring)",
+    "wrangler_dry_run": "854 KiB upload, bindings resolved (D1, Hyperdrive), exit 0",
+    "repo_typecheck": "tsc -b --force packages/contracts packages/domain apps/api apps/worker apps/web -> exit 0",
+    "npm_ci": "exit 0 (node_modules had been wiped by sandbox recycle)"
+  },
+  "deployment": {
+    "worker": "velora-telegram-bot",
+    "url": "https://velora-telegram-bot.yadgar-s-ict.workers.dev",
+    "version_id": "6f15c6dc-dc6f-4895-9162-85af8936b2f0",
+    "api_version_number": 41,
+    "previous_version_id": "9ba84512-91f4-46dd-912d-a9e410dca5a5",
+    "config": "wrangler.deploy-shell.jsonc (gitignored; real Hyperdrive 769298b9e39147e39b5e17167c9b7777), --keep-vars preserved provisioning",
+    "rollback": "POST /accounts/{account}/workers/scripts/velora-telegram-bot/versions/rollback with 9ba84512-91f4-46dd-912d-a9e410dca5a5"
+  },
+  "live_checks": {
+    "GET /health": "200 storage:postgres access:armed",
+    "GET /ready": "200 database:ok telegram:enabled reason:ok",
+    "POST /api/v1/webhooks/telegram (no secret)": "401",
+    "POST /api/v1/webhooks/telegram (wrong secret)": "401",
+    "GET /api/v1/telegram/diagnostics (no bearer)": "401",
+    "verification_level": "PASS for liveness/auth/deploy; NOT VERIFIED (live) for /post, templates and the agent loop, because no Telegram message was sent this session"
+  },
+  "owner_three_message_check": [
+    "/post today fa  -> expect a preview with inline publish buttons, not 'not configured'",
+    "a plain sentence with journal content -> expect a journal entry as before (no regression)",
+    "ask the bot to publish / use a search-backed request -> expect either a real action or a refusal naming the missing secret (AI_SEARCH_PROVIDER / BROWSERLESS_*); 'capability not configured' means the wiring regressed"
+  ],
+  "secrets": "no token, URI or key appears in this file; creds lived only in /tmp/vr7/creds.env (0600) and were shredded after use"
+}
