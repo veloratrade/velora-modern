@@ -60,6 +60,11 @@ const ROUTE_MODULES: readonly string[] = [
   join(REPO, "apps", "api", "src", "admin", "adminRoutes.ts"),
   join(REPO, "apps", "api", "src", "support", "supportRoutes.ts"),
   join(REPO, "apps", "api", "src", "kernel", "server.ts"),
+  // The AI surface — including the agent-tool panel. It was added to this list WITH the tab that reads it:
+  // `aiManage`/`aiRouteManage` are enforced in `aiAdminRoutes.ts` rather than in the admin console's own
+  // module, and a tab whose permission nobody checks server-side is exactly the bypass this test exists
+  // to catch.
+  join(REPO, "apps", "api", "src", "ai", "aiAdminRoutes.ts"),
 ];
 const APP_CSS = join(WEB, "src", "app", "(app)", "app.css");
 const SHELL_CSS = join(WEB, "src", "components", "layout", "shell.css");
@@ -78,9 +83,18 @@ const pageCode = pageSrc
   .replace(/^\s*\/\/.*$/gm, "")
   .replace(/\s\/\/.*$/gm, "");
 
-/** Every RBAC permission name declared in the contracts package. */
+/**
+ * Every RBAC permission name declared in the contracts package.
+ *
+ * DOTTED names are the house style, but Legacy's two AI permissions are deliberately UNDOTTED
+ * (`aiManage`, `aiRouteManage`, kept verbatim so `Role.php` diffs by name), and the agent-tool tab is
+ * gated on them. An earlier version of this scan matched only `x.y`, so widening it to accept a bare
+ * identifier is what keeps a real permission from being mistaken for a missing catalog key — and, on the
+ * other side of the same assertion, keeps `permission: "aiManage"` from failing the "is that a declared
+ * permission?" check with a false accusation.
+ */
 function declaredPermissions(): Set<string> {
-  return new Set([...read(RBAC).matchAll(/"([a-z_]+(?:\.[a-z_]+)+)"/g)].map((m) => m[1]!));
+  return new Set([...read(RBAC).matchAll(/"([a-z][A-Za-z0-9_]*(?:\.[a-z_]+)*)"/g)].map((m) => m[1]!));
 }
 
 /**
@@ -235,6 +249,34 @@ test("User 360 renders paginated login history through the guarded per-user cont
   assert.ok(kernel.includes('adminUsersRoute("users.view"'), "login history no longer uses users.view authorization");
   assert.ok(kernel.includes("maySeeSensitive"), "the route no longer omits sensitive fields for restricted callers");
   assert.ok(/ipAddress\?:/.test(resources) && /userAgent\?:/.test(resources), "sensitive history fields must remain optional");
+});
+
+test("a tool check's verdict is rendered from the RESPONSE, in both directions — never re-derived", () => {
+  // The browser pass (round 5) proved the ONLY honest picture: the list endpoint reports the KEYS and the
+  // 424 carries the same evidence envelope as the 200. Three ways this could rot, all silent:
+  //   1. the client starts swallowing non-2xx envelope data again — then the UI has "a failure" to show and
+  //      not WHICH failure, and the operator cannot tell INVALID_CREDENTIAL from a dead network;
+  //   2. the page re-reads the table expecting the row to flip — it never can (nothing is cached), so the
+  //      re-read is a wasted request that trains everyone to ignore what the table says;
+  //   3. a "Last checked" column comes back — under this contract it can only ever read "never", which is
+  //      the precise definition of a column that lies by being correct.
+  const resources = read(RESOURCES);
+  const client = read(join(WEB, "src", "lib", "api", "client.ts"));
+  assert.ok(resources.includes("adminAiToolVerdictFromError"), "the client no longer recovers the 424 verdict body");
+  assert.ok(/err\.status === 424/.test(resources), "the verdict recovery no longer keys on 424 specifically");
+  assert.ok(/payloadData/.test(client), "the shared client discards non-2xx envelope data again");
+  assert.ok(pageCode.includes("adminConsole.ai.noCache"), "the panel no longer explains that check results are never cached");
+  assert.ok(!pageCode.includes("adminConsole.ai.lastChecked"), "a 'Last checked' column is back on an endpoint that never caches a check");
+  // Scoped to `probe` itself: `load()` MAY (must, in fact) fetch the table — what may not happen again is
+  // the probe re-reading it underneath, as if a check were supposed to move the row.
+  const probeBody = pageCode.slice(pageCode.indexOf("async function probe"), pageCode.indexOf("if (loading)"));
+  assert.ok(probeBody.length > 100 && !probeBody.includes("getAdminAiTools"), "the probe re-reads the table expecting the state to have moved");
+  // Round 5's browser pass caught the same sentence printed twice on an `unsupported` row (badge AND the
+  // runtime suffix). The suffix only earns its place when it ADDS to the state word.
+  assert.ok(
+    pageCode.includes('row.state !== "unsupported"'),
+    "the runtime-unsupported suffix is printed unconditionally again — an `unsupported` row says it twice",
+  );
 });
 
 test("every class the console applies exists in the stylesheet", () => {

@@ -57,12 +57,17 @@ import {
   listPlatformTrades,
   listSecurityFeed,
   listSupportQueue,
+  getAdminAiTools,
   replySupportQueueTicket,
   revokeUserSessions,
   setUserRole,
   setUserStatus,
+  validateAdminAiTool,
   verifyUserEmail,
+  adminAiToolVerdictFromError,
   type AdminAccountRow,
+  type AdminAiToolVerdict,
+  type AdminAiToolsView,
   type AdminAuditRow,
   type AdminAuthEventRow,
   type AdminAuthHistoryView,
@@ -88,7 +93,7 @@ function useLocale(): Locale {
   return pathname !== null && pathname.startsWith("/en") ? "en" : "fa";
 }
 
-type TabKey = "overview" | "users" | "support" | "audit" | "security" | "system" | "analytics";
+type TabKey = "overview" | "users" | "support" | "audit" | "security" | "system" | "analytics" | "ai";
 
 /** Tab → the permission the SERVER checks. The same list the route layer uses;
  *  if the two ever disagreed the console would show a tab that answers 403. */
@@ -100,12 +105,227 @@ const TABS: readonly { key: TabKey; permission: string; labelKey: string }[] = [
   { key: "security", permission: "audit.view", labelKey: "admin.security.title" },
   { key: "system", permission: "system.health.view", labelKey: "admin.system.title" },
   { key: "analytics", permission: "analytics.view", labelKey: "admin.analytics.title" },
+  // Legacy's own undotted names, carried over verbatim by the RBAC table. READING the tool states is
+  // `aiManage` (admin + super admin); RUNNING a live check is `aiRouteManage` (super admin only), because
+  // that button spends a provider request on the platform's credential. The tab is therefore visible to an
+  // admin whose buttons are disabled — which is the honest UI, not a half-gate: a hidden tab would only
+  // hide the fact that the platform cannot search.
+  { key: "ai", permission: "aiManage", labelKey: "adminConsole.tab.aiTools" },
 ];
 
 /** Component key → label. SEVEN of the nine labels are Legacy's own keys; only the
  *  two subsystems Legacy never had a panel for (`adminConsole.component.*`) are
  *  authored. An unknown component key falls back to the raw key, so a subsystem
  *  added server-side is visible (and obviously unlocalized) rather than omitted. */
+/**
+ * The AGENT TOOL panel — what the platform can reach beyond a language model, and on what evidence.
+ *
+ * WHY IT IS NOT A BOOLEAN. The server answers with five states, and the difference between three of them
+ * is the whole reason an operator opens this screen: `unavailable` means a credential is missing (fixable
+ * here), `failing` means we asked and the provider refused (a revocation, an outage, a spent quota), and
+ * `unsupported` means this RUNTIME cannot host the capability at all — no key will change it. A panel that
+ * collapsed those into an on/off switch would send someone to configure a native module inside a Worker.
+ * So the state label comes from the server's vocabulary, and the `reason` code is printed beside it.
+ *
+ * THE STATE LABELS ARE WRITTEN OUT, not built as `prefix + state`: the console's key guard
+ * (`apps/web/src/i18n/adminSurface.test.ts`) scans STRING LITERALS, so a composed key would leave the
+ * screen without a check that every state has words in BOTH locales — and a missing translation in an
+ * admin surface reads as "the module is broken".
+ *
+ * WHY THE TABLE NEVER SHOWS `verified`. The list endpoint reports what the KEYS prove; a check's result
+ * travels with the check and is deliberately never cached — so a row that still reads `Configured, not
+ * checked` after a green verdict is the design REFUSING to let a credential revoked an hour ago look
+ * healthy until tomorrow. The verdict the operator just earned is therefore rendered from the check's own
+ * response, beside the instant it was made, and `adminConsole.ai.noCache` says why the table did not move.
+ * Painting the row green from page memory would state a fact the backend never claimed.
+ *
+ * WHY THE CHECK IS A BUTTON AND NOT AN AUTOMATIC REFRESH. `POST …/validate` performs one live request to
+ * the provider with the platform's own credential and writes an audit row. A screen that re-probed on
+ * mount would spend third-party quota every time an operator looked at it and would leave a trail full of
+ * machine-made "verifications". So the list is read-only until a human presses it, the result is stated in
+ * terms of what was asked (the row, refreshed silently), and the button only exists for a caller holding
+ * `aiRouteManage` — while the 403 still comes from the route, because a disabled button is a usability
+ * decision and never a security boundary.
+ */
+/** Every state the server may report, each with a literal key so the catalog guard can see it. */
+const AI_TOOL_STATE_KEYS: Record<string, string> = {
+  configured: "adminConsole.ai.state.configured",
+  verified: "adminConsole.ai.state.verified",
+  unavailable: "adminConsole.ai.state.unavailable",
+  failing: "adminConsole.ai.state.failing",
+  unsupported: "adminConsole.ai.state.unsupported",
+};
+
+function AiToolsTab({ locale, t, errorText, canProbe }: { locale: Locale; t: T; errorText: (e: unknown) => string; canProbe: boolean }): React.ReactElement {
+  const [data, setData] = useState<AdminAiToolsView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [verdict, setVerdict] = useState<{ tool: string; outcome: AdminAiToolVerdict } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    setError(null);
+    try {
+      setData(await getAdminAiTools());
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [errorText]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function probe(tool: string): Promise<void> {
+    setBusy(tool);
+    setVerdict(null);
+    setError(null);
+    try {
+      setVerdict({ tool, outcome: await validateAdminAiTool(tool) });
+    } catch (err) {
+      const carried = adminAiToolVerdictFromError(err);
+      if (carried !== null) {
+        // 424 is a VERDICT, not a transport failure, and its body carries the same evidence as a 200 —
+        // so the operator reads WHICH refusal (status, error code, latency, instant), not just "it failed".
+        // The table deliberately does not change under it: see `adminConsole.ai.noCache`.
+        setVerdict({ tool, outcome: carried });
+      } else if (err instanceof ApiError && err.status === 503) {
+        setError(t("adminConsole.ai.notVerifiable"));
+      } else if (err instanceof ApiError && err.status === 422) {
+        setError(t("adminConsole.ai.unknownTool"));
+      } else {
+        setError(errorText(err));
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="card">
+        <p className="muted-sm" role="status">{t("admin.analytics.loading")}</p>
+      </div>
+    );
+  }
+  if (error !== null && data === null) {
+    return (
+      <div className="card">
+        <ErrorNote text={error} />
+      </div>
+    );
+  }
+  if (data === null) {
+    return (
+      <div className="card">
+        <p className="muted-sm">{t("adminConsole.ai.empty")}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="page-head">
+        <div>
+          <h2 className="page-title">{t("adminConsole.ai.title")}</h2>
+          <p className="page-sub">{t("adminConsole.ai.subtitle")}</p>
+        </div>
+        {/* A count, not the word "Tool" floating alone (caught on the round-5 screenshots): the badge
+            must say something a reader could not already see by counting, or it is noise in the header. */}
+        <span className="badge">{t("adminConsole.ai.count", { count: String(data.items.length) })}</span>
+      </div>
+
+      <div className="card mt-8">
+        <div className="overflow-auto">
+          <table className="table mt-8" id="adm-ai-tools-table">
+            <thead>
+              <tr>
+                <th>{t("adminConsole.ai.tool")}</th>
+                <th>{t("adminConsole.ai.provider")}</th>
+                <th>{t("adminConsole.ai.state")}</th>
+                <th>{t("adminConsole.ai.secrets")}</th>
+                <th>{t("adminConsole.ai.reason")}</th>
+                <th>{t("adminConsole.ai.actions")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.items.map((row) => (
+                <tr key={row.tool}>
+                  <td className="text-12">{row.tool}</td>
+                  <td className="text-12">{row.provider}</td>
+                  <td>
+                    <span className={`badge${row.state === "failing" ? " badge-error" : ""}`}>
+                      {t(AI_TOOL_STATE_KEYS[row.state] ?? row.state, null, row.state)}
+                    </span>
+                    {/* The suffix is for rows whose STATE says something else while the RUNTIME cannot
+                        host them; when the state IS `unsupported` it has already said it — printing the
+                        same sentence twice read like a rendering fault, not like information. */}
+                    {!row.runtimeSupported && row.state !== "unsupported" ? ` · ${t("adminConsole.ai.state.unsupported")}` : ""}
+                  </td>
+                  <td className="text-12">
+                    {row.secrets.length === 0
+                      ? t("adminConsole.ai.noSecrets")
+                      : row.secrets
+                          .map((secret) => `${secret.key} — ${secret.present ? t("adminConsole.ai.secretPresent") : t("adminConsole.ai.secretAbsent")}${secret.source === "admin" ? ` (${t("adminConsole.ai.secretSourceAdmin")})` : secret.source === "env" ? ` (${t("adminConsole.ai.secretSourceEnv")})` : ""}`)
+                          .join(" · ")}
+                  </td>
+                  <td className="text-12">{row.reason ?? "—"}</td>
+                  <td>
+                    {canProbe ? (
+                      <button
+                        className="btn-ghost btn-sm"
+                        type="button"
+                        id={`adm-ai-validate-${row.tool}`}
+                        disabled={busy !== null}
+                        onClick={() => {
+                          void probe(row.tool);
+                        }}
+                      >
+                        {busy === row.tool ? t("adminConsole.ai.validating") : t("adminConsole.ai.validate")}
+                      </button>
+                    ) : (
+                      <span className="muted-sm text-12">{t("adminConsole.ai.needsPermission")}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {error !== null ? <ErrorNote text={error} /> : null}
+        {verdict !== null ? (
+          <p className="muted-sm text-12" role="status" id="adm-ai-verdict">
+            {verdict.outcome.ok ? t("adminConsole.ai.verdictOk") : t("adminConsole.ai.verdictFailed")}
+            {" — "}
+            {verdict.tool}
+            {" · "}
+            {t(AI_TOOL_STATE_KEYS[verdict.outcome.state] ?? verdict.outcome.state, null, verdict.outcome.state)}
+            {" · "}
+            {verdict.outcome.status}
+            {verdict.outcome.errorCode !== null ? ` · ${verdict.outcome.errorCode}` : ""}
+            {" · "}
+            {verdict.outcome.latencyMs} ms
+            {" · "}
+            {fmtDateLong(locale, verdict.outcome.checkedAt)}
+          </p>
+        ) : null}
+        <p className="muted-sm text-12">{t("adminConsole.ai.noCache")}</p>
+
+        <div className="flex-gap-8 mt-12">
+          <button className="btn-ghost btn-sm" type="button" id="adm-ai-tools-refresh" onClick={() => void load()}>
+            {t("admin.system.refresh")}
+          </button>
+        </div>
+        <p className="muted-sm text-12 mt-8">{t("adminConsole.ai.probeNote")}</p>
+      </div>
+    </div>
+  );
+}
+
 function componentLabel(componentKey: string): string {
   switch (componentKey) {
     case "database": return "admin.system.database";
@@ -376,6 +596,7 @@ export default function Page(): React.ReactElement {
         {tab === "security" ? <SecurityTab locale={locale} t={t} errorText={errorText} /> : null}
         {tab === "system" ? <SystemTab locale={locale} t={t} errorText={errorText} /> : null}
         {tab === "analytics" ? <AnalyticsTab locale={locale} t={t} errorText={errorText} /> : null}
+        {tab === "ai" ? <AiToolsTab locale={locale} t={t} errorText={errorText} canProbe={canUse("aiRouteManage")} /> : null}
       </div>
     </div>
   );

@@ -698,6 +698,80 @@ function qs(params: Record<string, string | number | undefined>): string {
   return `?${usable.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&")}`;
 }
 
+// --- Admin: the AGENT TOOL panel (`/api/v1/admin/ai/tools`) ------------------
+// The shapes are the server's own: `ToolCapabilityEvidence` and
+// `ToolValidationResult` in `apps/api/src/ai/aiToolCatalog.ts` / `aiToolAdmin.ts`. Nothing is renamed or
+// collapsed here, because the distinction between `unavailable` (no credential), `failing` (asked, and it
+// did not answer) and `unsupported` (this runtime cannot host the tool at all) is the entire content of
+// the screen — a UI that maps them onto one boolean loses the only information an operator acts on.
+
+export interface AdminAiToolSecret {
+  key: string;
+  present: boolean;
+  /** Where the value resolves from: the admin store, the environment, or nowhere. NEVER a value. */
+  source: "admin" | "env" | null;
+}
+
+export interface AdminAiToolEvidence {
+  tool: string;
+  provider: string;
+  state: "configured" | "verified" | "unavailable" | "failing" | "unsupported";
+  runtimeSupported: boolean;
+  secrets: AdminAiToolSecret[];
+  reason: string | null;
+  lastStatus: string | null;
+  lastCheckedAt: string | null;
+}
+
+export interface AdminAiToolsView {
+  items: AdminAiToolEvidence[];
+  /** The state vocabulary the server may return, so the panel never invents a label for it. */
+  states: string[];
+  tools: string[];
+}
+
+export interface AdminAiToolVerdict {
+  tool: string;
+  state: "configured" | "verified" | "unavailable" | "failing" | "unsupported";
+  ok: boolean;
+  status: string;
+  latencyMs: number;
+  errorCode: string | null;
+  detail: string | null;
+  checkedAt: string;
+}
+
+export function getAdminAiTools(): Promise<AdminAiToolsView> {
+  return api.request("/api/v1/admin/ai/tools");
+}
+
+/**
+ * Ask ONE tool's provider whether it answers. A POST on purpose: it spends a real request, and a
+ * super-admin-only permission backs it — reading the table is `aiManage`, proving a credential is more.
+ *
+ * THE VERDICT IS THE RESPONSE, FOR BOTH OUTCOMES. A positive probe resolves; a completed-but-negative one
+ * arrives as HTTP 424 — an error status the caller must not paint green, which is why it survives as a
+ * thrown `ApiError` — and the server puts the SAME evidence envelope in that 424's body as in the 200's.
+ * `adminAiToolVerdictFromError` recovers it. Losing that body is how a panel ends up reporting "network
+ * error" for what was actually `INVALID_CREDENTIAL` — and how a "Last checked" column becomes one that can
+ * only ever lie, because the LIST endpoint deliberately reports the keys, never a cached verdict. 503 means
+ * this runtime cannot probe that tool at all, and 422 means the name is not one this platform offers.
+ */
+export function validateAdminAiTool(tool: string): Promise<AdminAiToolVerdict> {
+  return api.request<AdminAiToolVerdict>(`/api/v1/admin/ai/tools/${encodeURIComponent(tool)}/validate`, {
+    method: "POST",
+    body: {},
+  });
+}
+
+/** The computed verdict carried by a 424 response, or null for any other failure (503, 422, transport). */
+export function adminAiToolVerdictFromError(err: unknown): AdminAiToolVerdict | null {
+  if (err instanceof api.ApiError && err.status === 424 && typeof err.data === "object" && err.data !== null) {
+    return err.data as AdminAiToolVerdict;
+  }
+  return null;
+}
+
 /** The caller's effective role, ownership flag and permission set. */
 export function getAdminSelf(): Promise<AdminSelfView> {
   return api.request("/api/v1/admin/rbac/self");

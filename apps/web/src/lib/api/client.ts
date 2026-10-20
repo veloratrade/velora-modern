@@ -23,6 +23,7 @@ export interface ApiErrorOptions {
   messageKey?: string;
   params?: Record<string, unknown>;
   details?: Record<string, unknown> | null;
+  data?: unknown;
 }
 
 export class ApiError extends Error {
@@ -31,6 +32,13 @@ export class ApiError extends Error {
   messageKey: string;
   params: Record<string, unknown>;
   details: Record<string, unknown> | null;
+  /**
+   * The envelope's `data`, when a NON-2xx response still carried one. Rare and deliberate: an HTTP 424
+   * from the admin tool probe is a VERDICT the server computed (its body is the normal success envelope),
+   * and a client that parses the error branch down to a status code throws the evidence away. Callers
+   * that can render a computed verdict read this; nobody else has to know it exists.
+   */
+  data: unknown;
   constructor(message?: string, options: ApiErrorOptions = {}) {
     super(message || options.code || "API request failed");
     this.name = "ApiError";
@@ -39,6 +47,7 @@ export class ApiError extends Error {
     this.messageKey = options.messageKey || "errors.api";
     this.params = options.params || {};
     this.details = options.details ?? null;
+    this.data = options.data;
   }
 }
 
@@ -335,12 +344,14 @@ export async function request<T = unknown>(path: string, options: RequestOptions
     const messageKey =
       detailMessageKey || (typeof error.messageKey === "string" ? String(error.messageKey) : undefined) || `errors.http.${response.status}`;
     const params = (detailParams as Record<string, unknown>) || (error.params as Record<string, unknown>) || derivedParams || {};
+    const payloadData = payload && typeof payload === "object" ? (payload as { data?: unknown }).data : undefined;
     const opts: ApiErrorOptions = {
       status: response.status,
       messageKey,
       params,
       ...(details ? { details: details as Record<string, unknown> } : {}),
       ...(code ? { code } : {}),
+      ...(payloadData !== null && payloadData !== undefined ? { data: payloadData } : {}),
     };
     throw new ApiError(String(error.message || response.statusText), opts);
   }
