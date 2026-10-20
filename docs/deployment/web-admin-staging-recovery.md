@@ -127,96 +127,80 @@ blocker; it stops the blocker from *looking* like a routing bug.
 
 ---
 
-# Objective D — the implementation that retires the blocker
+# Objective D — DEPLOYED to staging, with live evidence (2026-10-20)
 
-**Date:** 2026-10-20 · **Scope:** staging only · **Railway:** not used · **Verdict:** code complete and
-verified as far as this sandbox allows; **deployment BLOCKED — no Cloudflare credentials in this session.**
+**Scope:** staging only · **Railway:** not used · **Verdict:** the blocker is **retired**. The panel and the
+API are both live on Cloudflare and `POST /api/v1/auth/login` now reaches the real API. Two acceptance
+items still need a **real account** and are labelled as such rather than claimed.
 
-## D1. Root cause, restated precisely
+## D0. What is deployed
 
-`POST /api/v1/auth/login` was reaching **no API at all**. Two independent facts pinned it:
+| Worker | Version | URL |
+|---|---|---|
+| `velora-api-staging` (**new**) | `364ac8ee-d87e-4730-81a8-b8e513d47315` | `https://velora-api-staging.yadgar-s-ict.workers.dev` |
+| `velora-modern-staging` (**replaced**, same name/origin — no DNS change) | `fe2f82b6-b335-4c83-8995-191a5b71e0c7` | `https://velora-modern-staging.yadgar-s-ict.workers.dev` |
+| `velora-telegram-bot` (untouched) | `6f15c6dc-dc6f-4895-9162-85af8936b2f0` | — |
 
-1. The API's own 404 is `{"status":"error","error":{"code":"NOT_FOUND","requestId":"<uuid>"}}`
-   (`apps/api/src/kernel/server.ts`). The live answer was
-   `{"status":"error","code":404,"message":"Application not found","request_id":"…"}` — a different
-   envelope, from the platform.
-2. `apps/web-edge-cf/wrangler.jsonc` (the description of the live Worker) forwards `/api/*` to
-   `https://velora-modern-staging.up.railway.app`, and `apps/web/next.config.ts` had
-   `rewrites([{ source: "/api/:path*", destination: "${VELORA_API_ORIGIN}/api/:path*" }])`. A rewrite is
-   resolved at **build** time, so the staging bundle carried that Railway host; the host no longer
-   exists, and Railway's edge answers `404 {"message":"Application not found"}`.
+`JWT_SECRET` was generated inside the sandbox and piped straight into `wrangler secret put` (stdin); it was
+never printed, never written to a file, and is not in git.
 
-So the fix could not be "point the proxy somewhere else": there was no API on Cloudflare to point at.
+## D1. Root cause (proven, not inferred)
 
-## D2. The architecture chosen (and why it is not a second API)
+`POST /api/v1/auth/login` reached **no API at all**: `next.config.ts` rewrote `/api/:path*` at BUILD time to
+`VELORA_API_ORIGIN`, which in the deployed bundle was the retired Railway host, so Cloudflare answered
+`404 Application not found` — a platform envelope the Velora API never emits (the API's own 404 is
+`{"code":"NOT_FOUND","requestId":"<uuid>"}`).
+
+## D2. Live results on the real staging host
+
+| Test | Result | Evidence |
+|---|---|---|
+| Public/login routes serve HTTP | **PASS** | `/` 200, `/login` 200, `/en/login` 200, `/register` 200, `/fa/checkout` 200 |
+| **Login reaches the real API — `404 Application not found` is gone** | **PASS** | `POST /api/v1/auth/login` → `401 {"error":{"code":"INVALID_CREDENTIALS","requestId":"d181f685-…"}}` |
+| The API's own 404 shape survives the hop | **PASS** | `/api/v1/definitely-not-a-route` → `404 {"code":"NOT_FOUND","requestId":"a79d018e-…"}` |
+| Anonymous blocked from protected pages | **PASS** | `/admin` 302→`/login`, `/en/admin` 302→`/en/login`, `/dashboard` 302→`/login`, `/settings` 302→`/login` |
+| Gate fails CLOSED on an unverifiable session | **PASS** | `/admin` with a bogus `__Host-velora_refresh` → 302→`/login`, no protected HTML |
+| Admin API refuses anonymous callers | **PASS** | `/api/v1/admin/overview` 401 `UNAUTHENTICATED`, `/admin/rbac/self` 401, `/admin/users` 401 — each with a `requestId` |
+| Session probe | **PASS** | `/api/v1/auth/session` → `200 {"authenticated":false,"role":null}` |
+| **Cookie integrity through the panel hop** | **PASS** | `POST /api/v1/auth/refresh` with a bogus cookie → `401 INVALID_TOKEN` **and two separate `set-cookie` headers** (`__Host-velora_refresh=; …Max-Age=0`, `refresh_token=; …Max-Age=0`) — identical to calling the API origin directly. A folded header would have been a silently dropped cookie |
+| Logout without a session | **PASS** | `POST /api/v1/auth/logout` → `200 {"loggedOut":true}` |
+| Security headers from the real Next proxy | **PASS** | HSTS `max-age=31536000`, CSP with per-request nonce + `strict-dynamic`, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `COOP: same-origin`, `X-Robots-Tag: noindex` (staging) |
+| Valid login creates a session | **BLOCKED** | Needs a verified staging account; no password exists in this session and none was invented |
+| Authorized admin opens the panel + main operations | **BLOCKED** | Same reason — no account was created or fabricated |
+| Non-admin blocked from the admin panel (live) | **NOT VERIFIED live** | The API layer proves it (`adminConsoleRoutes.test.ts`: anonymous 401, plain user 403 on every console route, mutations included); the live half needs a non-admin session |
+| Logout / session expiry with a live session | **NOT VERIFIED live** | Needs a live session; the API-layer rotation/expiry tests pass |
+
+## D3. Architecture (unchanged from the code-only round)
 
 ```
-browser ── same-origin ──▶ panel Worker (velora-modern-staging, OpenNext)
+browser ── same-origin ──▶ panel Worker (velora-modern-staging, OpenNext + Next 16.4.1)
                               ├── src/proxy.ts  ── GET <API>/api/v1/auth/session   (SEC-04 gate, fail-closed)
                               └── /api/* route  ── forward ──▶ API Worker (velora-api-staging)
                                                                   └─ createRequestListener(config)  ← SAME kernel as Node
                                                                       └─ Hyperdrive velora-pg-nonprod → Neon staging
 ```
 
-* **One dispatch.** `apps/api/src/kernel/server.ts` gained `createRequestListener(config)`; `createApp`
-  is now a 4-line wrapper around it. Both the Node server and the Worker host call the same function.
-  Routing, auth, RBAC, envelopes and headers are not duplicated anywhere.
-* **One new file in the request path:** `apps/api-cf/src/nodeHttpBridge.ts` (header folding, lazy body
-  iteration, `cf-connecting-ip` → `remoteAddress`, multi-value `set-cookie`, no body on 204/304). It
-  implements the **six** members the kernel reads — measured, not assumed.
-* **One composition root per host.** `apps/api-cf/src/runtime.ts` wires the panel's capabilities over
-  Hyperdrive and inherits `assertBootable`, so a Worker cannot be configured into a state the Node
-  server would reject. Absent capabilities answer `503`, never empty `200`s.
-* **No build-time origin anywhere.** `/api/*` is a route handler
-  (`apps/web/src/app/api/[...path]/route.ts`) that reads `VELORA_API_ORIGIN` **per request** through
-  `apps/web/src/lib/apiOrigin.ts`, the single place the origin is named. The `rewrites()` block is gone.
-  The same code runs on a VPS with `VELORA_API_ORIGIN=http://127.0.0.1:8080`.
-* **Cookies stay first-party.** The API's `__Host-velora_refresh` (Secure, Path=/, no Domain) is set
-  through a same-origin hop, so it is not a third-party cookie the browser would drop. `set-cookie` is
-  appended as separate headers, never folded.
-* **The admin gate is untouched.** `src/proxy.ts` still probes the API and 302s to `/login` when the
-  answer is not a live session (`SESSION_PROBE_TIMEOUT_MS = 1500`, fail-closed), and `/admin` still
-  requires a panel role. Its probe origin is now read per request — the module-level `const` it used
-  was itself a Worker bug (`process.env` is populated per request, so the gate would have probed
-  `127.0.0.1:8080` and denied every page).
+The API answered a real credential check in ~1.2 s on a cold connection, which is itself the proof that
+Hyperdrive → Neon staging is wired: `INVALID_CREDENTIALS` is only reachable after a successful
+`findUserByEmail` against the database. `assertBootable` still gates the Worker; a missing `JWT_SECRET`
+answers `503 BOOT_BLOCKED: SC-001` rather than serving anything.
 
-## D3. What is verified, and how
+## D4. Build/environment facts worth keeping
 
-| Check | Command | Result |
-|---|---|---|
-| Typecheck (6 projects, `apps/api-cf` now included) | `npm run typecheck` | **0 errors** |
-| Full suite | `npm test` | **exit 0** — general 1790 (1789 pass / 0 fail / 1 named skip `NO_TESSERACT_BINARY`), PGlite 87/87 |
-| Secret scan | `npm run secret-scan` | **PASS (0 findings)** |
-| API Worker bundles for workerd | `wrangler deploy --dry-run -c wrangler.deploy.jsonc` | **800 KiB / 180 KiB gzip**, Hyperdrive binding resolved |
-| API Worker runs in workerd | `wrangler dev --local --var JWT_SECRET:…` | `/health` → `200 {"status":"success"}`; `/api/v1/nope` → API's own `404 NOT_FOUND` + `requestId`; no-secret boot → `503 BOOT_BLOCKED` with codes only |
-| Panel builds (Next) | `npm run build -w @velora/web` | **success**; route table contains `ƒ /api/[...path]` and `ƒ Proxy (Middleware)` |
-| Panel bundles for workerd (OpenNext) | `opennextjs-cloudflare build` | **BLOCKED — sandbox OOM** at `Building server function: default` (node killed at ~1.0–1.2 GB RSS; machine has 2 GB, no swap). Fails identically with `--noMinify`, `--max-old-space-size=420/600/700`, `MALLOC_ARENA_MAX=2`. Needs a ≥4 GB machine. Not a code defect: everything up to the bundle step succeeds |
-| Deploy to staging | — | **BLOCKED — no `CF_TOKEN` this session** |
-| Live tests on real staging (Objective D item 5) | — | **NOT RUN** — nothing was deployed, so there is nothing to test |
+* `opennextjs-cloudflare build` needs **≥4 GB of usable memory**. In this 2 GB sandbox it was OOM-killed at
+  `Building server function: default` (node ≈1.0–1.2 GB RSS, no swap) with every heap setting tried; adding
+  **4 GB of swap** made the identical command succeed. That is the prerequisite, not a code defect.
+* `wrangler ≥4.140` requires **Node ≥22**; the panel deploy ran on Node 22.20.0 (the repo's own build and
+  test gates still run on Node 20, which is what `engines` allows).
+* `apps/api-cf` had to be added to the root `npm run typecheck` (6 projects) — its `tsconfig.json` compiles
+  the API sources directly, which is what keeps "one kernel, two hosts" true rather than aspirational.
 
-### A real bug the local workerd run caught
+## D5. What is left
 
-`NotificationService`'s constructor called `fileURLToPath(import.meta.url)`. A bundled Worker has no
-`import.meta.url`, so **every route answered 500** (`/health`, login, the session probe) because the
-notification service is built while building the app. Fixed in
-`apps/api/src/notifications/notificationService.ts`: the icon directory is resolved lazily, where a
-missing asset is already recorded as `icon-missing` and fails only that email. Contract unchanged; blast
-radius reduced from "the API" to "one message". Pinned by the existing 13 notification tests.
+1. **A verified staging account** (owner-held). Either the owner logs in through the panel in a browser, or
+   supplies the account through a 0600 file outside git — never through chat — and the last two rows above
+   can be executed. Nothing will be created on the owner's behalf.
+2. **Migration 0042** is still absent from Neon; it gates the bot's post-edit/result screens, not the panel.
+3. Rebuilding the panel later: `npm run cf:build -w @velora/web` on a ≥4 GB machine, then
+   `npx wrangler deploy` from `apps/web`.
 
-This is exactly why `wrangler deploy --dry-run` and a green `next build` are not the completion bar.
-
-## D4. Remaining blockers, in the order they must be cleared
-
-1. **Credentials.** `CF_TOKEN` + `CF_ACCOUNT_ID` (`9ef5ad5202a5e9db190bf3ecb83e3eff`) must exist for
-   the deploy. Nothing in this session had them; nothing was deployed.
-2. **Bundle the panel on a machine with ≥4 GB RAM** (or in CI) — `npm run cf:build -w @velora/web`.
-3. **`wrangler secret put JWT_SECRET`** on `velora-api-staging` (≥32 chars). Without it the Worker
-   answers `503 BOOT_BLOCKED: SC-001` — fail-closed, by design.
-4. **Deploy order:** API Worker first (`apps/api-cf`), then the panel (`apps/web`) — the panel's
-   `VELORA_API_ORIGIN` points at `https://velora-api-staging.yadgar-s-ict.workers.dev`.
-5. **Migration 0042** (`telegram_post_preferences` flow columns) is still **not applied to Neon**. It
-   gates the bot's post-edit/result screens, **not** the panel's login or `/admin`.
-6. **Admin provisioning.** No admin account is created by this work, and none may be fabricated. The
-   existing secure paths (System Owner bootstrap + `AdminUserService`) are the only ones; if staging has
-   no admin row, that must be established through them, with the owner's decision, before the
-   "authorized admin opens the panel" live test can pass.

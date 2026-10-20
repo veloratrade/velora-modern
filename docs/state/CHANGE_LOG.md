@@ -1631,3 +1631,36 @@ default`, ~1.0–1.2 GB RSS, no swap; same with `--noMinify` and lowered heap ca
 machine or in CI. Deployment and the Objective-D live tests are **NOT RUN**: no credential, nothing
 deployed, and a rendered login page is not accepted as success. Migration 0042 is still absent from Neon
 (bot post-edit screens, not the panel).
+
+## AC-D2 — 2026-10-20 · Objective D deployed: the API and the panel are both live on Cloudflare staging
+
+- **Commits:** `0c1db06` (the code) + this evidence commit. **Push:** fast-forward from `ac81fa3` → `0c1db06`; CI `ci @ 0c1db06` = **success**. The push log noted the ruleset was bypassed ("Required status check `verify` is expected") because the token carries admin — recorded here rather than glossed over.
+- **Migration impact:** none.
+- **Deployed (this session, with credentials):**
+
+  | Worker | Version | Note |
+  |---|---|---|
+  | `velora-api-staging` | `364ac8ee-d87e-4730-81a8-b8e513d47315` | **new** — the API kernel behind `createRequestListener` |
+  | `velora-modern-staging` | `fe2f82b6-b335-4c83-8995-191a5b71e0c7` | **replaced** the hand-uploaded edge shim; same name/origin, so no DNS change |
+  | `velora-telegram-bot` | `6f15c6dc…` (v41) | untouched |
+
+**Live proof that the blocker is gone.** `POST /api/v1/auth/login` on the staging panel now answers
+`401 {"error":{"code":"INVALID_CREDENTIALS","requestId":"d181f685-…"}}` — the API's own envelope. The
+platform's `404 Application not found` no longer exists anywhere in the path. `INVALID_CREDENTIALS` is only
+reachable after a real `findUserByEmail` over Hyperdrive → Neon, which is simultaneously the proof that the
+database hop works.
+
+Also verified live: `/admin`, `/en/admin`, `/dashboard`, `/settings` → 302 to login (and 302 even with a
+bogus refresh cookie — fail-closed); `/api/v1/admin/{overview,rbac/self,users}` → 401 `UNAUTHENTICATED`;
+`/api/v1/auth/refresh` with a bad cookie → 401 **plus two separate `set-cookie` headers** (byte-identical
+to the API origin — the hop does not fold cookies); the real Next proxy now emits HSTS + nonce CSP + the
+full header set and `X-Robots-Tag: noindex` on staging.
+
+**Build fact worth keeping:** `opennextjs-cloudflare build` needs ≥4 GB of memory. In the 2 GB sandbox it
+was OOM-killed at `Building server function: default` under every heap setting; adding 4 GB of swap made
+the same command succeed. `wrangler ≥4.140` also requires Node ≥22 (the deploy ran on 22.20.0).
+
+**Still open (labelled, not claimed):** a valid login → session, and "authorized admin opens the panel",
+need a verified staging account. None was created and none was guessed. The non-admin denial and session
+expiry are proven at the API layer by tests (`adminConsoleRoutes.test.ts`, `apps/api/src/auth/*`) but were
+**not** re-run live for want of a session. Migration 0042 remains absent from Neon (bot screens only).

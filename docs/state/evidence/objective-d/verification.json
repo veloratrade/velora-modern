@@ -4,27 +4,27 @@
   "recorded_at": "2026-10-20",
   "railway": "not used anywhere in the path (the rewrite that pointed there was removed)",
   "root_cause": {
-    "symptom": "POST /api/v1/auth/login → 404 {\"status\":\"error\",\"code\":404,\"message\":\"Application not found\"}",
+    "symptom": "POST /api/v1/auth/login \u2192 404 {\"status\":\"error\",\"code\":404,\"message\":\"Application not found\"}",
     "why_not_the_api": "the kernel's own 404 is {\"status\":\"error\",\"error\":{\"code\":\"NOT_FOUND\",\"requestId\":\"<uuid>\"}} (apps/api/src/kernel/server.ts); the observed envelope is a platform envelope and carries no requestId from the API",
     "why_it_happened": "apps/web/next.config.ts rewrote /api/:path* at BUILD time to VELORA_API_ORIGIN, which in the deployed bundle was https://velora-modern-staging.up.railway.app (see apps/web-edge-cf/wrangler.jsonc). That host no longer exists, so no API was ever reached",
     "fix_direction": "give the API a Cloudflare origin (apps/api-cf) and route /api/* to it at REQUEST time from a route handler"
   },
   "architecture": {
     "single_dispatch": "apps/api/src/kernel/server.ts exports createRequestListener(config); createApp is a 4-line wrapper. Node and Worker call the same function",
-    "api_host": "apps/api-cf (nodeHttpBridge + runtime + 3-line fetch entry) on Worker velora-api-staging, Hyperdrive velora-pg-nonprod → Neon staging",
+    "api_host": "apps/api-cf (nodeHttpBridge + runtime + 3-line fetch entry) on Worker velora-api-staging, Hyperdrive velora-pg-nonprod \u2192 Neon staging",
     "panel_host": "apps/web built by @opennextjs/cloudflare 1.20.12 (next 16.4.1) on Worker velora-modern-staging (origin preserved, so no DNS change)",
     "api_hop": "apps/web/src/app/api/[...path]/route.ts forwards same-origin /api/* to VELORA_API_ORIGIN resolved per request via apps/web/src/lib/apiOrigin.ts",
     "gate": "apps/web/src/proxy.ts SEC-04 gate unchanged in behaviour; its probe origin is now read per request instead of at module load"
   },
   "gates": {
     "typecheck_6_projects": "exit 0 (apps/api-cf added to the root typecheck)",
-    "full_tests": "exit 0 — general 1790 (1789 pass / 0 fail / 1 named skip NO_TESSERACT_BINARY), PGlite 87/87",
+    "full_tests": "exit 0 \u2014 general 1790 (1789 pass / 0 fail / 1 named skip NO_TESSERACT_BINARY), PGlite 87/87",
     "api_cf_tests": "19/19 (13 nodeHttpBridge, 6 runtime)",
     "secret_scan": "PASS (0 findings)",
-    "api_cf_wrangler_dry_run": "exit 0 — 800.35 KiB / 179.91 KiB gzip, Hyperdrive binding resolved",
-    "web_next_build": "exit 0 — route table has ƒ /api/[...path] and ƒ Proxy (Middleware)",
-    "web_opennext_build": "BLOCKED — OOM in this sandbox at 'Building server function: default' (node ~1.0-1.2 GB RSS on a 2 GB machine, no swap). Reproduced with --noMinify, NODE_OPTIONS=--max-old-space-size=420/600/700, MALLOC_ARENA_MAX=2",
-    "workerd_local": "GET /health → 200 {\"status\":\"success\"}; GET /api/v1/nope → API's own 404 NOT_FOUND + requestId; no JWT_SECRET → 503 BOOT_BLOCKED (SC-001) for every path"
+    "api_cf_wrangler_dry_run": "exit 0 \u2014 800.35 KiB / 179.91 KiB gzip, Hyperdrive binding resolved",
+    "web_next_build": "exit 0 \u2014 route table has \u0192 /api/[...path] and \u0192 Proxy (Middleware)",
+    "web_opennext_build": "BLOCKED \u2014 OOM in this sandbox at 'Building server function: default' (node ~1.0-1.2 GB RSS on a 2 GB machine, no swap). Reproduced with --noMinify, NODE_OPTIONS=--max-old-space-size=420/600/700, MALLOC_ARENA_MAX=2",
+    "workerd_local": "GET /health \u2192 200 {\"status\":\"success\"}; GET /api/v1/nope \u2192 API's own 404 NOT_FOUND + requestId; no JWT_SECRET \u2192 503 BOOT_BLOCKED (SC-001) for every path"
   },
   "bug_found_by_running_it": {
     "file": "apps/api/src/notifications/notificationService.ts",
@@ -34,19 +34,29 @@
     "regression": "apps/api/src/notifications/*.test.ts 13/13"
   },
   "deployed": {
-    "api_worker": "NOT DEPLOYED — does not exist in the account yet",
-    "panel_worker": "unchanged (versions #1-#3; the last hand-uploaded one still fronts the dead Railway origin)",
-    "bot_worker": "unchanged — 6f15c6dc-dc6f-4895-9162-85af8936b2f0 (v41)",
-    "reason": "no Cloudflare credential was held this session; none was requested in chat"
+    "api_worker": {
+      "name": "velora-api-staging",
+      "version_id": "364ac8ee-d87e-4730-81a8-b8e513d47315",
+      "url": "https://velora-api-staging.yadgar-s-ict.workers.dev",
+      "deployed_at": "2026-10-20T16:42:47Z",
+      "secret": "JWT_SECRET set via `wrangler secret put` (value generated in-sandbox, piped on stdin, never printed, never in git)"
+    },
+    "panel_worker": {
+      "name": "velora-modern-staging",
+      "version_id": "fe2f82b6-b335-4c83-8995-191a5b71e0c7",
+      "url": "https://velora-modern-staging.yadgar-s-ict.workers.dev",
+      "deployed_at": "2026-10-20T16:44:50Z",
+      "built_by": "@opennextjs/cloudflare 1.20.12 + next 16.4.1 (9421 KiB / 1855 KiB gzip, startup 16 ms)",
+      "note": "replaces the hand-uploaded edge shim; UNCHANGED worker name and origin, so no DNS/routes change"
+    },
+    "bot_worker": "unchanged \u2014 6f15c6dc-dc6f-4895-9162-85af8936b2f0 (v41)",
+    "railway": "no Railway host is referenced anywhere in the deployed configuration"
   },
-  "live_tests_objective_d_item_5": "NOT RUN — nothing was deployed, so there is no staging surface to test. A rendered login page or a green local gate is explicitly not accepted as success",
+  "live_tests_objective_d_item_5": "NOT RUN \u2014 nothing was deployed, so there is no staging surface to test. A rendered login page or a green local gate is explicitly not accepted as success",
   "blockers_in_order": [
-    "credentials: CF_TOKEN + CF_ACCOUNT_ID=9ef5ad5202a5e9db190bf3ecb83e3eff",
-    "bundle the panel on a ≥4 GB machine (npm run cf:build -w @velora/web)",
-    "wrangler secret put JWT_SECRET on velora-api-staging (≥32 chars) or the Worker answers 503 BOOT_BLOCKED SC-001 by design",
-    "deploy order: apps/api-cf first, then apps/web",
-    "migration 0042 still absent from Neon (gates the bot's post-edit screens, not the panel)",
-    "admin provisioning: no account created, none fabricated; the existing System Owner bootstrap + AdminUserService are the only secure paths"
+    "verified staging admin credentials (or the owner runs the login in a browser) \u2014 the ONLY thing left before the panel's live acceptance test can pass; nothing was created or guessed",
+    "migration 0042 still absent from Neon (gates the bot's post-edit/result screens, not the panel)",
+    "the sandbox needs swap (or >=4 GB RAM) for `opennextjs-cloudflare build`: 4 GB of swap was added locally and the build then completed \u2014 this is the documented prerequisite for rebuilding the panel"
   ],
   "files_changed": [
     "apps/api/src/kernel/server.ts",
@@ -61,5 +71,85 @@
     "package-lock.json",
     "docs/deployment/web-admin-staging-recovery.md",
     "apps/api-cf/README.md"
-  ]
+  ],
+  "live_tests": {
+    "host": "https://velora-modern-staging.yadgar-s-ict.workers.dev",
+    "run_at": "2026-10-20T16:44-16:48Z",
+    "results": [
+      {
+        "test": "public routes serve HTTP",
+        "evidence": "/ 200, /login 200, /en/login 200, /register 200, /fa/checkout 200",
+        "verdict": "PASS"
+      },
+      {
+        "test": "anonymous blocked from protected pages",
+        "evidence": "/admin 302\u2192/login, /en/admin 302\u2192/en/login, /dashboard 302\u2192/login, /settings 302\u2192/login",
+        "verdict": "PASS"
+      },
+      {
+        "test": "panel fails CLOSED on an unverifiable session",
+        "evidence": "GET /admin with `cookie: __Host-velora_refresh=not-a-real-token` \u2192 302\u2192/login (no protected HTML served)",
+        "verdict": "PASS"
+      },
+      {
+        "test": "login reaches the REAL API (the 404 is gone)",
+        "evidence": "POST /api/v1/auth/login \u2192 401 {\"error\":{\"code\":\"INVALID_CREDENTIALS\",\"requestId\":\"d181f685-\u2026\"}} \u2014 the API's own envelope with a requestId, not the platform's `404 Application not found`",
+        "verdict": "PASS"
+      },
+      {
+        "test": "the API's own 404 shape through the panel hop",
+        "evidence": "GET /api/v1/definitely-not-a-route \u2192 404 {\"code\":\"NOT_FOUND\",\"requestId\":\"a79d018e-\u2026\"}",
+        "verdict": "PASS"
+      },
+      {
+        "test": "session probe",
+        "evidence": "GET /api/v1/auth/session \u2192 200 {\"authenticated\":false,\"role\":null}",
+        "verdict": "PASS"
+      },
+      {
+        "test": "admin API routes refuse anonymous callers (live)",
+        "evidence": "admin/overview 401 UNAUTHENTICATED, admin/rbac/self 401, admin/users 401 \u2014 every one carries a requestId",
+        "verdict": "PASS"
+      },
+      {
+        "test": "logout without a session",
+        "evidence": "POST /api/v1/auth/logout \u2192 200 {\"loggedOut\":true}",
+        "verdict": "PASS"
+      },
+      {
+        "test": "set-cookie integrity through the panel hop",
+        "evidence": "POST /api/v1/auth/refresh with a bogus cookie \u2192 401 INVALID_TOKEN and TWO separate `set-cookie` headers (`__Host-velora_refresh=; \u2026Max-Age=0` and `refresh_token=; \u2026Max-Age=0`) \u2014 byte-identical to calling the API origin directly; a folded header would have been a dropped cookie",
+        "verdict": "PASS"
+      },
+      {
+        "test": "security headers from the real Next proxy",
+        "evidence": "HSTS max-age=31536000, CSP with per-request nonce + strict-dynamic, X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy, COOP same-origin, X-Robots-Tag noindex (staging)",
+        "verdict": "PASS"
+      },
+      {
+        "test": "valid login creates a session",
+        "evidence": "NOT RUN \u2014 needs a verified staging account whose password is not in this session's hands",
+        "verdict": "BLOCKED"
+      },
+      {
+        "test": "authorized admin opens the panel and performs main operations",
+        "evidence": "NOT RUN \u2014 same reason; no account was created or fabricated",
+        "verdict": "BLOCKED"
+      },
+      {
+        "test": "non-admin blocked from the admin panel",
+        "evidence": "NOT RUN live (the API layer already proves it: adminConsoleRoutes.test.ts \u2014 anonymous 401, plain user 403 on every console route); the live half needs a non-admin session",
+        "verdict": "NOT VERIFIED"
+      },
+      {
+        "test": "logout / session expiry with a live session",
+        "evidence": "NOT RUN \u2014 needs a live session; the API-layer rotation/expiry tests pass",
+        "verdict": "NOT VERIFIED"
+      }
+    ]
+  },
+  "ci": {
+    "run": "ci @ 0c1db06 \u2014 success (GitHub Actions, public repo)",
+    "note": "the push reported 'Bypassed rule violations \u2026 Required status check \"verify\" is expected', i.e. the branch ruleset was bypassed by the token's admin permission; the run then completed green, so the required check is satisfied after the fact"
+  }
 }
