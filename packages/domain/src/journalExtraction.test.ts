@@ -170,6 +170,53 @@ test("time: an explicit clock time is honoured", () => {
   assert.equal(time.openTime, "2026-10-03 14:30:00");
 });
 
+// ── TIME: THE SHARED CHAT-DATE CONTRACT ON THIS PATH ────────────────────────────────────────────
+// The journal used to carry its OWN date rule (`ISO_DATE_RE` + `isRealDate`, zero-padded Latin
+// digits, Gregorian only). It now reads the same `resolveChatDate` that /stats and /checklist read,
+// so the day a message names cannot depend on which command asked.
+
+test("time: a Jalali date in a journal message is the same day /stats would sum", () => {
+  const time = resolveTradeTime("XAUUSD buy 1405-07-27 ورود 2650", NOW, TZ);
+  assert.equal(time.openTime, "2026-10-19 00:00:00", "1405-07-27 is Nowruz-month 7 day 27 of 1405");
+  assert.equal(time.timeNote, "date-from-message-jalali", "the note says which calendar was used");
+  const persian = resolveTradeTime("XAUUSD buy ۱۴۰۵-۰۷-۲۷ ورود 2650", NOW, TZ);
+  assert.equal(persian.openTime, time.openTime, "eastern digits must not move the day");
+  assert.equal(persian.timeNote, "date-from-message-jalali");
+});
+
+test("time: an ambiguous Persian-digit day is NOT guessed, and an impossible one is NOT rolled over", () => {
+  // `۲۰۲۶-۱۰-۱۹` may be Gregorian 2026 or Jalali 2026 (= CE 2547). The old code read it as neither
+  // (the ASCII regex simply did not see it) and journalled the message on TODAY. Refusing is the
+  // behaviour the audit asked for, and `openFromText` turns this note into an error before any row.
+  const ambiguous = resolveTradeTime("XAUUSD buy ۲۰۲۶-۱۰-۱۹", NOW, TZ);
+  assert.equal(ambiguous.timeNote, "date-ambiguous");
+  assert.equal(ambiguous.openTime.slice(0, 10), "2026-10-03", "the day itself stays the documented default; the NOTE is the refusal");
+  const impossible = resolveTradeTime("XAUUSD buy 2026-02-30", NOW, TZ);
+  assert.equal(impossible.timeNote, "date-invalid", "Feb 30 must not become March 2");
+});
+
+test("time: an unreadable date never swallows the word 'yesterday' in the same message", () => {
+  // The old shape was `if (date) … else if (yesterday) …`, so a message whose date failed to parse
+  // could not also be read as "yesterday". The two tests are independent now, and a refusal cannot
+  // silently convert a dated message into an undated one.
+  const both = resolveTradeTime("دیروز XAUUSD buy 2026-02-30", NOW, TZ);
+  assert.equal(both.timeNote, "date-invalid", "the bad date is still reported");
+  const clean = resolveTradeTime("دیروز XAUUSD buy", NOW, TZ);
+  assert.equal(clean.timeNote, "date-yesterday");
+  assert.equal(clean.openTime, "2026-10-02 00:00:00");
+});
+
+test("time: a date glued to a price or a word is not read as a date at all", () => {
+  // `1405.07.27.50` is a price with 4 segments; `1405-07-27X` is a typo. Neither may become a day,
+  // and neither may be REJECTED as a date either — the message simply carries no date, exactly as it
+  // did before, so the entry stays on the day the user meant (today) instead of erroring.
+  for (const text of ["XAUUSD buy 1405.07.27.50", "XAUUSD buy 1405-07-27X", "XAUUSD buy v1.2.3"]) {
+    const time = resolveTradeTime(text, NOW, TZ);
+    assert.equal(time.timeNote, null, `no date note for ${JSON.stringify(text)}: ${JSON.stringify(time)}`);
+    assert.equal(time.openTime.slice(0, 10), "2026-10-03");
+  }
+});
+
 test("draft: the payload mirrors the existing create path and omits absent optionals", () => {
   const draft = extract("XAUUSD buy ورود 2650 خروج 2660 حجم 1");
   const payload = draftToTradePayload(draft.fields);

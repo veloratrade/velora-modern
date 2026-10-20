@@ -272,7 +272,7 @@ export class PgPortfolioStore implements PortfolioStore {
   async tradesByAccount(userId: string) {
     const rows = await this.q(
       `SELECT account_id::text AS account_id, net_pnl::text, r_multiple::text, symbol,
-              COALESCE(strategy_tag, strategy) AS strategy
+              COALESCE(strategy, strategy_tag) AS strategy
          FROM trades
         WHERE user_id = $1 AND account_id IS NOT NULL AND deleted_at IS NULL AND quarantined = false
         ORDER BY occurred_at ASC, id ASC`,

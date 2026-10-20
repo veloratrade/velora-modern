@@ -128,8 +128,11 @@ export class PgTenancyStore implements TenancyStore {
     const row = rows[0];
     if (row === undefined) return null;
     const userId = String(row["user_id"]);
+    // strategy is the authoritative journaling column; strategy_tag is the 0022 legacy-parity
+    // mirror the modern write path does not populate. Reads follow the authoritative column
+    // (owner decision 2026-10-18), so an imported legacy label cannot outlive a user's edit.
     const tradeRows = await this.q(
-      `SELECT net_pnl::text, r_multiple::text, COALESCE(strategy_tag, strategy) AS strategy
+      `SELECT net_pnl::text, r_multiple::text, COALESCE(strategy, strategy_tag) AS strategy
          FROM trades WHERE user_id = $1 AND deleted_at IS NULL AND quarantined = false`,
       [userId],
     );

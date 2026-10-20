@@ -1,6 +1,7 @@
 // Analytics reads — the repository behind the v0.5 analytics surface.
 //
-// WHAT THIS READS. `trades` (net_pnl, r_multiple, symbol, strategy_tag,
+// WHAT THIS READS. `trades` (net_pnl, r_multiple, symbol, strategy -- the 0022 mirror
+// `strategy_tag` only as a legacy fallback, see the query below --
 // occurred_at) and `trading_accounts` (timezone), all of which already exist in
 // the frozen foundation (0005, 0022). No migration is proposed.
 //
@@ -86,7 +87,10 @@ const SELECT_TRADES = `
          t.symbol                                     AS symbol,
          t.net_pnl::text                              AS net_pnl,
          t.r_multiple::text                           AS r_multiple,
-         COALESCE(t.strategy_tag, t.strategy)         AS strategy,
+           -- AUTHORITY: prefer the column the modern write path maintains. strategy_tag is a
+           -- 0022 legacy-parity MIRROR that the modern path never populates, so preferring it
+           -- would let an imported label outlive the user's own edit. Fallback keeps legacy rows.
+           COALESCE(t.strategy, t.strategy_tag)           AS strategy,
          to_char((t.occurred_at AT TIME ZONE ${TZ}), 'YYYY-MM-DD') AS day,
          EXTRACT(DOW  FROM (t.occurred_at AT TIME ZONE ${TZ}))::int AS weekday,
          EXTRACT(HOUR FROM (t.occurred_at AT TIME ZONE ${TZ}))::int AS hour

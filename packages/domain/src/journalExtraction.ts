@@ -24,6 +24,7 @@
 //   whole pipeline (decimal → numeric(20,8)) must never touch a binary float.
 //   Parsing only validates the shape and normalizes separators.
 import { wallClockIn } from "./time.js";
+import { resolveChatDate } from "./jalali.js";
 
 /** Fields the ADR-002 manual-create path requires before a trade can exist. */
 export const JOURNAL_REQUIRED_FIELDS = ["symbol", "direction", "entryPrice", "exitPrice", "volume"] as const;
@@ -238,6 +239,10 @@ function isAnyFieldKeyword(key: string): boolean {
 // Extraction
 // ---------------------------------------------------------------------------
 
+// `ISO_DATE_RE` survives for ONE job it always did — refusing to read a date-shaped token as a
+// SYMBOL (`isSymbolToken`) — and it is deliberately no longer the rule for which DAY a message means.
+// That grammar is `resolveChatDate` in `jalali.ts`, shared with /stats and /checklist, so the three
+// paths cannot drift apart again.
 const ISO_DATE_RE = /\b(\d{4})[-/](\d{2})[-/](\d{2})\b/;
 const CLOCK_RE = /\b([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?\b/;
 
@@ -261,15 +266,23 @@ export function resolveTradeTime(
   let date = nowWall.slice(0, 10);
   let note: string | null = null;
 
-  const iso = ISO_DATE_RE.exec(text);
-  if (iso !== null) {
-    const [, y, m, d] = iso;
-    const candidate = `${y}-${m}-${d}`;
-    if (isRealDate(candidate)) {
-      date = candidate;
-      note = "date-from-message";
-    }
+  // ONE grammar for every chat-facing date in the product, shared with /stats and /checklist: see
+  // `resolveChatDate` in `jalali.ts`. Before this, this path used `ISO_DATE_RE` (zero-padded Latin
+  // digits, Gregorian only, no calendar marker), so `1405-07-27` here meant the 15th-century
+  // Gregorian day while the same string in /stats meant Nowruz 1405 — the same word, two days.
+  const chatDate = resolveChatDate(text);
+  if (chatDate !== null && chatDate.kind === "ok") {
+    date = chatDate.iso;
+    note = chatDate.calendar === "jalali" ? "date-from-message-jalali" : "date-from-message";
+  } else if (chatDate !== null) {
+    // A date-shaped string that neither calendar can read, or one whose calendar is genuinely
+    // ambiguous. FAIL CLOSED: the message is refused by the caller's required-field check rather than
+    // journalled on today's date with a confident stamp. Silently filing under the wrong day is the
+    // one outcome a journal cannot undo, and the note below is what the user reads.
+    note = chatDate.rejection.kind === "ambiguous" ? "date-ambiguous" : "date-invalid";
   } else if (/(^|\s)(دیروز|yesterday)(\s|$)/i.test(text)) {
+    // Tested on its own branch, not as an `else` on the date probe: an unreadable date must not also
+    // swallow the word "yesterday" sitting in the same message.
     date = wallClockIn(timeZone, new Date(now.getTime() - 86_400_000)).slice(0, 10);
     note = "date-yesterday";
   }
@@ -283,6 +296,8 @@ export function resolveTradeTime(
   return { openTime: stamp, closeTime: stamp, timeNote: note };
 }
 
+/** Kept for callers that validate an already-normalised ISO day; the CHAT-side check lives in
+ * `resolveChatDate`, so this must not grow a second meaning. */
 function isRealDate(value: string): boolean {
   const [y, m, d] = value.split("-").map(Number);
   if (y === undefined || m === undefined || d === undefined) return false;
