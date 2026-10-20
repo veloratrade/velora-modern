@@ -1713,3 +1713,20 @@ refresh 401, `/admin` 302.
 
 **Gates:** typecheck 0 (6 projects) · `npm test` exit 0 (general 1796: 1795 pass / 1 named skip; PGlite
 87/87) · api-cf 25/25 · secret-scan PASS.
+
+## AC-D4 — 2026-10-20 · Migration 0042 applied to the staging database (Neon `velora_journal`)
+
+- **Commits:** none needed (no code change); this entry is the evidence.
+- **Applied:** `0042_telegram_post_preferences.sql` — the last outstanding migration.
+- **How:** the repository's own runner, `DATABASE_URL=<direct Neon URL> npx tsx db/migrate.ts`, on the
+  direct (non-pooled) connection because the migration is DDL. No hand-written SQL was executed.
+- **State:** before = 41 applied / 42 on disk (head `0041_audit_ai_tool_action.sql`); after = **42 applied /
+  42 on disk, head `0042_telegram_post_preferences.sql`, missing [] extra []**. A second run printed
+  `up to date`, so the runner remains forward-only and re-runnable.
+- **Verified objects:** `flow_post_id` column present; 7 CHECK constraints; the flat
+  `telegram_post_preferences_flow_stage` present; the flow vocabulary includes `post_edit_body`.
+- **Verified behaviour (live, inside BEGIN…ROLLBACK — the table's row count stayed 0):**
+  `post_edit_body` + `flow_template_id` → refused 23514 (the cross-namespace shape 0042 exists to forbid);
+  `post_edit_body` + `flow_post_id` only → accepted; an unknown `flow_kind` → refused 23514.
+- **After the migration:** API `/health` 200, `/api/v1/auth/session` 200; the Telegram Worker is still
+  `6f15c6dc` (untouched).

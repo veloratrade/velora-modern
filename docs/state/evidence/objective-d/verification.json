@@ -55,7 +55,7 @@
   },
   "live_tests_objective_d_item_5": "NOT RUN \u2014 nothing was deployed, so there is no staging surface to test. A rendered login page or a green local gate is explicitly not accepted as success",
   "blockers_in_order": [
-    "migration 0042 still absent from Neon (bot post-edit/result screens, not the panel)"
+    "Workers Free CPU limit (10 ms) makes Argon2id logins fail ~50% of the time \u2014 needs Workers Paid + limits.cpu_ms 500, or moving the API off Workers"
   ],
   "files_changed": [
     "apps/api/src/kernel/server.ts",
@@ -195,5 +195,36 @@
     "cause": "VeloraHasher uses hash-wasm, which the Workers runtime refuses: 'WebAssembly.compile(): Wasm code generation disallowed by embedder'. needsRehash() sends every successful bcrypt login through hash() too, so BOTH credential paths were broken while every other route looked healthy",
     "fix": "apps/api-cf/src/workersHasher.ts \u2014 Argon2id in pure TypeScript (@noble/hashes/argon2.js) producing the identical $argon2id$v=19$m=19456,t=2,p=1$\u2026 encoding, bcryptjs for $2a/$2b/$2y, constant-time compare, parameters read from each hash so a future cost bump still verifies old credentials",
     "proof": "apps/api-cf/src/workersHasher.test.ts (6 tests): Worker\u2192Node and Node\u2192Worker verification both directions, identical encoded shape, bcrypt incl. Legacy $2y$, foreign/malformed hashes refused; plus a live register on staging returning 201 and a live admin login returning 200"
+  },
+  "staging_database": {
+    "project": "velora-journal-nonprod (young-cloud-88888840) \u00b7 database velora_journal \u00b7 ap-southeast-2",
+    "migration_state_before": {
+      "applied": 41,
+      "on_disk": 42,
+      "head": "0041_audit_ai_tool_action.sql"
+    },
+    "applied_now": "0042_telegram_post_preferences.sql",
+    "how": "the repo's own runner \u2014 `DATABASE_URL=<direct Neon URL> npx tsx db/migrate.ts` (NOT a hand-written ALTER); direct (non-pooled) connection because 0042 is DDL",
+    "migration_state_after": {
+      "applied": 42,
+      "on_disk": 42,
+      "head": "0042_telegram_post_preferences.sql",
+      "missing": [],
+      "extra": []
+    },
+    "idempotency": "a second run printed 'up to date' \u2014 the runner is forward-only and re-runnable",
+    "verified_objects": {
+      "flow_post_id": "present on telegram_post_preferences",
+      "check_constraints": 7,
+      "flat_flow_stage_check": "present (telegram_post_preferences_flow_stage)",
+      "flow_vocabulary": "includes post_edit_body"
+    },
+    "live_constraint_behaviour": [
+      "post_edit_body + flow_template_id  -> refused (23514 telegram_post_preferences_flow_stage) \u2014 the cross-namespace shape 0042 exists to forbid",
+      "post_edit_body + flow_post_id only -> accepted",
+      "unknown flow_kind                  -> refused (23514 telegram_post_preferences_flow_kind_check)"
+    ],
+    "probe_hygiene": "every probe ran inside BEGIN\u2026ROLLBACK; telegram_post_preferences row count is 0 before and after",
+    "post_migration_health": "API /health 200, /api/v1/auth/session 200; bot Worker still 6f15c6dc (untouched)"
   }
 }
