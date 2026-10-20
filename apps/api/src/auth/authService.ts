@@ -85,6 +85,14 @@ export interface TokenPair {
 export interface AuthDeps {
   readonly store: UserStore;
   readonly hasher: PasswordHasher;
+  /**
+   * Whether a successful login may replace the stored hash with an Argon2id one (ADR-005 S5).
+   *
+   * Default `true` — the Node server's documented behaviour. A host that cannot compute Argon2id passes
+   * `false` and stores bcrypt instead (a Cloudflare Worker on the Free plan has a 10 ms CPU budget; the
+   * hashing there happens inside PostgreSQL). Verification is unaffected either way.
+   */
+  readonly rehashPolicy?: { readonly allowUpgrade: boolean };
   readonly jwt: JwtService;
   /** Injectable clock (TestClock pattern). Defaults to real time. */
   readonly now?: () => Date;
@@ -369,7 +377,12 @@ export class AuthService {
       }
 
       // S5 boundary: verify + transparent rehash, persisted through the store.
-      const result = await verifyAndRehash(this.deps.hasher, input.password, user.passwordHash);
+      const result = await verifyAndRehash(
+        this.deps.hasher,
+        input.password,
+        user.passwordHash,
+        this.deps.rehashPolicy === undefined ? {} : { allowUpgrade: this.deps.rehashPolicy.allowUpgrade },
+      );
       if (!result.verified) {
         throw new AuthError(401, "INVALID_CREDENTIALS", "Invalid credentials.");
       }

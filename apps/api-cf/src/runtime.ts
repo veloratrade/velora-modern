@@ -26,7 +26,7 @@ import { PgOwnershipStore } from "../../api/src/auth/pgOwnershipStore.js";
 import { PgAuditStore } from "../../api/src/auth/pgAuditStore.js";
 import { PgAdminConsoleStore } from "../../api/src/admin/adminConsoleStore.js";
 import { AuthService } from "../../api/src/auth/authService.js";
-import { WorkersHasher } from "./workersHasher.js";
+import { PgCryptoHasher } from "./pgCryptoHasher.js";
 import { JwtService } from "../../api/src/auth/jwt.js";
 import { AdminUserService } from "../../api/src/auth/adminUserService.js";
 import { OwnershipService } from "../../api/src/auth/ownershipService.js";
@@ -95,11 +95,15 @@ export function buildApiConfig(env: Env, pool: PoolLike): { config: ApiConfig; b
   // through `PoolLike`. The surface they use (`query(text, values) → { rows }`, `connect`, `end`) is
   // satisfied by both drivers, and `poolQuery` is the single seam that translates one to the other.
   const q = poolQuery(pool as never);
-  // ONE hasher for this host, and it is NOT the Node one: `VeloraHasher` hashes with `hash-wasm`, which a
-  // deployed Worker refuses ("Wasm code generation disallowed by embedder" — measured on staging
-  // 2026-10-20, where registration 500'd and login could not have rehashed). `WorkersHasher` produces the
-  // identical `$argon2id$v=19$m=19456,t=2,p=1$…` encoding in pure TypeScript, and
-  // `workersHasher.test.ts` proves the two verify each other's output in both directions.
+  // ONE hasher for this host, and the KDF runs in POSTGRES, not here.
+  //
+  // This Worker is on the Free plan: 10 ms of CPU per request. Argon2id needs ~200 ms, so the credential
+  // route failed with `1102 Worker exceeded resource limits` about half the time (wrangler tail:
+  // "Exceeded CPU Limit"), and WebAssembly — the usual fix — is refused by the runtime
+  // ("Wasm code generation disallowed by embedder"). Moving the hash to `pgcrypto` keeps the strength
+  // (bcrypt cost 12, a format the Node host also verifies) and takes the CPU off the Worker entirely.
+  // `rehashPolicy: { allowUpgrade: false }` below stops a per-login rewrite: this host cannot produce the
+  // Argon2id upgrade, so pretending to would only rewrite the row on every login.
   const userStore = new PgUserStore(pool as never);
   const authEventStore = new PgAuthEventStore(pool as never);
   const ownershipStore = new PgOwnershipStore(pool as never);
@@ -151,7 +155,9 @@ export function buildApiConfig(env: Env, pool: PoolLike): { config: ApiConfig; b
     });
     const auth = new AuthService({
       store: userStore,
-      hasher: new WorkersHasher(),
+      // No Argon2id on this host (see the note above): verify against the stored hash and leave it alone.
+      rehashPolicy: { allowUpgrade: false },
+      hasher: new PgCryptoHasher(q),
       jwt: JwtService.create(boot.jwtSecret),
       mail,
       authEvents: authEventStore,
@@ -166,7 +172,7 @@ export function buildApiConfig(env: Env, pool: PoolLike): { config: ApiConfig; b
       ownership: new OwnershipService({
         ownership: ownershipStore,
         users: userStore,
-        hasher: new WorkersHasher(),
+        hasher: new PgCryptoHasher(q),
         audit: auditStore,
       }),
       adminUsers,

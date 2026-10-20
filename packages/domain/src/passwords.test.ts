@@ -76,3 +76,54 @@ test("policy never returns or references the plaintext password", async () => {
   const serialized = JSON.stringify(r);
   assert.ok(!serialized.includes("correct-password"), "result must not leak the password");
 });
+
+/** Minimal hasher double: records hash() calls and answers verify() from the script. */
+function fakeHasher(script: { verify: boolean }) {
+  const state = { hashCalls: 0 };
+  return {
+    get hashCalls() {
+      return state.hashCalls;
+    },
+    async hash() {
+      state.hashCalls += 1;
+      return "$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA";
+    },
+    async verify() {
+      return script.verify;
+    },
+  };
+}
+
+
+// ---------------------------------------------------------------------------------------------------
+// The upgrade policy: a host that cannot compute Argon2id passes `allowUpgrade: false` and keeps the
+// stored hash. Verification is unchanged — a wrong password still fails, and never reaches the policy.
+// ---------------------------------------------------------------------------------------------------
+test("allowUpgrade:false verifies but never rewrites the stored hash", async () => {
+  const hasher = fakeHasher({ verify: true });
+  const result = await verifyAndRehash(hasher, "secret", "$2y$12$legacybcrypthash", { allowUpgrade: false });
+  assert.deepEqual(result, { verified: true, rehashNeeded: false });
+  assert.equal(hasher.hashCalls, 0, "no upgrade work is attempted on a host that cannot do it");
+});
+
+test("allowUpgrade:false still refuses a wrong password, and still does no hashing", async () => {
+  const hasher = fakeHasher({ verify: false });
+  const result = await verifyAndRehash(hasher, "wrong", "$2y$12$legacybcrypthash", { allowUpgrade: false });
+  assert.deepEqual(result, { verified: false, rehashNeeded: false });
+  assert.equal(hasher.hashCalls, 0);
+});
+
+test("the default policy is unchanged: bcrypt is upgraded on a successful login", async () => {
+  const hasher = fakeHasher({ verify: true });
+  const result = await verifyAndRehash(hasher, "secret", "$2y$12$legacybcrypthash");
+  assert.equal(result.verified, true);
+  assert.equal(result.rehashNeeded, true);
+  assert.equal(hasher.hashCalls, 1);
+});
+
+test("allowUpgrade:true is the same as the default", async () => {
+  const hasher = fakeHasher({ verify: true });
+  const result = await verifyAndRehash(hasher, "secret", "$2y$12$legacybcrypthash", { allowUpgrade: true });
+  assert.equal(result.rehashNeeded, true);
+  assert.equal(hasher.hashCalls, 1);
+});

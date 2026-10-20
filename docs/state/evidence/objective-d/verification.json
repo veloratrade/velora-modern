@@ -36,7 +36,7 @@
   "deployed": {
     "api_worker": {
       "name": "velora-api-staging",
-      "version_id": "14228323-86ee-4565-845d-b4e56fd6e295",
+      "version_id": "68f75f60-5ed5-479d-86d1-73b879185063",
       "url": "https://velora-api-staging.yadgar-s-ict.workers.dev",
       "deployed_at": "2026-10-20T16:42:47Z",
       "secret": "JWT_SECRET set via `wrangler secret put` (value generated in-sandbox, piped on stdin, never printed, never in git)",
@@ -249,5 +249,14 @@
     ],
     "probe_hygiene": "every probe ran inside BEGIN\u2026ROLLBACK; telegram_post_preferences row count is 0 before and after",
     "post_migration_health": "API /health 200, /api/v1/auth/session 200; bot Worker still 6f15c6dc (untouched)"
+  },
+  "free_plan_hashing": {
+    "problem": "Workers Free allows 10 ms of CPU per request; Argon2id (m=19456, t=2) needs 200-240 ms, so POST /api/v1/auth/login answered 1102 'Worker exceeded resource limits' on roughly half of all attempts (wrangler tail: 'Exceeded CPU Limit'). WebAssembly \u2014 the usual remedy \u2014 is refused by the runtime.",
+    "solution": "the KDF moved into PostgreSQL: apps/api-cf/src/pgCryptoHasher.ts runs crypt($1, gen_salt('bf', 12)) and crypt($1,$2)=$2 inside Neon via pgcrypto (extension 1.3, installed on velora_journal). The Worker spends one round trip, not a KDF.",
+    "why_not_weaker": "bcrypt cost 12 is a standard credential hash and is the SAME family the Node host verifies (bcryptjs, including Legacy $2y$ imports). No parameter was lowered to fit the plan and no fast/unkeyed hash was introduced.",
+    "rehash_policy": "AuthDeps gained an optional rehashPolicy; the Worker passes {allowUpgrade:false} because it cannot produce the Argon2id upgrade (rehashing would rewrite the row on every login for no gain). The default is unchanged and pinned by packages/domain/src/passwords.test.ts (4 new tests).",
+    "legacy_rows": "argon2id rows still verify through the in-worker fallback (workersHasher); the two admin rows were converted to bcrypt so no login takes that slow path",
+    "live_check": "8 consecutive logins succeeded before the API's own auth:login limiter (8 per 300 s) answered 429 TOO_MANY_REQUESTS \u2014 no 1102 at all; after the window, login 200 \u2192 /admin 200 \u2192 /admin/overview 200 \u2192 session authenticated:true \u2192 wrong password 401 INVALID_CREDENTIALS \u2192 register 201 (DB-side hash) \u2192 logout 200",
+    "artifacts": "apps/api-cf/src/pgCryptoHasher.ts + 6 unit tests; workersHasher.ts + 6 cross-verification tests; 4 domain tests for the policy"
   }
 }

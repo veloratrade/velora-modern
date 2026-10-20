@@ -1753,3 +1753,33 @@ refresh 401, `/admin` 302.
   really carries round 7 (`post_edit` ×7, `postresult` ×2, `ویرایش متن`, `نتیجهٔ انتشار`).
 - **Not verified:** a real Telegram round trip. The bot token is a Worker secret and unreadable from here, so
   the final check is the owner pressing `/start` and tapping «✏️ ویرایش متن».
+
+## AC-D6 — 2026-10-20 · Credentials work on the Workers FREE plan: the KDF moves into PostgreSQL
+
+- **Commits:** this one. **Deployed:** `velora-api-staging` → `68f75f60-5ed5-479d-86d1-73b879185063`.
+- **Migration impact:** none in `db/migrations`; the database gained the **`pgcrypto` extension** (1.3),
+  installed by the owner-authorised setup against Neon staging.
+
+**The problem, precisely.** Workers Free allows **10 ms of CPU per request**. Argon2id (m=19456, t=2) needs
+**200–240 ms**, and WebAssembly — the normal remedy — is refused by the runtime. So `POST /api/v1/auth/login`
+answered `1102 Worker exceeded resource limits` on roughly half of all attempts (`wrangler tail`:
+`Exceeded CPU Limit`). Every route that does not hash was healthy, which is why earlier live tests passed.
+
+**What changed.** `apps/api-cf/src/pgCryptoHasher.ts`: `hash()` = `crypt($1, gen_salt('bf', 12))`, `verify()`
+= `crypt($1, $2) = $2`, both evaluated **inside Neon**. The Worker's cost is one round trip instead of a KDF.
+bcrypt cost 12 is a standard credential hash and is the family the Node host already verifies (bcryptjs,
+including Legacy `$2y$`), so the same credential keeps working when the API moves to a VPS. **No parameter
+was lowered and no fast/unkeyed hash was introduced.**
+
+`AuthDeps` gained an optional `rehashPolicy`; the Worker passes `{ allowUpgrade: false }` because it cannot
+produce the Argon2id upgrade — rehashing there would rewrite the row on every login for no security gain.
+The default is unchanged and pinned by four new `packages/domain/src/passwords.test.ts` cases. Argon2id rows
+still verify through the in-worker fallback; the admin rows were converted to bcrypt so no login takes it.
+
+**Live on staging:** 8 consecutive logins succeeded before the API's **own** `auth:login` limiter
+(8 per 300 s) answered `429 TOO_MANY_REQUESTS` — **zero 1102s**. After the window: login `200` → `/admin`
+`200` → `/admin/overview` `200` → session `{authenticated:true, role:"admin"}` → wrong password `401
+INVALID_CREDENTIALS` → `POST /register` `201` (hash produced by the database) → logout `200`.
+
+**Gates:** typecheck 0 (6 projects) · `npm test` exit 0 (general 1806: 1805 pass / 1 named skip; PGlite
+87/87) · api-cf 31/31 · domain passwords 10/10 · secret-scan PASS.

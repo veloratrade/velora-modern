@@ -50,11 +50,24 @@ export async function verifyAndRehash(
   hasher: PasswordHasher,
   password: string,
   hash: string,
+  /**
+   * Upgrade policy. Default (absent) = upgrade, exactly as before.
+   *
+   * `allowUpgrade: false` exists for a host that CANNOT produce an Argon2id hash: a Cloudflare Worker
+   * with a 10 ms CPU budget (Free plan) computes Argon2 elsewhere — in PostgreSQL, via pgcrypto — and
+   * stores bcrypt. Rehashing there would rewrite the row on every single login for no security gain,
+   * because the replacement would be bcrypt again. Verification is unaffected: the password is still
+   * checked, and a FAILED check never reaches the policy.
+   */
+  options: { readonly allowUpgrade?: boolean } = {},
 ): Promise<RehashResult> {
   if (!(await hasher.verify(password, hash))) {
     return { verified: false, rehashNeeded: false };
   }
   if (!needsRehash(hash)) {
+    return { verified: true, rehashNeeded: false };
+  }
+  if (options.allowUpgrade === false) {
     return { verified: true, rehashNeeded: false };
   }
   return { verified: true, rehashNeeded: true, newHash: await hasher.hash(password) };
