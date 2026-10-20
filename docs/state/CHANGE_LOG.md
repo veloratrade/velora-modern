@@ -1440,3 +1440,50 @@ configured 25/25, reject 4/4, hang 6/6, worker 4/4, none 2/2, nosecret 5/5 — 4
 path is proven against the mock), real Telegram delivery (no token), the Worker deployment (`apps/worker-cf/`
 remains untracked and undeployed), and the live Neon branch (the rig is in-memory by the boot gate's own
 design). Nothing was committed, pushed or deployed; no production configuration was touched.
+
+## 2026-10-20 — Telegram platform round 6: GitHub main synced, staging redeployed for real, database brought to head
+
+**Why.** Rounds 1–5 accumulated a working tree with a standing rule: *nothing committed*. The owner lifted
+it for a bounded scope — verify, commit and push to `main`, redeploy the Cloudflare **staging** resources,
+prepare/verify the staging database, and make the deploy path reproducible; never production, never force,
+never secrets-in-git.
+
+**GitHub.** 13 content commits (`18f129a…47f4b4c`) grouped by dependency — rate-limit snapshot fix,
+migrations 0036–0041 + runner evidence, agent/tool core, audit vocabulary, telegram agent/banner/templates,
+journal read-authority, the admin-web verdict contract, `apps/worker-cf`, the NEW `apps/web-edge-cf`,
+lock + tooling + docs + state. Fast-forward push on top of `354edaa`; the remote was re-verified by API
+(`main = 47f4b4c`), CI (`ci.yml` run 39392383493) recorded in the round-6 report. The repo's own
+`npm run secret-scan` plus a 27,648-line added-diff sweep for key/token/password-url shapes (and against
+the three credentials pasted into chat) returned zero real hits.
+
+**What the mission's audit lens caught that the rounds missed** — three genuine defects, all fixed before
+commit: a **rate-limit snapshot that aliased the live bucket** (a burst of 20 against a limit of 5 refused
+ALL 20, including the five legitimately first in line — memory + PG stores both fixed, tests pin the
+boundary); **`COALESCE(strategy_tag, strategy)` read the legacy mirror as authority** in three read paths,
+so an imported label outlived a user's edit (inverted to the authoritative column, owner-decision comments
+in place); and the staging **database was five migrations behind** — applied via the official runner after a
+restorable Neon snapshot branch, head now `0041`.
+
+**Cloudflare.** `velora-telegram-bot` redeployed from the committed tree (version
+`9ba84512…`, gates first: tsc 0, 60/60 tests, dry-run): `/health` 200 `storage:postgres`, `/ready` 200
+`database:ok`, webhook 401 with/without a wrong secret, diagnostics 401 unauthenticated — the deploy is
+live and the gates answer exactly as designed. The web **edge** (`velora-modern-staging`) was NOT swapped:
+its source had never been in the repo, and `apps/web-edge-cf/` now reconstructs it (pure handler, 7 tests
+derived from observed responses, gated deploy + printed rollback) — replacing a working manual upload with a
+behavioral reconstruction is explicitly the owner's call. The app behind the edge (Railway staging) answers
+`Application not found` for every route — it is DOWN; recorded as pre-existing and out of Cloudflare's
+hands, NOT papered over.
+
+**Portability, as an architectural fact not a promise.** `apps/api` imports zero Cloudflare modules
+(grep-pinned in `docs/architecture/deployment-portability.md`); the queue, PG access, ingress and raster
+capabilities each have a named adapter seam with a documented VPS equivalent; `docs/deployment/` gained the
+staging runbook and the VPS migration path, both walked from real files.
+
+**Tests.** Full battery against the committed lock: `npm ci` 0 → `npm test` exit 0 (general 1733: 1732/0/1
+named-skip; PGlite 85/85) → `tsc -b --force` across all projects 0 → production web build 0 → repo
+secret-scan 0. (`--force` matters: the sandbox restore wiped `dist/` but left stale `*.tsbuildinfo` — the
+runner's TS6305 guard did its job of refusing a half-built tree.)
+
+**Still open, honestly:** Railway staging is down (owner infra); the edge swap awaits owner confirmation;
+the Worker admin token is not held in this sandbox so `/stats`-class content checks are `BLOCKED` there;
+production does not exist and nothing was created toward it.

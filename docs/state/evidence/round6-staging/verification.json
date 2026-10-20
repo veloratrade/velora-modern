@@ -1,0 +1,49 @@
+{
+ "date": "2026-10-20",
+ "git": {
+  "start_head": "354edaae38c3c482594f06ff3e10879bff43aaf2",
+  "pushed_main": "47f4b4ccf",
+  "commits": 13,
+  "tree_status_after_commits": "clean (docs/state round-6 files pending in a follow-up commit)"
+ },
+ "cloudflare": {
+  "account_id": "9ef5ad5202a5e9db190bf3ecb83e3eff (identifier, not a secret)",
+  "workers": [
+   "tgpl (untouched)",
+   "velora-modern-staging (edge, versions #1-#3; NOT swapped \u2014 owner-gated)",
+   "velora-telegram-bot (REDEPLOYED: version 9ba84512-91f4-46dd-912d-a9e410dca5a5)"
+  ],
+  "hyperdrive": "velora-pg-nonprod 769298b9e39147e39b5e17167c9b7777 \u2192 Neon velora_journal @ ap-southeast-2; password re-synced after rotation; caching disabled",
+  "post_deploy_checks": {
+   "GET /health": "200 storage:postgres mode:private-test access:armed",
+   "GET /ready": "200 checks.database:ok telegram:enabled access.valid:true",
+   "GET /api/v1/telegram/diagnostics (no bearer)": "401 UNAUTHENTICATED (content NOT VERIFIED: admin token not held in this sandbox)",
+   "POST /api/v1/webhooks/telegram no secret": "401",
+   "POST /api/v1/webhooks/telegram wrong secret": "401"
+  }
+ },
+ "edge_live_checks": {
+  "GET / (workers.dev)": "200, x-robots-tag: noindex, nofollow, CSP nonce",
+  "GET /_next/static/css/d9ebc27af4f5c87b.css": "200 cache-control: public,max-age=31536000,immutable (assets binding)",
+  "GET /en/dashboard": "302 \u2192 /en/login (edge guard)",
+  "GET /robots.txt": "200 content-signals block (assets)",
+  "GET|POST /api/v1/*": "proxied to origin; Railway staging service answers 'Application not found' (origin DOWN, pre-existing) \u2014 app-behind-edge NOT VERIFIED"
+ },
+ "database": {
+  "type": "Neon Postgres 17 (velora-journal-nonprod / velora_journal, branch main)",
+  "backup": "snapshot branch pre-round6-snapshot-20261020 (br-dry-waterfall-a7o7t5gn) \u2014 restorable; retained",
+  "migrations": "ledger head was 0036 \u2192 applied 0037,0038,0039,0040,0041 via npm run migrate:dev (MIGRATION_DATABASE_URL) \u2192 head 0041",
+  "credential_flow": "verification role created via Neon API; neondb_owner password rotated (DDL required); Hyperdrive config updated same session; temp role dropped after final checks",
+  "read_write_probe": "round6_probe table create/insert/select/delete OK; new tables + constraints readable (telegram_post_templates 0 rows, telegram_channels_standby_not_revoked present)"
+ },
+ "gates": {
+  "npm_ci": 0,
+  "npm_test": "exit 0 (general 1733: 1732 pass/0 fail/1 named-skip; PGlite 85/85)",
+  "typecheck": "tsc -b --force all projects: 0 (stale tsbuildinfo + wiped dist after sandbox restore \u2014 rebuild required, --force is the fix)",
+  "secret-scan_repo": "npm run secret-scan: exit 0",
+  "diff_secret_scan": "27,648 added lines scanned for key/token/password-url shapes + the three pasted credentials: zero hits (3 regex matches were the public staging URL's subdomain text)",
+  "worker_cf": "tsc 0; 60/60 tests",
+  "web_edge": "tsc 0; 7/7 tests",
+  "web_prod_build": "next build rc=0"
+ }
+}

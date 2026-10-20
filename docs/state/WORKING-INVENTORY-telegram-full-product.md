@@ -176,3 +176,16 @@ Sentinel scan across every response body, console line and DOM in all six scenar
 `tesseract`, real Bot API, Worker deployment; nothing committed, pushed or deployed, tree at 45 `M` / 48 `??`
 against `354edaa`. `docs/state/REPORT-telegram-platform-round-5.md` holds the eleven answers;
 `docs/state/evidence/admin-ui-round5/<scenario>/` holds the screenshots and per-check results.
+## J. Round 6 close-out (2026-10-20) — committed, pushed, staging redeployed, DB at head
+
+13 commits + docs landed on GitHub `main` (verified `47f4b4c` via API; fast-forward, no force, no history
+rewrites). Cloudflare staging `velora-telegram-bot` redeployed from the committed tree (version
+`9ba84512-91f4-46dd-912d-a9e410dca5a5`) with live post-checks green (health/ready 200, gates 401);
+`apps/web-edge-cf/` makes the web edge reproducible (deploy gated on owner confirmation — live edge #3
+untouched); Neon staging moved 0036→0041 head via `migrate:dev` after snapshot branch
+`pre-round6-snapshot-20261020`; three real defects fixed pre-commit (rate-limit live-bucket alias,
+strategy read-authority inversion, DB behind head). Portability docs (`deployment-portability`,
+`cloudflare-staging`, `vps-migration`) pinned to real files, incl. the zero-Cloudflare-imports grep for
+`apps/api`. Battery on the committed lock: ci 0 · npm test 0 (1733/85) · tsc --force 0 · web prod build 0 ·
+secret-scan 0 (+ diff-scan of 27,648 added lines: zero secrets). Railway app-behind-edge is DOWN —
+pre-existing, owner infra. `docs/state/REPORT-round-6.md` is the eleven-section record.
