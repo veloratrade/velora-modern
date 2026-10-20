@@ -2393,3 +2393,185 @@ test("/help advertises bounded multi-step planning only where a planner is wired
   const helpWithout = noPlanner.api.sent.at(-1)?.text ?? "";
   assert.ok(!/bounded steps|مرحلهٔ محدود/u.test(helpWithout), "a runtime that answers in one step must not promise several");
 });
+
+// ── Round 7: the navigable menu ─────────────────────────────────────────────
+//
+// These tests drive the bot the way a user does — tapping buttons — because the property that broke
+// before (a capability wired in `apps/api` but never handed to a deployment) is invisible to a unit
+// test of the handler alone. Each one asserts the EFFECT (a row written, a message sent, nothing
+// written) rather than the wording.
+
+test("the main menu reaches every section by button, and every section reaches home", async () => {
+  const { bot, api, links } = await linkedBotWithChannel();
+  await bot.handleUpdate(commandUpdate(2001, "/start"));
+  const sections = ["templates", "banner", "ai", "posts", "home"] as const;
+  for (const [index, target] of sections.entries()) {
+    await bot.handleUpdate(callbackUpdate(2002 + index, `menu:${target}`));
+    const screen = api.sent.at(-1);
+    assert.ok(screen !== undefined, `menu:${target} produced no screen`);
+    const back = (screen.options?.inlineKeyboard ?? []).flat()
+      .map((b) => (b as { callbackData?: string }).callbackData ?? "");
+    // The main menu IS home: it needs no home button. Every other section must carry one.
+    if (target !== "home") assert.ok(back.includes("menu:home"), `menu:${target} has no way home`);
+  }
+});
+
+test("an unlinked user cannot reach a menu screen by tapping a stale button", async () => {
+  const { bot, api } = makeBot({ posts: true });
+  // No `linkAccount`: this identity has never completed the handshake.
+  for (const [index, data] of ["menu:templates", "menu:posts", "tpl_list:1", "ai_status:none"].entries()) {
+    await bot.handleUpdate(callbackUpdate(2100 + index, data));
+  }
+  const texts = api.texts.join("\n");
+  assert.ok(texts.includes(copyFor("fa").onboardingTitle.replace(/<[^>]+>/gu, "")) || texts.includes("اتصال"), "an unlinked tap gets onboarding, not a section");
+  assert.equal(texts.includes(copyFor("fa").navPostsBody), false, "no section content leaks to an unlinked identity");
+});
+
+test("templates: create through the guided prompts persists a version", async () => {
+  const { bot, api, store, links } = await linkedBotWithChannel();
+  await linkAccount(links);
+  await bot.handleUpdate(callbackUpdate(2200, "tpl_new:none"));
+  assert.ok(api.lastText.includes(copyFor("fa").tplAskName), "step 1 asks for the name");
+  await bot.handleUpdate(messageUpdate(2201, "morning-card"));
+  assert.ok(api.lastText.includes(copyFor("fa").tplAskBody), "step 2 asks for the body");
+  await bot.handleUpdate(messageUpdate(2202, "کارت صبح: {symbol} — {winRate}"));
+  const saved = await store.findCurrentTemplate("1", "morning-card");
+  assert.notEqual(saved, null, "the template must be persisted, not held in memory");
+  assert.equal(saved?.version, 1);
+  assert.ok((await store.getPostPreferences("1")).pendingFlow === null, "the flow cursor is closed after the write");
+});
+
+test("templates: editing writes a NEW version and keeps the old one readable", async () => {
+  const { bot, store, links } = await linkedBotWithChannel();
+  await linkAccount(links);
+  const first = await store.saveTemplate({ userId: "1", name: "bias", body: "v1 {symbol}", expectedVersion: null, at: new Date() });
+  assert.equal(first.status, "saved");
+  const id = first.status === "saved" ? first.record.id : "";
+  await bot.handleUpdate(callbackUpdate(2300, `tpl_edit:${id}`));
+  await bot.handleUpdate(messageUpdate(2301, "v2 {symbol} {netPnl}"));
+  const current = await store.findCurrentTemplate("1", "bias");
+  assert.equal(current?.version, 2);
+  assert.equal(current?.body, "v2 {symbol} {netPnl}");
+  const all = await store.listTemplates("1");
+  assert.equal(all.length, 1, "listTemplates shows the CURRENT version only");
+});
+
+test("templates: delete asks once, then retires — and clears a default that pointed at it", async () => {
+  const { bot, api, store, links } = await linkedBotWithChannel();
+  await linkAccount(links);
+  const saved = await store.saveTemplate({ userId: "1", name: "temp", body: "{symbol}", expectedVersion: null, at: new Date() });
+  const id = saved.status === "saved" ? saved.record.id : "";
+  await bot.handleUpdate(callbackUpdate(2400, `tpl_def:${id}`));
+  assert.equal((await store.getPostPreferences("1")).defaultTemplateName, "temp");
+
+  await bot.handleUpdate(callbackUpdate(2401, `tpl_del:${id}`));
+  assert.ok(api.lastText.includes(copyFor("fa").tplDeleteAsk("temp")), "the question comes first");
+  assert.notEqual(await store.findCurrentTemplate("1", "temp"), null, "asking changes nothing");
+
+  await bot.handleUpdate(callbackUpdate(2402, `tpl_delok:${id}`));
+  assert.equal(await store.findCurrentTemplate("1", "temp"), null, "the confirmation retires it");
+  assert.equal(
+    (await store.getPostPreferences("1")).defaultTemplateName,
+    null,
+    "a default pointing at a retired template is cleared, so /post never asks an unanswerable question",
+  );
+});
+
+test("templates: a duplicate name is refused instead of silently replacing the first", async () => {
+  const { bot, api, store, links } = await linkedBotWithChannel();
+  await linkAccount(links);
+  await store.saveTemplate({ userId: "1", name: "dup", body: "first {symbol}", expectedVersion: null, at: new Date() });
+  await bot.handleUpdate(callbackUpdate(2450, "tpl_new:none"));
+  await bot.handleUpdate(messageUpdate(2451, "dup"));
+  assert.ok(api.lastText.includes(copyFor("fa").tplNameTaken));
+  const still = await store.findCurrentTemplate("1", "dup");
+  assert.equal(still?.body, "first {symbol}", "the existing version is untouched");
+});
+
+test("templates: /cancel closes an open prompt and nothing is written", async () => {
+  const { bot, api, store, links } = await linkedBotWithChannel();
+  await linkAccount(links);
+  await bot.handleUpdate(callbackUpdate(2500, "tpl_new:none"));
+  await bot.handleUpdate(commandUpdate(2501, "/cancel"));
+  assert.ok(api.lastText.includes(copyFor("fa").tplCanceled));
+  assert.equal((await store.getPostPreferences("1")).pendingFlow, null);
+  await bot.handleUpdate(messageUpdate(2502, "orphan-name"));
+  assert.equal(await store.findCurrentTemplate("1", "orphan-name"), null, "text after a cancel is not captured by the prompt");
+});
+
+test("banner: the toggle persists, and the screen never claims a PNG it cannot make", async () => {
+  const { bot, api, store, links } = await linkedBotWithChannel();
+  await linkAccount(links);
+  assert.equal((await store.getPostPreferences("1")).bannerEnabled, true, "defaults are on");
+  await bot.handleUpdate(callbackUpdate(2600, "bn_toggle:off"));
+  assert.equal((await store.getPostPreferences("1")).bannerEnabled, false, "the toggle is persisted, not remembered in a closure");
+  // The harness wires no `renderBannerPng`, so this runtime cannot rasterize — and says so.
+  assert.ok(api.lastText.includes("PNG"), "the limitation is stated on the screen");
+  await bot.handleUpdate(callbackUpdate(2601, "bn_title:ask"));
+  await bot.handleUpdate(messageUpdate(2602, "عنوان سفارشی"));
+  assert.equal((await store.getPostPreferences("1")).bannerTitle, "عنوان سفارشی");
+});
+
+test("AI tools: the status screen names what is missing and no secret value", async () => {
+  const { bot, api, links } = makeBot({
+    posts: true,
+    tools: {
+      search: {
+        status: async () => ({
+          tool: "web_search",
+          provider: "tavily",
+          state: "unavailable",
+          runtimeSupported: true,
+          secrets: [{ key: "TAVILY_API_KEY", present: false, source: null }],
+          reason: "MISSING_API_KEY",
+          lastStatus: null,
+          lastCheckedAt: null,
+        }),
+      } as never,
+      browser: {
+        status: async () => ({
+          tool: "browser_capture",
+          provider: "browserless",
+          state: "unavailable",
+          runtimeSupported: true,
+          secrets: [{ key: "BROWSERLESS_URL", present: false, source: null }],
+          reason: "MISSING_API_KEY",
+          lastStatus: null,
+          lastCheckedAt: null,
+        }),
+      } as never,
+    },
+  });
+  await linkAccount(links);
+  await bot.handleUpdate(callbackUpdate(2700, "ai_status:none"));
+  assert.ok(api.lastText.includes("TAVILY_API_KEY"), "the missing key is named");
+  assert.ok(api.lastText.includes("BROWSERLESS_URL"));
+  assert.ok(api.lastText.includes(copyFor("fa").aiOff));
+});
+
+test("a publish tap from a DIFFERENT identity is refused", async () => {
+  const { bot, api, store, links } = await linkedBotWithChannel();
+  await bot.handleUpdate(commandUpdate(2800, "/post velora.bias"));
+  const data = (api.sent.at(-1)?.options?.inlineKeyboard ?? []).flat()
+    .map((b) => (b as { callbackData?: string }).callbackData ?? "")
+    .find((d) => d.startsWith("post_pub:"));
+  assert.ok(data !== undefined);
+  // A second, linked identity must not be able to publish the first identity's draft.
+  await linkAccount(links, "2", "777");
+  await bot.handleUpdate(callbackUpdate(2801, data as string, 777));
+  const rows = await store.listRecentPosts("1", 5);
+  assert.equal(rows[0]?.status, "DRAFT", "the owning identity's draft is still unpublished");
+});
+
+test("a journal message is never captured by an open template prompt", async () => {
+  const { bot, api, store, links } = await linkedBotWithChannel();
+  await linkAccount(links);
+  await bot.handleUpdate(callbackUpdate(2900, "tpl_new:none"));
+  // This is a complete journal entry. The parser must win, and the prompt must say it stayed open.
+  await bot.handleUpdate(messageUpdate(2901, COMPLETE_FA));
+  assert.ok(api.texts.some((t) => t.includes(copyFor("fa").flowJournalWins)), "the user is told the trade won");
+  const drafts = await store.listTemplates("1");
+  assert.equal(drafts.length, 0, "no template was created from a trade sentence");
+  assert.equal(await bot.handleUpdate(messageUpdate(2902, "ژورنال")), "handled");
+  assert.notEqual((await store.getPostPreferences("1")).pendingFlow, null, "the prompt is still armed afterwards");
+});

@@ -162,6 +162,14 @@ export interface PreviewRequest {
   readonly windowKind?: "today" | "yesterday" | "week" | "all" | undefined;
   /** Stable per user action: a re-delivered update reuses the row instead of making a second post. */
   readonly dedupeKey: string;
+  /**
+   * A title override for the banner card, from the user's own settings (0042).
+   *
+   * Deliberately an input rather than a store read: the service composes a card from the request it
+   * was given, and a renderer that silently consulted a settings row would make two callers with the
+   * same request produce different artwork. Capped by the migration at 60 characters.
+   */
+  readonly bannerTitle?: string | null | undefined;
   /** An AI interpretation supplied by the caller, already labelled. Never read from a template. */
   readonly analysis?: string | null | undefined;
   /** A Telegram file id for the user's own screenshot, so the caption can be posted WITH it. */
@@ -353,7 +361,7 @@ export class TelegramPostService {
     const banner =
       request.banner === true
         ? renderBanner({
-            title: bannerTitle(source.key, request.locale),
+            title: request.bannerTitle ?? bannerTitle(source.key, request.locale),
             direction: request.locale === "fa" ? "rtl" : "ltr",
             locale: request.locale,
             rows: bannerRows(values, rendered.missing, request.locale),
@@ -499,6 +507,26 @@ export class TelegramPostService {
    * runtime, or the render failed. The caller then says the image preview is unavailable here; the text
    * preview still stands, and the approval is bound to those text bytes and their hash either way.
    */
+  /**
+   * Whether THIS runtime can produce a PNG at all.
+   *
+   * A probe, not a constant: the injected `renderBannerPng` is the only thing that knows, and it is
+   * different per host (the Node API has `@resvg/resvg-js`, the Cloudflare Worker has no native module
+   * and answers null). The result is cached for the life of the service because the answer cannot
+   * change without a redeploy — and because a menu screen must not spend a render on every open.
+   */
+  async canRenderBanner(): Promise<boolean> {
+    if (this.deps.renderBannerPng === undefined) return false;
+    this.bannerProbe ??= this.deps.renderBannerPng(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"></svg>',
+    )
+      .then((bytes) => bytes !== null)
+      .catch(() => false);
+    return this.bannerProbe;
+  }
+
+  private bannerProbe: Promise<boolean> | null = null;
+
   async previewPng(input: { readonly userId: string; readonly postId: string }): Promise<Buffer | null> {
     if (this.deps.renderBannerPng === undefined) return null;
     const post = await this.deps.store.findPost(input.userId, input.postId);

@@ -58,6 +58,20 @@ import type { RateLimiter } from "../ratelimits/rateLimiter.js";
 import type { TelegramChannelRecord, TelegramDraftKind, TelegramStore } from "./telegramStore.js";
 import type { TelegramLinkService } from "./telegramLinkService.js";
 import { TelegramPostError, type TelegramPostService } from "./telegramPostService.js";
+import {
+  aiMenu,
+  bannerMenu,
+  helpMenu,
+  journalMenu,
+  mainMenu,
+  postsMenu,
+  templatesMenu,
+  flowKeyboard,
+  TEMPLATES_PER_PAGE,
+  type MenuScreen,
+} from "./telegramMenus.js";
+import type { TelegramPendingFlow, TelegramPostPreferences, TelegramTemplateRecord } from "./telegramStore.js";
+import { TEMPLATE_BODY_LIMIT } from "@velora/domain";
 import { effectiveRegistry, findTool, findToolIn, NO_TOOL_CAPABILITIES, planFromModel, resolveIntent,
   type ToolDefinition,
   type AgentDecision, type Plan, type ToolCapabilities } from "./telegramAgent.js";
@@ -74,6 +88,11 @@ import {
 } from "../ai/aiAgentLoop.js";
 import { MAX_AGENT_TOOL_STEPS, telegramAgentLoopBudget } from "../ai/aiToolCatalog.js";
 import { BUILT_IN_TEMPLATES, builtinTemplate, inspectTemplate } from "@velora/domain";
+
+/** The way back from a preview to the template list. */
+const backToTemplates = (copy: TelegramCopy): InlineKeyboardButton[] => [
+  { text: copy.btnBack, callbackData: buildCallbackData("menu", "templates") },
+];
 
 export interface TelegramBotDeps {
   readonly api: TelegramBotApi;
@@ -401,6 +420,18 @@ export class TelegramBot {
     // round trip less, and an activity gauge does not need better than minute accuracy.
     if (identity !== null && !seenRecently(identity.lastSeenAt)) await this.deps.links.touch(identity.id);
 
+    if (matchesCommand(text, "cancel")) {
+      // `/cancel` closes an open guided prompt. It is also the escape hatch the prompts themselves
+      // name, so a user never has to remember a button path to get out of a question.
+      const pending = (await this.deps.store.getPostPreferences(userId)).pendingFlow;
+      if (pending === null) {
+        await this.safeSend(chatId, copy.tplCanceled);
+        return "handled";
+      }
+      await this.deps.store.setPendingFlow({ userId, flow: null, at: this.now() });
+      await this.safeSend(chatId, copy.tplCanceled);
+      return "handled";
+    }
     if (matchesCommand(text, "unlink")) return this.confirmUnlink(chatId, locale, userId);
     if (matchesCommand(text, "settings")) return this.sendSettings(chatId, userId, locale);
     if (matchesCommand(text, "last")) return this.sendLast(chatId, userId, locale);
@@ -438,10 +469,25 @@ export class TelegramBot {
     const open = await this.deps.journal.currentDraft(userId, tgId);
     if (open !== null && open.missingFields.length > 0) return this.applyAnswer(userId, tgId, chatId, open, text, locale);
 
-    // Ordinary conversation must not create a row. The parser decides, not a
-    // keyword list here: if the message carries no journal value at all, it is
-    // chat, and the bot answers with the menu instead of an empty draft.
+    // The parser decides, not a keyword list here: if the message carries no journal value at all,
+    // it is chat, and the bot answers with the menu instead of an empty draft.
     const preview = await this.deps.journal.previewFromText({ userId, text });
+
+    // ── guided menu flows (round 7): the answer to a question the BOT asked ──
+    //
+    // ORDER IS THE SAFETY PROPERTY, and it is deliberate in two directions:
+    //   • a sentence with JOURNAL VALUE is never consumed by a template prompt — a lost trade is worse
+    //     than a lost template body, so the parser wins and the prompt stays armed (the user is told);
+    //   • text with no journal value is the answer to the open question, so a user who tapped
+    //     "New template" can simply type the name instead of relearning a command.
+    // The flow cursor is persisted (0042) and expires; nothing here trusts it for authorization.
+    const pendingFlow = (await this.deps.store.getPostPreferences(userId)).pendingFlow;
+    if (pendingFlow !== null) {
+      if (!preview.hasValue) return this.advanceFlow(pendingFlow, userId, chatId, text, locale);
+      const { copy: flowCopy } = this.copyFor(locale, { media: this.mediaAvailable });
+      await this.safeSend(chatId, flowCopy.flowJournalWins);
+    }
+
     if (!preview.hasValue && preview.missingFields.length === 5) {
       // ── the agent, and why it sits HERE ──────────────────────────────────
       // AFTER the journal parser has said "this text has nothing to file". Order matters more than
@@ -509,28 +555,167 @@ export class TelegramBot {
     return "handled";
   }
 
+  /**
+   * The main menu — six sections, every one of them a real handler.
+   *
+   * WHAT CHANGED IN ROUND 7, AND WHY. `/start` used to answer with eight commands as buttons and a
+   * ninth that appeared only when the post service was wired. That served a user who knew what the
+   * bot could do; it did not serve one who did not. The menu is now navigable (journal · posts ·
+   * templates · banner · AI · settings · help), each section explains itself in a sentence, and every
+   * screen carries "back" and "home" so nothing is a dead end. The slash commands still work — they
+   * are the compatibility layer, not the primary path.
+   */
   private async sendMenu(chatId: string, userId: string, locale: Locale | null): Promise<UpdateOutcome> {
     void userId;
     const { copy } = this.copyFor(locale, { media: this.mediaAvailable });
-    const keyboard: InlineKeyboardButton[][] = [
-      [{ text: copy.btnNewJournal, callbackData: buildCallbackData("menu", "journal") }],
-      [
-        { text: copy.btnLastTrade, callbackData: buildCallbackData("menu", "last") },
-        { text: copy.btnHistory, callbackData: buildCallbackData("menu", "history") },
-      ],
-      [
-        { text: copy.btnStats, callbackData: buildCallbackData("menu", "stats") },
-        { text: copy.btnChecklist, callbackData: buildCallbackData("menu", "checklist") },
-      ],
-      [
-        { text: copy.btnAnalyze, callbackData: buildCallbackData("menu", "analyze") },
-        { text: copy.btnSettings, callbackData: buildCallbackData("menu", "settings") },
-      ],
-      // Offered only when a post service exists in this process. A menu button that always fails is
-      // worse than no button: it teaches the user that this bot's promises are unreliable.
-      ...(this.postsService() === null ? [] : [[{ text: copy.btnPost, callbackData: buildCallbackData("menu", "post") }] as InlineKeyboardButton[]]),
-    ];
-    await this.safeSend(chatId, clamp(`${copy.menuTitle}\n\n${copy.menuBody}`), { inlineKeyboard: keyboard });
+    const screen = mainMenu(copy, { postsWired: this.postsService() !== null });
+    await this.sendScreen(chatId, screen);
+    return "handled";
+  }
+
+  /** One place that sends a built screen, so every menu is clamped and escaped the same way. */
+  private async sendScreen(chatId: string, screen: MenuScreen): Promise<void> {
+    await this.safeSend(chatId, clamp(screen.text), { inlineKeyboard: screen.keyboard.map((row) => [...row]) });
+  }
+
+  /** The user's persisted post settings, or the documented defaults when they have none. */
+  private async preferences(userId: string): Promise<TelegramPostPreferences> {
+    return this.deps.store.getPostPreferences(userId);
+  }
+
+  private async templatesFor(userId: string): Promise<readonly TelegramTemplateRecord[]> {
+    const service = this.postsService();
+    if (service === null) return [];
+    return this.deps.store.listTemplates(userId);
+  }
+
+  /**
+   * Whether this runtime can actually produce a PNG.
+   *
+   * Asked of the SERVICE, which probes the injected renderer once and caches the answer — the banner
+   * screen must state the truth of THIS process, not a constant. A deployment that gains a renderer
+   * (a Node host, a VPS) starts telling the truth about it with no code change here.
+   */
+  private async canRasterize(): Promise<boolean> {
+    const service = this.postsService();
+    if (service === null) return false;
+    return service.canRenderBanner();
+  }
+
+  /** Route one `menu:<target>` tap to the screen (or the existing handler) it names. */
+  private async openMenuTarget(
+    target: string,
+    userId: string,
+    tgId: string,
+    chatId: string,
+    locale: Locale | null,
+  ): Promise<UpdateOutcome> {
+    const { copy } = this.copyFor(locale, { media: this.mediaAvailable });
+    switch (target) {
+      case "home":
+        return this.sendMenu(chatId, userId, locale);
+      case "journal": {
+        const screen = journalMenu(copy);
+        await this.sendScreen(chatId, screen);
+        return "handled";
+      }
+      case "posts": {
+        const prefs = await this.preferences(userId);
+        await this.sendScreen(chatId, postsMenu(copy, {
+          postsWired: this.postsService() !== null,
+          defaultTemplateName: prefs.defaultTemplateName,
+        }));
+        return "handled";
+      }
+      case "templates": {
+        const [templates, prefs] = await Promise.all([this.templatesFor(userId), this.preferences(userId)]);
+        await this.sendScreen(chatId, templatesMenu(copy, {
+          templates,
+          preferences: prefs,
+          page: 1,
+          postsWired: this.postsService() !== null,
+        }));
+        return "handled";
+      }
+      case "banner": {
+        const prefs = await this.preferences(userId);
+        await this.sendScreen(chatId, bannerMenu(copy, { preferences: prefs, canRaster: await this.canRasterize() }));
+        return "handled";
+      }
+      case "ai":
+        return this.sendAiStatus(chatId, locale);
+      case "help":
+        await this.sendScreen(chatId, helpMenu(copy, copy.helpBody({
+          media: this.mediaAvailable,
+          posts: this.deps.posts !== undefined,
+          tools: {
+            search: this.deps.tools !== undefined,
+            capture: this.deps.tools !== undefined,
+            planner: this.deps.tools?.planner !== undefined,
+          },
+        })));
+        return "handled";
+      // The journal destinations existed before this menu and keep their handlers unchanged.
+      case "last":
+        return this.sendLast(chatId, userId, locale);
+      case "history":
+        return this.sendHistory(chatId, userId, locale, 1);
+      case "analyze":
+        return this.sendAnalysis(chatId, userId, tgId, locale);
+      case "settings":
+        return this.sendSettings(chatId, userId, locale);
+      case "stats":
+        return this.sendStats(chatId, userId, locale);
+      case "checklist":
+        await this.safeSend(chatId, renderChecklistPrompt(copy, CHECKLIST_PROMPT_LINES));
+        return "handled";
+      case "post":
+        // Same call the `/post` command makes: the button cannot be a shortcut past the preview.
+        return this.handlePostCommand("/post", userId, chatId, `menu`, locale);
+      default:
+        await this.safeSend(chatId, copy.genericError);
+        return "rejected";
+    }
+  }
+
+  /**
+   * The AI-tools screen: what is wired, and the exact NAME of a missing key when something is not.
+   *
+   * Two rules hold this screen to the product's own standards. (1) `status()` returns secret names and
+   * presence only — never a value — so the screen cannot leak one even by accident. (2) A tool that is
+   * wired but unconfigured is reported as OFF with its missing key, which is the difference between
+   * "this bot cannot do that" and "the operator has not finished setting it up".
+   */
+  private async sendAiStatus(chatId: string, locale: Locale | null): Promise<UpdateOutcome> {
+    const { copy } = this.copyFor(locale, { media: this.mediaAvailable });
+    const tools: { name: string; state: string; missing: readonly string[]; reason: string | null }[] = [];
+    if (this.deps.tools === undefined) {
+      tools.push({ name: "web_search", state: "unavailable", missing: [], reason: "NOT_WIRED_IN_THIS_DEPLOYMENT" });
+      tools.push({ name: "browser_capture", state: "unavailable", missing: [], reason: "NOT_WIRED_IN_THIS_DEPLOYMENT" });
+      tools.push({ name: "planner", state: "unavailable", missing: [], reason: "NOT_WIRED_IN_THIS_DEPLOYMENT" });
+    } else {
+      const search = await this.deps.tools.search.status();
+      const capture = await this.deps.tools.browser.status();
+      tools.push({
+        name: "web_search",
+        state: search.state,
+        missing: search.secrets.filter((x) => !x.present).map((x) => x.key),
+        reason: search.reason,
+      });
+      tools.push({
+        name: "browser_capture",
+        state: capture.state,
+        missing: capture.secrets.filter((x) => !x.present).map((x) => x.key),
+        reason: capture.reason,
+      });
+      tools.push({
+        name: "planner",
+        state: this.deps.tools.planner === undefined ? "unavailable" : "configured",
+        missing: [],
+        reason: this.deps.tools.planner === undefined ? "NO_PLANNER_WIRED" : null,
+      });
+    }
+    await this.sendScreen(chatId, aiMenu(copy, { tools }));
     return "handled";
   }
 
@@ -654,31 +839,95 @@ export class TelegramBot {
     }
 
     if (action === "menu") {
-      switch (subject) {
-        case "journal":
-          await this.safeSend(chatId, copy.journalPrompt({ media: this.mediaAvailable }));
-          return "handled";
-        case "last":
-          return this.sendLast(chatId, userId, locale);
-        case "history":
-          return this.sendHistory(chatId, userId, locale, 1);
-        case "analyze":
-          return this.sendAnalysis(chatId, userId, tgId, locale);
-        case "settings":
-          return this.sendSettings(chatId, userId, locale);
-        case "stats":
-          return this.sendStats(chatId, userId, locale);
-        case "checklist":
-          await this.safeSend(chatId, renderChecklistPrompt(copy, CHECKLIST_PROMPT_LINES));
-          return "handled";
-        case "post":
-          // The button performs the same call as the command, so it cannot be a shortcut past the
-          // preview: it opens a DRAFT, and the publish still needs the second tap on the post itself.
-          return this.handlePostCommand("/post", userId, chatId, `cb:${query.id}`, locale);
-        default:
-          await this.safeSend(chatId, copy.genericError);
-          return "rejected";
+      // ONE router for every menu destination. The journal ones keep their pre-round-7 handlers
+      // verbatim; the new sections are screens. Nothing here can reach a handler the slash commands
+      // cannot, and `menu` subjects are a closed set (`MENU_TARGETS`), so a payload cannot name a
+      // destination that was never designed.
+      if (subject === "journal") {
+        // "Journal" as a destination still means "start journaling", not "show a section" — the
+        // prompt is what the user tapped for, and the section is one level up under "home".
+        await this.safeSend(chatId, copy.journalPrompt({ media: this.mediaAvailable }));
+        return "handled";
       }
+      return this.openMenuTarget(subject, userId, tgId, chatId, locale);
+    }
+
+    // ── templates (round 7) ──
+    if (action === "tpl_list") {
+      const page = Number.parseInt(subject, 10);
+      const [templates, prefs] = await Promise.all([this.templatesFor(userId), this.preferences(userId)]);
+      await this.sendScreen(chatId, templatesMenu(copy, {
+        templates,
+        preferences: prefs,
+        page: Number.isFinite(page) ? page : 1,
+        postsWired: this.postsService() !== null,
+      }));
+      return "handled";
+    }
+    if (action === "tpl_new") return this.beginTemplateFlow(userId, chatId, locale, { kind: "new" });
+    if (action === "tpl_edit") return this.beginTemplateFlow(userId, chatId, locale, { kind: "edit", templateId: subject });
+    if (action === "tpl_pv") return this.previewTemplate(userId, subject, chatId, locale);
+    if (action === "tpl_def") return this.makeDefaultTemplate(userId, subject, chatId, locale);
+    if (action === "tpl_del") {
+      const template = await this.deps.store.findTemplateById(userId, subject);
+      if (template === null) {
+        await this.safeSend(chatId, copy.tplNotFound);
+        return "handled";
+      }
+      // A destructive step asks ONCE, and the question carries the confirmation button. Nothing is
+      // written by this branch — that is what makes a double-tap on the list harmless.
+      await this.safeSend(chatId, copy.tplDeleteAsk(template.name), {
+        inlineKeyboard: [[
+          { text: copy.btnConfirm, callbackData: buildCallbackData("tpl_delok", subject) },
+          { text: copy.btnCancel, callbackData: buildCallbackData("tpl_list", "1") },
+        ]],
+      });
+      return "handled";
+    }
+    if (action === "tpl_delok") return this.retireTemplate(userId, subject, chatId, locale);
+
+    // ── banner and appearance (round 7) ──
+    if (action === "bn_toggle") {
+      const prefs = await this.preferences(userId);
+      const enabled = subject === "on";
+      const result = await this.deps.store.savePostPreferences({ userId, bannerEnabled: enabled });
+      const saved = result.status === "saved" ? result.preferences : prefs;
+      await this.sendScreen(chatId, bannerMenu(copy, { preferences: saved, canRaster: await this.canRasterize() }));
+      return "handled";
+    }
+    if (action === "bn_title") {
+      if (subject === "clear") {
+        const result = await this.deps.store.savePostPreferences({ userId, bannerTitle: null });
+        const saved = result.status === "saved" ? result.preferences : await this.preferences(userId);
+        await this.safeSend(chatId, copy.bnTitleCleared);
+        await this.sendScreen(chatId, bannerMenu(copy, { preferences: saved, canRaster: await this.canRasterize() }));
+        return "handled";
+      }
+      // The title itself is text, so it arrives as a message (the flow cursor carries that step).
+      await this.deps.store.setPendingFlow({
+        userId,
+        flow: { kind: "banner_title", name: null, body: null, templateId: null, startedAt: this.now() },
+        at: this.now(),
+      });
+      await this.safeSend(chatId, copy.bnAskTitle, { inlineKeyboard: flowKeyboard(copy).map((row) => [...row]) });
+      return "handled";
+    }
+
+    // ── AI tools (round 7) ──
+    if (action === "ai_status") return this.sendAiStatus(chatId, locale);
+
+    // ── guided flow cursor ──
+    if (action === "flow_cancel") {
+      await this.deps.store.setPendingFlow({ userId, flow: null, at: this.now() });
+      await this.safeSend(chatId, copy.tplCanceled);
+      const [templates, prefs] = await Promise.all([this.templatesFor(userId), this.preferences(userId)]);
+      await this.sendScreen(chatId, templatesMenu(copy, {
+        templates,
+        preferences: prefs,
+        page: 1,
+        postsWired: this.postsService() !== null,
+      }));
+      return "handled";
     }
 
     if (action === "unlink") {
@@ -1264,6 +1513,292 @@ export class TelegramBot {
         await this.safeSend(chatId, copy.genericError);
         return "rejected";
     }
+  }
+
+  // ── Guided template and banner flows (round 7) ───────────────────────────
+  //
+  // WHY THE CURSOR IS PERSISTED AND NOT A MAP ON THE INSTANCE. The bot object is per-process and, on
+  // Cloudflare, per-invocation: an in-memory pending step would be lost between the question and the
+  // answer, and lost again on every deploy. `telegram_post_preferences` (0042) holds one cursor per
+  // user, with the store-written start time that makes it expire — a prompt abandoned last week must
+  // not capture the next sentence.
+
+  /** How long an open prompt stays armed. */
+  private static readonly FLOW_TTL_MS = 15 * 60 * 1000;
+
+  private async beginTemplateFlow(
+    userId: string,
+    chatId: string,
+    locale: Locale | null,
+    mode: { readonly kind: "new" } | { readonly kind: "edit"; readonly templateId: string },
+  ): Promise<UpdateOutcome> {
+    const { copy } = this.copyFor(locale, { media: this.mediaAvailable });
+    if (this.postsService() === null) {
+      await this.safeSend(chatId, copy.postNoService);
+      return "handled";
+    }
+    if (mode.kind === "new") {
+      await this.deps.store.setPendingFlow({
+        userId,
+        flow: { kind: "tpl_new_name", name: null, body: null, templateId: null, startedAt: this.now() },
+        at: this.now(),
+      });
+      await this.safeSend(chatId, copy.tplAskName, { inlineKeyboard: flowKeyboard(copy).map((row) => [...row]) });
+      return "handled";
+    }
+    const template = await this.deps.store.findTemplateById(userId, mode.templateId);
+    if (template === null) {
+      await this.safeSend(chatId, copy.tplNotFound);
+      return "handled";
+    }
+    await this.deps.store.setPendingFlow({
+      userId,
+      flow: { kind: "tpl_edit_body", name: template.name, body: null, templateId: template.id, startedAt: this.now() },
+      at: this.now(),
+    });
+    // The old body is quoted so the user edits rather than retypes — and so a mismatch between what
+    // they think is stored and what is stored surfaces before they rewrite it.
+    await this.safeSend(chatId, clamp(`${copy.tplAskBody}\n\n<b>${esc(template.name)}</b> v${String(template.version)}\n<code>${esc(template.body)}</code>`), {
+      inlineKeyboard: flowKeyboard(copy).map((row) => [...row]),
+    });
+    return "handled";
+  }
+
+  /**
+   * Consume one message as the answer to the open prompt, or say the prompt expired.
+   *
+   * The caller only reaches this after the journal parser has declined the text (see `handleText`),
+   * which is the rule that keeps a trade from being swallowed by a template question.
+   */
+  private async advanceFlow(flow: TelegramPendingFlow, userId: string, chatId: string, text: string, locale: Locale | null): Promise<UpdateOutcome> {
+    const { copy } = this.copyFor(locale, { media: this.mediaAvailable });
+    const expired = this.now().getTime() - flow.startedAt.getTime() > TelegramBot.FLOW_TTL_MS;
+    if (expired) {
+      await this.deps.store.setPendingFlow({ userId, flow: null, at: this.now() });
+      await this.safeSend(chatId, copy.tplFlowExpired);
+      return "handled";
+    }
+    const service = this.postsService();
+    if (service === null) {
+      await this.deps.store.setPendingFlow({ userId, flow: null, at: this.now() });
+      await this.safeSend(chatId, copy.postNoService);
+      return "handled";
+    }
+
+    if (flow.kind === "banner_title") {
+      const title = text.trim();
+      if (title.length === 0 || title.length > 60) {
+        await this.safeSend(chatId, copy.bnTitleTooLong);
+        return "handled";
+      }
+      await this.deps.store.setPendingFlow({ userId, flow: null, at: this.now() });
+      const result = await this.deps.store.savePostPreferences({ userId, bannerTitle: title });
+      const prefs = result.status === "saved" ? result.preferences : await this.preferences(userId);
+      await this.safeSend(chatId, copy.bnTitleSet(title));
+      await this.sendScreen(chatId, bannerMenu(copy, { preferences: prefs, canRaster: await this.canRasterize() }));
+      return "handled";
+    }
+
+    if (flow.kind === "tpl_new_name") {
+      const name = text.trim();
+      if (name.length === 0 || name.length > 64) {
+        await this.safeSend(chatId, copy.tplNameInvalid);
+        return "handled";
+      }
+      const existing = await this.deps.store.findCurrentTemplate(userId, name);
+      if (existing !== null) {
+        await this.safeSend(chatId, copy.tplNameTaken);
+        return "handled";
+      }
+      await this.deps.store.setPendingFlow({
+        userId,
+        flow: { kind: "tpl_new_body", name, body: null, templateId: null, startedAt: flow.startedAt },
+        at: this.now(),
+      });
+      await this.safeSend(chatId, copy.tplAskBody, { inlineKeyboard: flowKeyboard(copy).map((row) => [...row]) });
+      return "handled";
+    }
+
+    // The two body steps share everything except which version they write.
+    const body = text.trim();
+    if (body.length === 0) {
+      await this.safeSend(chatId, copy.tplBodyEmpty);
+      return "handled";
+    }
+    if (body.length > TEMPLATE_BODY_LIMIT) {
+      await this.safeSend(chatId, copy.tplBodyTooLong(TEMPLATE_BODY_LIMIT));
+      return "handled";
+    }
+    if (flow.kind === "tpl_new_body") {
+      const name = flow.name ?? "";
+      const saved = await service.saveTemplate({
+        userId,
+        name,
+        body,
+        expectedVersion: null,
+        locale: locale === "en" ? "en" : "fa",
+      });
+      if (saved.result.status !== "saved") {
+        // Someone (or an earlier tap) created the name between the question and the answer. Reported,
+        // never overwritten — 0037's versioning exists precisely for this.
+        await this.deps.store.setPendingFlow({ userId, flow: null, at: this.now() });
+        await this.safeSend(chatId, copy.tplNameTaken);
+        return "handled";
+      }
+      await this.deps.store.setPendingFlow({ userId, flow: null, at: this.now() });
+      await this.safeSend(chatId, copy.tplSaved(saved.result.record.name, saved.result.record.version));
+      await this.sendTemplatesPage(userId, chatId, locale, 1);
+      return "handled";
+    }
+
+    const template = flow.templateId === null ? null : await this.deps.store.findTemplateById(userId, flow.templateId);
+    if (template === null) {
+      await this.deps.store.setPendingFlow({ userId, flow: null, at: this.now() });
+      await this.safeSend(chatId, copy.tplNotFound);
+      return "handled";
+    }
+    // Compare-and-set on the version the user was shown: a lost update is reported, not applied.
+    const edited = await service.saveTemplate({
+      userId,
+      name: template.name,
+      body,
+      expectedVersion: template.version,
+      locale: locale === "en" ? "en" : "fa",
+    });
+    if (edited.result.status !== "saved") {
+      await this.deps.store.setPendingFlow({ userId, flow: null, at: this.now() });
+      await this.safeSend(chatId, copy.tplNotFound);
+      return "handled";
+    }
+    await this.deps.store.setPendingFlow({ userId, flow: null, at: this.now() });
+    await this.safeSend(chatId, copy.tplUpdated(edited.result.record.name, edited.result.record.version));
+    await this.sendTemplatesPage(userId, chatId, locale, 1);
+    return "handled";
+  }
+
+  private async sendTemplatesPage(userId: string, chatId: string, locale: Locale | null, page: number): Promise<void> {
+    const { copy } = this.copyFor(locale, { media: this.mediaAvailable });
+    const [templates, prefs] = await Promise.all([this.templatesFor(userId), this.preferences(userId)]);
+    await this.sendScreen(chatId, templatesMenu(copy, {
+      templates,
+      preferences: prefs,
+      page,
+      postsWired: this.postsService() !== null,
+    }));
+  }
+
+  /**
+   * Render one template against the user's OWN data; missing variables are NAMED, never filled.
+   *
+   * This is the same rendering `handlePostCommand` shows, reached from a button instead of a command
+   * — the block below mirrors that path line for line on purpose. Two renderers would eventually
+   * disagree, and the one the user approved is the one that must be published.
+   */
+  private async previewTemplate(userId: string, templateId: string, chatId: string, locale: Locale | null): Promise<UpdateOutcome> {
+    const { copy } = this.copyFor(locale, { media: this.mediaAvailable });
+    const service = this.postsService();
+    if (service === null) {
+      await this.safeSend(chatId, copy.postNoService);
+      return "handled";
+    }
+    const template = await this.deps.store.findTemplateById(userId, templateId);
+    if (template === null) {
+      await this.safeSend(chatId, copy.tplNotFound);
+      return "handled";
+    }
+    const prefs = await this.preferences(userId);
+    let out: Awaited<ReturnType<TelegramPostService["preview"]>>;
+    try {
+      out = await service.preview({
+        userId,
+        templateName: template.name,
+        dedupeKey: `tplpv:${template.id}:${String(template.version)}`,
+        locale: locale === "en" ? "en" : "fa",
+        banner: prefs.bannerEnabled,
+        ...(prefs.bannerTitle === null ? {} : { bannerTitle: prefs.bannerTitle }),
+      });
+    } catch (err) {
+      if (err instanceof TelegramPostError && err.code === "TEMPLATE_NOT_FOUND") {
+        await this.safeSend(chatId, copy.tplNotFound);
+        return "rejected";
+      }
+      throw err;
+    }
+    if (out.status === "needs-channel") {
+      await this.safeSend(chatId, out.reason === "NO_CHANNEL" ? copy.postNoChannel : copy.postChannelNotOurs);
+      return "rejected";
+    }
+    const post = out.post;
+    if (post === null) {
+      await this.safeSend(chatId, copy.genericError);
+      return "failed";
+    }
+    const lines: string[] = [`${copy.tplPreviewTitle(template.name)} — ${post.chatId}`];
+    if (out.gaps.length > 0) lines.push(copy.postGaps(out.gaps.length));
+    // A variable with no value is shown as "not recorded" — the concrete answer to "handle missing
+    // variables explicitly" — and it is named, because "some field was missing" is not actionable.
+    if (out.unknownPlaceholders.length > 0) lines.push(copy.tplPreviewMissing(out.unknownPlaceholders));
+    if (out.unsupportedPlaceholders.length > 0) lines.push(copy.postUnsupportedExpr);
+    if (out.truncated) lines.push(copy.postTruncated);
+    if (out.markupDropped) lines.push(copy.postMarkupDropped);
+    if (out.blockedReason !== null) lines.push(copy.postBlocked(out.blockedReason));
+    // The publish button is offered only when nothing blocks the send — a button that cannot work is
+    // the kind of promise this bot does not make.
+    const keyboard: InlineKeyboardButton[][] =
+      out.blockedReason === null
+        ? [[
+            { text: copy.btnPublish, callbackData: buildCallbackData("post_pub", post.id) },
+            { text: copy.btnDismiss, callbackData: buildCallbackData("post_no", post.id) },
+          ], [...backToTemplates(copy)]]
+        : [[...backToTemplates(copy)]];
+    await this.safeSend(chatId, clamp(`${lines.join("\n")}\n\n${out.text}`), { inlineKeyboard: keyboard });
+    if (out.banner !== null) {
+      // No rasterizer ⇒ say so in one sentence; never claim an image was produced.
+      const png = await service.previewPng({ userId, postId: post.id });
+      await this.safeSend(chatId, png === null ? copy.postBannerNotRendered : copy.postBannerPreview(out.banner.rowsShown, out.banner.rowsDropped));
+    }
+    return "handled";
+  }
+
+  private async makeDefaultTemplate(userId: string, templateId: string, chatId: string, locale: Locale | null): Promise<UpdateOutcome> {
+    const { copy } = this.copyFor(locale, { media: this.mediaAvailable });
+    const template = await this.deps.store.findTemplateById(userId, templateId);
+    if (template === null) {
+      await this.safeSend(chatId, copy.tplNotFound);
+      return "handled";
+    }
+    const result = await this.deps.store.savePostPreferences({ userId, defaultTemplateName: template.name });
+    if (result.status === "unknown-template") {
+      await this.safeSend(chatId, copy.tplNotFound);
+      return "handled";
+    }
+    await this.safeSend(chatId, copy.tplDefaultSet(template.name));
+    await this.sendTemplatesPage(userId, chatId, locale, 1);
+    return "handled";
+  }
+
+  private async retireTemplate(userId: string, templateId: string, chatId: string, locale: Locale | null): Promise<UpdateOutcome> {
+    const { copy } = this.copyFor(locale, { media: this.mediaAvailable });
+    const service = this.postsService();
+    if (service === null) {
+      await this.safeSend(chatId, copy.postNoService);
+      return "handled";
+    }
+    const template = await this.deps.store.findTemplateById(userId, templateId);
+    if (template === null) {
+      await this.safeSend(chatId, copy.tplNotFound);
+      return "handled";
+    }
+    await service.forgetTemplate(userId, template.name);
+    // A default that points at a retired template would make `/post` ask a question it cannot answer,
+    // so the pointer is cleared in the same operation and the user is told.
+    const prefs = await this.preferences(userId);
+    if (prefs.defaultTemplateName === template.name) {
+      await this.deps.store.savePostPreferences({ userId, defaultTemplateName: null });
+    }
+    await this.safeSend(chatId, copy.tplDeleted(template.name));
+    await this.sendTemplatesPage(userId, chatId, locale, 1);
+    return "handled";
   }
 
   /** `/template` list · `/template save <name> <body>` · `/template delete <name>`. */
