@@ -1,0 +1,17 @@
+{
+  "scenario": "none",
+  "checks": [
+    {
+      "name": "absent tool services → error state, not an empty table",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "no sentinel leaked in any response or console",
+      "ok": true,
+      "detail": "clean"
+    }
+  ],
+  "failures": 0,
+  "apiResponses": 12
+}

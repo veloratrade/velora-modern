@@ -1,0 +1,27 @@
+{
+  "scenario": "reject",
+  "checks": [
+    {
+      "name": "424 is presented as a verdict, not success",
+      "ok": true,
+      "detail": "The provider did not answer — the verdict it returned, and the audit trail records who ran it: — web_search · Failing · UNKNOWN · STATUS · 2 ms · 20 October 2026"
+    },
+    {
+      "name": "the verdict names the code the provider returned",
+      "ok": true,
+      "detail": "The provider did not answer — the verdict it returned, and the audit trail records who ran it: — web_search · Failing · UNKNOWN · STATUS · 2 ms · 20 October 2026"
+    },
+    {
+      "name": "row is unchanged by a refused probe (no cached failing either)",
+      "ok": true,
+      "detail": "Configured, not checked"
+    },
+    {
+      "name": "no sentinel leaked in any response or console",
+      "ok": true,
+      "detail": "clean"
+    }
+  ],
+  "failures": 0,
+  "apiResponses": 13
+}

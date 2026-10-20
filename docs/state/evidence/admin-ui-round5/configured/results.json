@@ -1,0 +1,132 @@
+{
+  "scenario": "configured",
+  "checks": [
+    {
+      "name": "tab visible to super_admin",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "three tool rows rendered",
+      "ok": true,
+      "detail": "count=3"
+    },
+    {
+      "name": "web_search starts at 'Configured, not checked'",
+      "ok": true,
+      "detail": "Configured, not checked"
+    },
+    {
+      "name": "credentials column names keys + presence",
+      "ok": true,
+      "detail": "TAVILY_API_KEY — set (from the environment)"
+    },
+    {
+      "name": "no 'Last checked' column on a never-caching endpoint",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "no sentinel in the DOM",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "the header badge states the tool count",
+      "ok": true,
+      "detail": "3 tools"
+    },
+    {
+      "name": "verdict line carries the evidence: state, status, latency, instant",
+      "ok": true,
+      "detail": "The provider answered — evidence from this check, not from a cache: — web_search · Verified just now · VALID · 2 ms · 20 October 2026"
+    },
+    {
+      "name": "row does NOT flip — the table reports keys, not cached verdicts",
+      "ok": true,
+      "detail": "Configured, not checked"
+    },
+    {
+      "name": "the panel explains why the row did not move",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "no stale green after reload — the verdict was momentary, the keys are now",
+      "ok": true,
+      "detail": "Configured, not checked"
+    },
+    {
+      "name": "the verdict line is gone after reload (not kept in page memory)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "audit tab shows AI_TOOL_VALIDATED with its verdict",
+      "ok": true,
+      "detail": "AI_TOOL_VALIDATED\t5\t—\ttool:web_search verdict:ok\t20 October 2026\n\nShowing 1 users"
+    },
+    {
+      "name": "no sentinel in the audit tab DOM",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "admin sees the rows",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "admin sees NO probe button",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "admin is TOLD why (needsPermission copy)",
+      "ok": true,
+      "detail": "panel says reading ≠ probing"
+    },
+    {
+      "name": "direct POST as admin → 403 from the route",
+      "ok": true,
+      "detail": "{\"status\":403,\"body\":\"{\\\"status\\\":\\\"error\\\",\\\"data\\\":null,\\\"error\\\":{\\\"code\\\":\\\"FORBIDDEN\\\",\\\"message\\\":\\\"Insufficient role.\\\",\\\"requestId\\\":\\\"f0f28cb6-9496-469"
+    },
+    {
+      "name": "the refusal carries no secret material",
+      "ok": true,
+      "detail": "{\"status\":\"error\",\"data\":null,\"error\":{\"code\":\"FORBIDDEN\",\"message\":\"Insufficient role.\",\"requestId\":\"f0f28cb6-9496-4691"
+    },
+    {
+      "name": "plain user: the console never opens for them (route guard moved them)",
+      "ok": true,
+      "detail": "http://localhost:3000/en/dashboard"
+    },
+    {
+      "name": "plain user: no Agent-tools tab anywhere on screen",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "plain user: GET /admin/ai/tools → 403 in-browser",
+      "ok": true,
+      "detail": "{\"status\":403,\"body\":\"{\\\"status\\\":\\\"error\\\",\\\"data\\\":null,\\\"error\\\":{\\\"code\\\":\\\"FORBIDDEN\\\",\\\"message\\\":\\\"Insufficient role.\\\",\\\"requestId\\\":\\\"a5c81aaf-edfa-4c5"
+    },
+    {
+      "name": "fa tab renders Persian state label",
+      "ok": true,
+      "detail": "پیکربندی‌شده، بررسی‌نشده"
+    },
+    {
+      "name": "fa render is rtl-context",
+      "ok": true,
+      "detail": "dir=rtl"
+    },
+    {
+      "name": "no sentinel leaked in any response or console",
+      "ok": true,
+      "detail": "clean"
+    }
+  ],
+  "failures": 0,
+  "apiResponses": 54
+}

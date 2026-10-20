@@ -1,0 +1,27 @@
+{
+  "scenario": "worker",
+  "checks": [
+    {
+      "name": "raster row says 'Not possible in this runtime'",
+      "ok": true,
+      "detail": "Not possible in this runtime"
+    },
+    {
+      "name": "raster row is NOT rendered as mere 'Not configured'",
+      "ok": true,
+      "detail": "Not possible in this runtime"
+    },
+    {
+      "name": "probe of an unverifiable tool says 'no request was sent'",
+      "ok": true,
+      "detail": "rom the environment)\t—\tRun a live check\nbanner_raster\tresvg\tNot possible in this runtime\tno credential needed\tNO_NATIVE_IMAGE_MODULE_IN_THIS_RUNTIME\tRun a live check\n\nThis runtime cannot check that tool, so no request was sent.\n\nThe table above reports what the credentials prove right now. A check's result travels with the check and is never cached: a revoked key must not stay green until tomorrow.\n\nRefresh\n\nA check sends one request to"
+    },
+    {
+      "name": "no sentinel leaked in any response or console",
+      "ok": true,
+      "detail": "clean"
+    }
+  ],
+  "failures": 0,
+  "apiResponses": 13
+}

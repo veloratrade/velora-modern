@@ -1,0 +1,32 @@
+{
+  "scenario": "nosecret",
+  "checks": [
+    {
+      "name": "without credentials the row says 'Not configured'",
+      "ok": true,
+      "detail": "Not configured"
+    },
+    {
+      "name": "the credentials cell names the missing key",
+      "ok": true,
+      "detail": "TAVILY_API_KEY — missing"
+    },
+    {
+      "name": "and the reason column carries the code",
+      "ok": true,
+      "detail": "MISSING_API_KEY"
+    },
+    {
+      "name": "probe-without-credential is a stated verdict, not silence",
+      "ok": true,
+      "detail": "The provider did not answer — the verdict it returned, and the audit trail records who ran it: — web_search · Failing · UNKNOWN · NOT_CONFIGURED · 0 ms · 20 October 2026"
+    },
+    {
+      "name": "no sentinel leaked in any response or console",
+      "ok": true,
+      "detail": "clean"
+    }
+  ],
+  "failures": 0,
+  "apiResponses": 13
+}
