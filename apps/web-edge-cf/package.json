@@ -1,0 +1,13 @@
+{
+  "name": "@velora/web-edge-cf",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare edge shell for the staging web app: assets in front, app origin behind. Reconstructed from the live Worker's observed behavior (see README); the handler is dependency-free and tested with node --test.",
+  "scripts": {
+    "types": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test src/*.test.ts",
+    "assets": "node prepare-assets.mjs",
+    "bundle": "wrangler deploy --dry-run --outdir dist -c wrangler.jsonc"
+  }
+}

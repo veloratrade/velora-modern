@@ -1,0 +1,7 @@
+# Wrangler/tsc output and local secret material — never commit.
+.wrangler/
+dist/
+dist-assets/
+*.tsbuildinfo
+.dev.vars
+wrangler.deploy*.jsonc

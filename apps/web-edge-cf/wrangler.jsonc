@@ -1,0 +1,32 @@
+{
+  // Staging edge for the Velora web app — the reproducible description of the Worker that had been
+  // uploaded manually on 2026-10-06 (versions #1-#3; read back from
+  // GET /accounts/:acc/workers/scripts/velora-modern-staging/versions). This file is the source of
+  // truth from now on; see README.md for the swap policy and the fidelity caveats.
+  "name": "velora-modern-staging",
+  "main": "src/index.ts",
+  // Pinned to what the LIVE version reports (settings.compatibility_date=2026-09-01) — deviating from
+  // it here would silently change runtime semantics during a deploy. Raise only together with a live
+  // re-verification, never on its own.
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "send_metrics": false,
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "dist-assets"
+  },
+
+  "vars": {
+    // The app origin behind the edge. Staging today runs on Railway; moving it is a one-value change
+    // here (or a secret-free `--var` at deploy time), which is the whole point of the edge existing.
+    "VELORA_API_ORIGIN": "https://velora-modern-staging.up.railway.app",
+    // Staging must never be indexed. Read by src/handler.ts; "true" injects `x-robots-tag` on HTML
+    // responses that do not already carry one.
+    "VELORA_NOINDEX": "true",
+    "VELORA_SITE_ORIGIN": "https://velora-modern-staging.yadgar-s-ict.workers.dev"
+  },
+
+  "routes": []
+}
