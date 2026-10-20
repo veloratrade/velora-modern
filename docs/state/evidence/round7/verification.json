@@ -3,12 +3,18 @@
   "objective-a": "Telegram UI via buttons and menus",
   "objective-b": "Web admin panel access recovery",
   "recorded_at": "2026-10-20",
-  "commits": ["af7653b", "b30a6f0", "6202cf5"],
+  "commits": [
+    "af7653b",
+    "b30a6f0",
+    "6202cf5",
+    "5d763e0",
+    "316792a"
+  ],
   "not_deployed": "Nothing was deployed this round: no Cloudflare credential was held (the ones used earlier were shredded after use, per policy), and no new one was requested in chat.",
   "gates": {
     "typecheck_5_projects": "exit 0 (tsc -b --force packages/contracts packages/domain apps/api apps/worker apps/web)",
     "worker_cf_tsc": "exit 0",
-    "full_tests": "exit 0 — general 1768 (1767 pass / 0 fail / 1 named skip NO_TESSERACT_BINARY), PGlite 86/86",
+    "full_tests": "exit 0 — general 1771 (1770 pass / 0 fail / 1 named skip NO_TESSERACT_BINARY), PGlite 87/87",
     "worker_cf_tests": "65/65",
     "web_edge_cf_tests": "10/10",
     "web_production_build": "exit 0 (every route ƒ dynamic, Proxy middleware present)",
@@ -18,19 +24,53 @@
     "secret_scan": "PASS (0 findings)"
   },
   "objective_a": {
-    "menu": ["journal", "posts", "templates", "banner", "AI tools", "settings", "help", "home"],
-    "new_contract_actions": ["tpl_list", "tpl_new", "tpl_edit", "tpl_del", "tpl_delok", "tpl_def", "tpl_pv", "bn_toggle", "bn_title", "ai_status", "flow_cancel"],
-    "new_menu_targets": ["home", "posts", "templates", "banner", "ai", "help"],
+    "menu": [
+      "journal",
+      "posts",
+      "templates",
+      "banner",
+      "AI tools",
+      "settings",
+      "help",
+      "home"
+    ],
+    "new_contract_actions": [
+      "tpl_list",
+      "tpl_new",
+      "tpl_edit",
+      "tpl_del",
+      "tpl_delok",
+      "tpl_def",
+      "tpl_pv",
+      "bn_toggle",
+      "bn_title",
+      "ai_status",
+      "flow_cancel"
+    ],
+    "new_menu_targets": [
+      "home",
+      "posts",
+      "templates",
+      "banner",
+      "ai",
+      "help"
+    ],
     "persistence": "migration 0042 telegram_post_preferences (default template, banner on/off, banner title, one open guided flow with expiry)",
     "tests_added": {
       "telegramMenus.test.ts": "9 — every button on every screen parses AND has a route; routed-action list == contract vocabulary; pagination clamps; default marked; banner states both rasterizer answers; AI names keys not values; prompts carry cancel",
       "telegramBot.test.ts (appended)": "11 — menu navigation, unlinked-user refusal, template create/edit/delete/default, duplicate-name refusal, /cancel, banner toggle+title persistence, AI status, foreign-identity publish refusal, journal-wins-over-prompt regression",
-      "db/tests/migrations.test.ts": "1 — 0042 constraints"
+      "db/tests/migrations.test.ts": "2 — 0042 constraints incl. the cross-namespace mix",
+      "telegramBot.test.ts": "14 — of which: post edit revokes approval, published post not editable, publish-result screen (empty, published, unavailable)"
     },
     "verification_levels": {
       "menu unit + behavioural": "PASS (tests above)",
       "persistence": "PASS in PGlite and in the memory store; NOT applied to the live Neon staging database (no DB credential this session)",
       "deployed bot behaviour": "NOT VERIFIED — the live Worker still runs version 6f15c6dc, which predates this round"
+    },
+    "post_flow": {
+      "edit": "preview → 'Edit text' → new body → TelegramPostService.edit (revisePost): body+hash replaced AND approval cleared in one statement; published/cancelled refused",
+      "publish_result": "menu:postresult — status per row, Telegram message id when published, stored errorCode when failed, and 'publishing unavailable + reason' from the same active-channel lookup publish uses",
+      "cursor": "new flow_post_id column (post ids and template ids are different namespaces) with a flat, branch-complete stage CHECK"
     }
   },
   "objective_b": {

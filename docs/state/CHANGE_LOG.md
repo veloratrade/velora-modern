@@ -1564,3 +1564,29 @@ packages 0 · secret-scan 0.
 **Not deployed, and said so:** no Cloudflare credential was held this session, so the live bot still runs
 `6f15c6dc`; the staging database has not been migrated to 0042 (no DB credential — the migration is proven
 against PGlite, not against Neon); and the admin panel is `NOT VERIFIED`, not claimed.
+
+### round 7 — follow-up `316792a`: edit a prepared post, and report what reached the channel
+
+Two requirements were still open after the menu: *edit content* and *show the publishing result*. Both are
+now real.
+
+**Edit.** A preview carries "Edit text" beside "Publish". The new body goes through
+`TelegramPostService.edit` → `revisePost`, which replaces the body **and its hash and clears the approval**
+in one statement — so the bytes a user approved can never be the bytes that get sent (0037's
+`approved_hash = content_hash` CHECK is the database half of that rule). A `PUBLISHED` or `CANCELLED` post is
+refused and left untouched.
+
+**Result.** "Publish result" reads the same outbox rows the publish path writes: status per post, the
+Telegram message id when it went out, the stored `errorCode` when it failed (a channel-permission failure and
+a rate limit are different problems and must not be flattened into "failed"), and — when the user has no
+active channel — that publishing is unavailable *and why*, from the same lookup `publish` uses.
+
+**One schema consequence, in the same migration.** A guided post edit needs its own cursor column
+(`flow_post_id`): template ids and post ids are different namespaces, and one column holding both is how a
+handler resumes the wrong object. `flow_kind`'s closed vocabulary gained `post_edit_body`, and the stage
+CHECK was rewritten as a **flat list of complete branches** — its first draft put an `AND` after a chain of
+`OR`s, which binds to the last branch only. A test now pins that the cross-namespace shape is refused and that
+clearing a flow must clear its post id.
+
+**Gates:** typecheck 0 · `npm test` **exit 0** (general 1771: 1770 pass / 0 fail / 1 named skip; PGlite 87/87)
+· secret-scan 0. Still not deployed (no credential this session) and still not migrated to the live database.
