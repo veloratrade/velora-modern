@@ -476,6 +476,25 @@ const FA = {
   navHelpBody: "همهٔ کارهای روزمره از دکمه‌ها انجام می‌شود؛ دستورهای اسلش برای سازگاری مانده‌اند.",
   flowJournalWins:
     "ℹ️ متن شما ارزش ژورنالی داشت، پس به‌عنوان معامله ثبت می‌شود و پرسش قبلی (قالب) باز می‌ماند. برای پاسخ دادن به آن، بعد از این پیام متن را بفرستید؛ برای بستنش /cancel.",
+  // ── publish result + post editing (round 7) ──
+  postResultTitle: "📬 <b>نتیجهٔ انتشار</b>",
+  postResultEmpty: "هنوز پستی از این حساب آماده یا منتشر نشده است. از «پست تازه» شروع کنید.",
+  postStatusDraft: "پیش‌نویس (منتشر نشده)",
+  postStatusApproved: "تأییدشده، در صف ارسال",
+  postStatusPublishing: "در حال ارسال",
+  postStatusPublished: "منتشر شد",
+  postStatusFailed: "ناموفق",
+  postStatusCancelled: "لغو شد",
+  postResultLine: (o: { readonly when: string; readonly status: string; readonly excerpt: string; readonly messageId: string | null; readonly errorCode: string | null }) =>
+    `• ${o.when} — <b>${o.status}</b>${o.messageId === null ? "" : ` (پیام ${o.messageId})`}${o.errorCode === null ? "" : ` — کد: ${o.errorCode}`}\n  <i>${esc(o.excerpt)}</i>`,
+  postResultUnavailable: (reason: string) => `⚠️ انتشار در حال حاضر ممکن نیست: ${reason}`,
+  btnPostEdit: "✏️ ویرایش متن",
+  postEditAsk:
+    "متن جدید پست را بفرستید. با این کار تأیید قبلی باطل می‌شود و باید پیش‌نمایش تازه را دوباره تأیید کنید. برای لغو /cancel.",
+  postEdited: "✅ متن پست اصلاح شد؛ تأیید قبلی باطل شد. پیش‌نمایش تازه را ببینید و اگر درست است منتشر کنید.",
+  postEditNotEditable: "این پست دیگر قابل ویرایش نیست (یا منتشر شده یا لغو شده).",
+  postEditInvalid: "این متن پذیرفته نشد: خالی است، بیش از حد بلند است، یا متغیر ناشناخته دارد. متن دیگری بفرستید یا /cancel.",
+  postEditExpiredPost: "⏳ این ویرایش منقضی شد؛ پست دست‌نخورده ماند. دوباره از پیش‌نمایش شروع کنید.",
 };
 
 const EN: typeof FA = {
@@ -878,6 +897,25 @@ const EN: typeof FA = {
   navHelpBody: "Daily work is done from the buttons; slash commands remain for compatibility.",
   flowJournalWins:
     "ℹ️ That text had journal value, so it is being filed as a trade and the earlier question (template) stays open. Send your answer after this message, or /cancel to close it.",
+  // ── publish result + post editing (round 7) ──
+  postResultTitle: "📬 <b>Publish result</b>",
+  postResultEmpty: "No post has been prepared or published from this account yet. Start with “New post”.",
+  postStatusDraft: "draft (not published)",
+  postStatusApproved: "approved, queued to send",
+  postStatusPublishing: "sending",
+  postStatusPublished: "published",
+  postStatusFailed: "failed",
+  postStatusCancelled: "cancelled",
+  postResultLine: (o: { readonly when: string; readonly status: string; readonly excerpt: string; readonly messageId: string | null; readonly errorCode: string | null }) =>
+    `• ${o.when} — <b>${o.status}</b>${o.messageId === null ? "" : ` (message ${o.messageId})`}${o.errorCode === null ? "" : ` — code: ${o.errorCode}`}\n  <i>${esc(o.excerpt)}</i>`,
+  postResultUnavailable: (reason: string) => `⚠️ Publishing is not possible right now: ${reason}`,
+  btnPostEdit: "✏️ Edit text",
+  postEditAsk:
+    "Send the post's new text. This REVOKES the previous approval, so you will approve the fresh preview again. To cancel: /cancel",
+  postEdited: "✅ The post text was revised; the previous approval is void. Review the fresh preview and publish it if it is right.",
+  postEditNotEditable: "That post can no longer be edited (it was published or cancelled).",
+  postEditInvalid: "That text was refused: it is empty, too long, or has an unknown variable. Send another or /cancel.",
+  postEditExpiredPost: "⏳ That edit expired; the post is unchanged. Start again from the preview.",
 };
 
 /** The copy object's type. Both locales are this shape — `EN` is annotated `typeof FA`, so a key added

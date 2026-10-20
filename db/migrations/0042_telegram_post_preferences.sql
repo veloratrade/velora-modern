@@ -55,25 +55,41 @@ CREATE TABLE IF NOT EXISTS telegram_post_preferences (
   banner_title          TEXT CHECK (banner_title IS NULL OR length(btrim(banner_title)) BETWEEN 1 AND 60),
 
   -- One open guided flow per user, or none. Kinds are closed: a new step is a migration, by design.
-  flow_kind             TEXT CHECK (flow_kind IS NULL OR flow_kind IN ('tpl_new_name', 'tpl_new_body', 'tpl_edit_body', 'banner_title')),
+  flow_kind             TEXT CHECK (flow_kind IS NULL OR flow_kind IN ('tpl_new_name', 'tpl_new_body', 'tpl_edit_body', 'banner_title', 'post_edit_body')),
   flow_name             TEXT CHECK (flow_name IS NULL OR length(btrim(flow_name)) BETWEEN 1 AND 64),
   flow_body             TEXT CHECK (flow_body IS NULL OR length(flow_body) BETWEEN 1 AND 8000),
   flow_template_id      BIGINT,
+  -- The post a guided edit is rewriting. Separate from `flow_template_id` on purpose: a template id and
+  -- a post id are different namespaces, and one column holding both is how a handler resumes the wrong
+  -- object — the class of bug that rewrites a different user's card.
+  flow_post_id          BIGINT,
   flow_started_at       TIMESTAMPTZ,
 
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
 
   CONSTRAINT telegram_post_preferences_flow_coherent CHECK (
-    (flow_kind IS NULL AND flow_started_at IS NULL AND flow_name IS NULL AND flow_body IS NULL AND flow_template_id IS NULL)
+    -- No flow, or a flow that knows when it started. A kind without a timestamp would never expire.
+    (flow_kind IS NULL AND flow_started_at IS NULL AND flow_name IS NULL AND flow_body IS NULL
+      AND flow_template_id IS NULL AND flow_post_id IS NULL)
     OR (flow_kind IS NOT NULL AND flow_started_at IS NOT NULL)
   ),
-  -- The name step knows no body yet; the body steps must have their target. Making this explicit stops a
-  -- handler from resuming a flow it cannot finish.
+  /*
+   * Which columns each step may carry. Written as one flat list with every OR-branch complete, because
+   * an `AND` written after a chain of `OR`s silently attaches to the LAST branch only — the shape this
+   * constraint had in its first draft, and the reason it is now spelled out branch by branch:
+   *
+   *   tpl_new_name   → nothing else yet (the body arrives in the next step)
+   *   tpl_new_body   → its NAME (the body being written is the message itself)
+   *   tpl_edit_body  → its template id
+   *   banner_title   → nothing else
+   *   post_edit_body → its POST id, and never a template id (different namespaces)
+   */
   CONSTRAINT telegram_post_preferences_flow_stage CHECK (
     flow_kind IS NULL
-    OR (flow_kind = 'tpl_new_name' AND flow_body IS NULL AND flow_template_id IS NULL)
-    OR (flow_kind = 'tpl_new_body' AND flow_name IS NOT NULL AND flow_template_id IS NULL)
-    OR (flow_kind = 'tpl_edit_body' AND flow_template_id IS NOT NULL)
-    OR (flow_kind = 'banner_title' AND flow_name IS NULL AND flow_body IS NULL AND flow_template_id IS NULL)
+    OR (flow_kind = 'tpl_new_name'  AND flow_name IS NULL     AND flow_body IS NULL AND flow_template_id IS NULL     AND flow_post_id IS NULL)
+    OR (flow_kind = 'tpl_new_body'  AND flow_name IS NOT NULL AND flow_body IS NULL AND flow_template_id IS NULL     AND flow_post_id IS NULL)
+    OR (flow_kind = 'tpl_edit_body' AND flow_name IS NULL     AND flow_body IS NULL AND flow_template_id IS NOT NULL AND flow_post_id IS NULL)
+    OR (flow_kind = 'banner_title'  AND flow_name IS NULL     AND flow_body IS NULL AND flow_template_id IS NULL     AND flow_post_id IS NULL)
+    OR (flow_kind = 'post_edit_body' AND flow_name IS NULL    AND flow_body IS NULL AND flow_template_id IS NULL     AND flow_post_id IS NOT NULL)
   )
 );

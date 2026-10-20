@@ -264,6 +264,7 @@ export const CALLBACK_ACTIONS = [
   "bn_title", // subject `ask` | `clear`: the banner's title override (the text arrives as a message)
   "ai_status", // read-only: which tools are wired, and which env var is missing when one is not
   "flow_cancel", // subject `none`: close the open guided prompt and write nothing
+  "post_edit", // subject is a post id: rewrite the preview's text (which REVOKES its approval)
 ] as const;
 export type CallbackAction = (typeof CALLBACK_ACTIONS)[number];
 
@@ -272,7 +273,7 @@ export const MENU_TARGETS = [
   // round-7 navigation: the six sections the user asked for, plus `home` (the way back) and the
   // three journal shortcuts that were already here and stay reachable from the journal section.
   "home", "journal", "last", "history", "analyze", "stats", "checklist", "post",
-  "posts", "templates", "banner", "ai", "settings", "help",
+  "posts", "postresult", "templates", "banner", "ai", "settings", "help",
 ] as const;
 export type MenuTarget = (typeof MENU_TARGETS)[number];
 
@@ -280,7 +281,7 @@ export type MenuTarget = (typeof MENU_TARGETS)[number];
 // `post_pub`/`post_no` must never be reachable by a payload that meant `post`. The subject class stays
 // ASCII-only and 48 chars, which is what keeps a button from ever carrying user-authored text.
 const CALLBACK_RE =
-  /^(confirm|cancel|edit|menu|unlink|history_more|channel_test|connect|trade|trade_arm|trade_edit|trade_delete|post_pub|post_no|tpl_list|tpl_new|tpl_edit|tpl_del|tpl_delok|tpl_def|tpl_pv|bn_toggle|bn_title|ai_status|flow_cancel):([A-Za-z0-9_-]{1,48})$/;
+  /^(confirm|cancel|edit|menu|unlink|history_more|channel_test|connect|trade|trade_arm|trade_edit|trade_delete|post_pub|post_no|tpl_list|tpl_new|tpl_edit|tpl_del|tpl_delok|tpl_def|tpl_pv|bn_toggle|bn_title|ai_status|flow_cancel|post_edit):([A-Za-z0-9_-]{1,48})$/;
 
 export function parseCallbackData(data: string): { action: CallbackAction; subject: string } | null {
   const match = CALLBACK_RE.exec(data.trim());

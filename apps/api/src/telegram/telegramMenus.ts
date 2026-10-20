@@ -104,6 +104,8 @@ export function postsMenu(copy: TelegramCopy, options: { readonly postsWired: bo
       // "New post" IS `/post` — same handler, so the button cannot bypass the preview or the approval.
       [{ text: copy.btnPostNew, callbackData: buildCallbackData("menu", "post") }],
       [nav(copy.btnPostTplList, "templates"), nav(copy.btnPostPreview, "post")],
+      // The outcome screen: what actually left the account, and why nothing did when nothing did.
+      [nav(copy.btnPostResult, "postresult")],
       backAndHome(copy, "home"),
     ],
   };
@@ -163,6 +165,65 @@ export function templatesMenu(
   return {
     text: `${copy.navTplTitle}\n\n${copy.navTplBody}\n\n${String(options.templates.length)} — صفحهٔ ${String(page)}/${String(pages)}`,
     keyboard: rows,
+  };
+}
+
+/**
+ * The publish-result screen: what left this account, and why nothing did when nothing did.
+ *
+ * This is the answer to "show the publishing result or a clear reason publication is unavailable", and
+ * it reads the SAME rows the publish path writes — no second bookkeeping. A failed post keeps its
+ * `errorCode` (0037's `failed_has_code`), so the screen can name the failure instead of saying
+ * "something went wrong": that code is the difference between a channel permission problem and a
+ * Telegram rate limit, and a user cannot act on the second if they are told the first.
+ */
+export function postResultMenu(
+  copy: TelegramCopy,
+  options: {
+    readonly posts: readonly {
+      readonly id: string;
+      readonly status: string;
+      readonly createdAt: string;
+      readonly body: string;
+      readonly telegramMessageId: string | null;
+      readonly errorCode: string | null;
+    }[];
+    readonly blockedReason: string | null;
+  },
+): MenuScreen {
+  const statusLabel = (status: string): string => {
+    switch (status) {
+      case "DRAFT": return copy.postStatusDraft;
+      case "APPROVED": return copy.postStatusApproved;
+      case "PUBLISHING": return copy.postStatusPublishing;
+      case "PUBLISHED": return copy.postStatusPublished;
+      case "FAILED": return copy.postStatusFailed;
+      case "CANCELLED": return copy.postStatusCancelled;
+      default: return status;
+    }
+  };
+  const lines = options.posts.map((post) =>
+    copy.postResultLine({
+      when: post.createdAt.slice(0, 16).replace("T", " "),
+      status: statusLabel(post.status),
+      // One line of the post, escaped: enough to recognise WHICH post, never the whole card again.
+      excerpt: post.body.replace(/\s+/gu, " ").trim().slice(0, 70),
+      messageId: post.telegramMessageId,
+      errorCode: post.errorCode,
+    }),
+  );
+  const text = [
+    copy.postResultTitle,
+    "",
+    ...(lines.length === 0 ? [copy.postResultEmpty] : lines),
+    ...(options.blockedReason === null ? [] : ["", copy.postResultUnavailable(options.blockedReason)]),
+  ].join("\n");
+  return {
+    text,
+    keyboard: [
+      [{ text: copy.btnPostNew, callbackData: buildCallbackData("menu", "post") }],
+      backAndHome(copy, "posts"),
+    ],
   };
 }
 

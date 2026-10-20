@@ -44,7 +44,7 @@ const ROUTED_ACTIONS = [
   "confirm", "cancel", "edit", "menu", "unlink", "history_more", "channel_test", "connect",
   "trade", "trade_arm", "trade_edit", "trade_delete", "post_pub", "post_no",
   "tpl_list", "tpl_new", "tpl_edit", "tpl_del", "tpl_delok", "tpl_def", "tpl_pv",
-  "bn_toggle", "bn_title", "ai_status", "flow_cancel",
+  "bn_toggle", "bn_title", "ai_status", "flow_cancel", "post_edit",
 ] as const;
 
 function template(id: string, name: string, version = 1): TelegramTemplateRecord {

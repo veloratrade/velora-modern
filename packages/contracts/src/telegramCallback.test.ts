@@ -46,6 +46,7 @@ test("every declared action round-trips, including a trade id with hyphens", () 
     bn_title: "ask",
     ai_status: "none",
     flow_cancel: "none",
+    post_edit: "51",
   };
   for (const action of CALLBACK_ACTIONS) {
     const subject = subjects[action];
@@ -64,7 +65,7 @@ test("the menu targets the bot can render are exactly the ones the keyboard can 
   // destinations are unchanged, which is the compatibility promise: every old button keeps working.
   assert.deepEqual(
     [...MENU_TARGETS],
-    ["home", "journal", "last", "history", "analyze", "stats", "checklist", "post", "posts", "templates", "banner", "ai", "settings", "help"],
+    ["home", "journal", "last", "history", "analyze", "stats", "checklist", "post", "posts", "postresult", "templates", "banner", "ai", "settings", "help"],
   );
 });
 

@@ -1765,9 +1765,16 @@ test("template text cannot mint a button or a link outside the allowlist", async
   const preview = api.sent.at(-1);
   const urls = (preview?.options?.inlineKeyboard ?? []).flat().map((b) => (b as { url?: string }).url).filter((u): u is string => typeof u === "string");
   for (const url of urls) assert.ok(url.includes("app.velora.example"), `a template cannot introduce a destination: ${url}`);
-  // The only buttons are the ones the bot owns: publish/dismiss, no link buttons from template text.
+  // The only buttons are the ones the bot owns — publish, edit, dismiss — and every one of them carries a
+  // callback this bot minted. A template that could introduce a BUTTON (not just a URL) would be an
+  // open redirect with the platform's own authority behind it.
   const texts = (preview?.options?.inlineKeyboard ?? []).flat().map((b) => b.text);
-  assert.deepEqual(texts, [copyFor("fa").btnPublish, copyFor("fa").btnDismiss]);
+  assert.deepEqual(texts, [copyFor("fa").btnPublish, copyFor("fa").btnPostEdit, copyFor("fa").btnDismiss]);
+  const payloads = (preview?.options?.inlineKeyboard ?? []).flat()
+    .map((b) => (b as { callbackData?: string }).callbackData ?? "");
+  for (const payload of payloads) {
+    assert.ok(/^(post_pub|post_edit|post_no):/u.test(payload), `only the bot's own post actions may appear: ${payload}`);
+  }
   assert.equal((preview?.text ?? "").includes("evil.example"), false, "the disallowed anchor is stripped, its label kept");
 });
 
@@ -2574,4 +2581,68 @@ test("a journal message is never captured by an open template prompt", async () 
   assert.equal(drafts.length, 0, "no template was created from a trade sentence");
   assert.equal(await bot.handleUpdate(messageUpdate(2902, "ژورنال")), "handled");
   assert.notEqual((await store.getPostPreferences("1")).pendingFlow, null, "the prompt is still armed afterwards");
+});
+
+test("post editing: the revised bytes replace the row and REVOKE the previous approval", async () => {
+  const { bot, api, store } = await linkedBotWithChannel();
+  await bot.handleUpdate(commandUpdate(3000, "/post velora.bias"));
+  const preview = api.sent.at(-1);
+  const editData = (preview?.options?.inlineKeyboard ?? []).flat()
+    .map((b) => (b as { callbackData?: string }).callbackData ?? "")
+    .find((d) => d.startsWith("post_edit:"));
+  // The preview offers an edit that leads back to the SAME approval — never straight to the channel.
+  assert.notEqual(editData, undefined, "the preview must offer editing the text it is showing");
+
+  const rows = await store.listRecentPosts("1", 5);
+  const post = rows[0];
+  assert.notEqual(post, undefined);
+  const postId = post!.id;
+
+  await bot.handleUpdate(callbackUpdate(3001, `post_edit:${postId}`));
+  assert.ok(api.lastText.includes(copyFor("fa").postEditAsk), "the prompt quotes the old text and asks for the new one");
+  await bot.handleUpdate(messageUpdate(3002, "متن کاملاً جدید برای کانال"));
+  const after = await store.findPost("1", postId);
+  assert.equal(after?.body, "متن کاملاً جدید برای کانال");
+  assert.equal(after?.approvedHash, null, "the old approval (bound to the old hash) is cleared by the edit");
+  assert.notEqual(after?.contentHash, post?.contentHash, "the hash follows the bytes");
+  assert.ok(api.texts.some((t) => t.includes(copyFor("fa").postEdited)));
+});
+
+test("post editing: a post that was already published is not editable", async () => {
+  const { bot, api, store } = await linkedBotWithChannel();
+  await bot.handleUpdate(commandUpdate(3010, "/post velora.bias"));
+  const postId = (await store.listRecentPosts("1", 5))[0]!.id;
+  const data = (api.sent.at(-1)?.options?.inlineKeyboard ?? []).flat()
+    .map((b) => (b as { callbackData?: string }).callbackData ?? "")
+    .find((d) => d.startsWith("post_pub:"));
+  await bot.handleUpdate(callbackUpdate(3011, data as string));
+  assert.equal((await store.findPost("1", postId))?.status, "PUBLISHED");
+
+  await bot.handleUpdate(callbackUpdate(3012, `post_edit:${postId}`));
+  await bot.handleUpdate(messageUpdate(3013, "متن دیرهنگام"));
+  assert.ok(api.texts.some((t) => t.includes(copyFor("fa").postEditNotEditable)));
+  assert.equal((await store.findPost("1", postId))?.status, "PUBLISHED", "a published post is untouched");
+});
+
+test("the publish-result screen shows the real outcome, and names why a send is impossible", async () => {
+  // No channel bound: the screen must say publishing is unavailable, not imply a failed click.
+  const noChannel = makeBot({ posts: true });
+  await linkAccount(noChannel.links);
+  await noChannel.bot.handleUpdate(callbackUpdate(3020, "menu:postresult"));
+  assert.ok(noChannel.api.lastText.includes(copyFor("fa").postResultEmpty), "nothing has been prepared yet");
+  assert.ok(noChannel.api.lastText.includes(copyFor("fa").postResultUnavailable(copyFor("fa").postNoChannel)));
+
+  // With a channel and a real publish, the row is reported as published with its message id.
+  const { bot, api, store } = await linkedBotWithChannel();
+  await bot.handleUpdate(commandUpdate(3021, "/post velora.bias"));
+  const data = (api.sent.at(-1)?.options?.inlineKeyboard ?? []).flat()
+    .map((b) => (b as { callbackData?: string }).callbackData ?? "")
+    .find((d) => d.startsWith("post_pub:"));
+  await bot.handleUpdate(callbackUpdate(3022, data as string));
+  await bot.handleUpdate(callbackUpdate(3023, "menu:postresult"));
+  const screen = api.lastText;
+  assert.ok(screen.includes(copyFor("fa").postStatusPublished), "the published row is labelled as published");
+  assert.equal(screen.includes(copyFor("fa").postStatusDraft), false, "and not shown as a draft");
+  const row = (await store.listRecentPosts("1", 1))[0]!;
+  assert.ok(screen.includes(row.telegramMessageId ?? ""), "the message id is shown, so the user can find the post");
 });

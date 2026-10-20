@@ -1257,3 +1257,59 @@ test("0042: one preferences row per user, with defaults by absence and a coheren
     await engine.close();
   }
 });
+
+// 0042's stage rule is a flat list of complete branches; this pins the two shapes that a hand-written
+// `AND` after a chain of `OR`s would have let through (the constraint's own first draft).
+test("0042: a post-edit step carries a post id and never a template id", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    const userId = (await engine.query(
+      "INSERT INTO users(email, password_hash) VALUES ($1,$2) RETURNING id",
+      ["prefs2@velora.ir", "x"],
+    )).rows[0]?.id;
+    assert.ok(userId !== undefined);
+    await engine.query("INSERT INTO telegram_post_preferences (user_id) VALUES ($1)", [userId]);
+
+    // A post edit without its post id cannot be resumed, so it cannot be stored.
+    await assert.rejects(
+      engine.query(
+        "UPDATE telegram_post_preferences SET flow_kind = 'post_edit_body', flow_started_at = now() WHERE user_id = $1",
+        [userId],
+      ),
+      /check constraint/i,
+    );
+    // A template step must not smuggle a post id (the cross-namespace mix the constraint forbids).
+    await assert.rejects(
+      engine.query(
+        `UPDATE telegram_post_preferences
+            SET flow_kind = 'tpl_edit_body', flow_started_at = now(), flow_template_id = 1, flow_post_id = 2
+          WHERE user_id = $1`,
+        [userId],
+      ),
+      /check constraint/i,
+    );
+    // The real shape is accepted.
+    await engine.query(
+      `UPDATE telegram_post_preferences
+          SET flow_kind = 'post_edit_body', flow_started_at = now(), flow_post_id = 42
+        WHERE user_id = $1`,
+      [userId],
+    );
+    // …and clearing the flow clears the post id too (a stale id would resume a finished edit).
+    await assert.rejects(
+      engine.query(
+        "UPDATE telegram_post_preferences SET flow_kind = NULL, flow_started_at = NULL WHERE user_id = $1",
+        [userId],
+      ),
+      /check constraint/i,
+      "a cleared flow that kept flow_post_id is refused",
+    );
+    await engine.query(
+      "UPDATE telegram_post_preferences SET flow_kind = NULL, flow_started_at = NULL, flow_post_id = NULL WHERE user_id = $1",
+      [userId],
+    );
+  } finally {
+    await engine.close();
+  }
+});

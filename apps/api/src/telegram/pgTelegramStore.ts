@@ -843,7 +843,7 @@ export class PgTelegramStore implements TelegramStore {
   async getPostPreferences(userId: string): Promise<TelegramPostPreferences> {
     const rows = await this.q(
       `SELECT default_template_name, banner_enabled, banner_title, updated_at,
-              flow_kind, flow_name, flow_body, flow_template_id, flow_started_at
+              flow_kind, flow_name, flow_body, flow_template_id, flow_post_id, flow_started_at
          FROM telegram_post_preferences WHERE user_id = $1::bigint`,
       [userId],
     );
@@ -886,7 +886,7 @@ export class PgTelegramStore implements TelegramStore {
             banner_title          = CASE WHEN $6::boolean THEN EXCLUDED.banner_title ELSE telegram_post_preferences.banner_title END,
             updated_at            = now()
          RETURNING default_template_name, banner_enabled, banner_title, updated_at,
-                   flow_kind, flow_name, flow_body, flow_template_id, flow_started_at`,
+                   flow_kind, flow_name, flow_body, flow_template_id, flow_post_id, flow_started_at`,
       [
         input.userId,
         input.defaultTemplateName === undefined ? null : input.defaultTemplateName,
@@ -921,13 +921,14 @@ export class PgTelegramStore implements TelegramStore {
     const f = input.flow;
     await this.q(
       `INSERT INTO telegram_post_preferences
-              (user_id, flow_kind, flow_name, flow_body, flow_template_id, flow_started_at, updated_at)
-            VALUES ($1::bigint, $2, $3, $4, $5::bigint, $6::timestamptz, $6::timestamptz)
+              (user_id, flow_kind, flow_name, flow_body, flow_template_id, flow_post_id, flow_started_at, updated_at)
+            VALUES ($1::bigint, $2, $3, $4, $5::bigint, $6::bigint, $7::timestamptz, $7::timestamptz)
        ON CONFLICT (user_id) DO UPDATE SET
               flow_kind = EXCLUDED.flow_kind,
               flow_name = EXCLUDED.flow_name,
               flow_body = EXCLUDED.flow_body,
               flow_template_id = EXCLUDED.flow_template_id,
+              flow_post_id = EXCLUDED.flow_post_id,
               flow_started_at = EXCLUDED.flow_started_at,
               updated_at = EXCLUDED.updated_at`,
       [
@@ -936,6 +937,7 @@ export class PgTelegramStore implements TelegramStore {
         f === null ? null : f.name,
         f === null ? null : f.body,
         f === null || f.templateId === null ? null : f.templateId,
+        f === null || f.postId === null ? null : f.postId,
         f === null ? null : f.startedAt.toISOString(),
       ],
     );
@@ -1091,13 +1093,16 @@ function toPendingFlow(row: Record<string, unknown>): TelegramPendingFlow | null
   const kind = row["flow_kind"];
   const startedAt = row["flow_started_at"];
   if (typeof kind !== "string" || !(startedAt instanceof Date)) return null;
-  if (kind !== "tpl_new_name" && kind !== "tpl_new_body" && kind !== "tpl_edit_body" && kind !== "banner_title") return null;
+  const KINDS = ["tpl_new_name", "tpl_new_body", "tpl_edit_body", "banner_title", "post_edit_body"] as const;
+  if (!(KINDS as readonly string[]).includes(kind)) return null;
   const templateId = row["flow_template_id"];
+  const postId = row["flow_post_id"];
   return {
-    kind,
+    kind: kind as (typeof KINDS)[number],
     name: (row["flow_name"] as string | null) ?? null,
     body: (row["flow_body"] as string | null) ?? null,
     templateId: templateId === null || templateId === undefined ? null : String(templateId),
+    postId: postId === null || postId === undefined ? null : String(postId),
     startedAt,
   };
 }

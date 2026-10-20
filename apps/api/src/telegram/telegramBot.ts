@@ -65,6 +65,7 @@ import {
   journalMenu,
   mainMenu,
   postsMenu,
+  postResultMenu,
   templatesMenu,
   flowKeyboard,
   TEMPLATES_PER_PAGE,
@@ -637,6 +638,8 @@ export class TelegramBot {
         }));
         return "handled";
       }
+      case "postresult":
+        return this.sendPostResult(userId, chatId, locale);
       case "banner": {
         const prefs = await this.preferences(userId);
         await this.sendScreen(chatId, bannerMenu(copy, { preferences: prefs, canRaster: await this.canRasterize() }));
@@ -906,7 +909,7 @@ export class TelegramBot {
       // The title itself is text, so it arrives as a message (the flow cursor carries that step).
       await this.deps.store.setPendingFlow({
         userId,
-        flow: { kind: "banner_title", name: null, body: null, templateId: null, startedAt: this.now() },
+        flow: { kind: "banner_title", name: null, body: null, templateId: null, postId: null, startedAt: this.now() },
         at: this.now(),
       });
       await this.safeSend(chatId, copy.bnAskTitle, { inlineKeyboard: flowKeyboard(copy).map((row) => [...row]) });
@@ -915,6 +918,29 @@ export class TelegramBot {
 
     // ── AI tools (round 7) ──
     if (action === "ai_status") return this.sendAiStatus(chatId, locale);
+
+    // ── post editing (round 7) ──
+    if (action === "post_edit") {
+      const service = this.postsService();
+      if (service === null) {
+        await this.safeSend(chatId, copy.postNoService);
+        return "handled";
+      }
+      const post = await service.findPost(userId, subject);
+      if (post === null) {
+        await this.safeSend(chatId, copy.genericError);
+        return "rejected";
+      }
+      await this.deps.store.setPendingFlow({
+        userId,
+        flow: { kind: "post_edit_body", name: null, body: null, templateId: null, postId: post.id, startedAt: this.now() },
+        at: this.now(),
+      });
+      await this.safeSend(chatId, clamp(`${copy.postEditAsk}\n\n<i>${esc(post.body.slice(0, 900))}</i>`), {
+        inlineKeyboard: flowKeyboard(copy).map((row) => [...row]),
+      });
+      return "handled";
+    }
 
     // ── guided flow cursor ──
     if (action === "flow_cancel") {
@@ -1400,9 +1426,12 @@ export class TelegramBot {
     if (out.truncated) lines.push(copy.postTruncated);
     if (out.markupDropped) lines.push(copy.postMarkupDropped);
     if (out.blockedReason !== null) lines.push(copy.postBlocked(out.blockedReason));
+    // "Edit" sits with the publish button because it edits THAT preview: a second tap path to the same
+    // text, where the edit revokes the approval the publish button would have taken.
     const keyboard: InlineKeyboardButton[][] =
       out.blockedReason === null
         ? [[{ text: copy.btnPublish, callbackData: buildCallbackData("post_pub", post.id) },
+            { text: copy.btnPostEdit, callbackData: buildCallbackData("post_edit", post.id) },
             { text: copy.btnDismiss, callbackData: buildCallbackData("post_no", post.id) }]]
         : [];
     // `safeSend` sends HTML by default, so the rendered markup needs no flag — and the buttons are
@@ -1426,6 +1455,34 @@ export class TelegramBot {
         await this.safeSendPhoto(chatId, png, copy.postBannerImage);
       }
     }
+    return "handled";
+  }
+
+  /**
+   * The publish-result screen.
+   *
+   * Reads the same outbox rows the publish path writes. Two honesty rules live here: a bound-but-
+   * unpublished post is shown as a DRAFT (not as "sent"), and when publishing is impossible the screen
+   * names the reason from the user's own binding state rather than implying the click failed.
+   */
+  private async sendPostResult(userId: string, chatId: string, locale: Locale | null): Promise<UpdateOutcome> {
+    const { copy } = this.copyFor(locale, { media: this.mediaAvailable });
+    const service = this.postsService();
+    if (service === null) {
+      await this.safeSend(chatId, copy.postNoService);
+      return "handled";
+    }
+    const posts = await this.deps.store.listRecentPosts(userId, 5);
+    // The blocking reason comes from the same lookup the publish path uses (the user's ACTIVE channel),
+    // so this screen cannot promise a send that `publish` would refuse.
+    const channel = await this.deps.store.findActiveChannel(userId);
+    const blockedReason =
+      channel === null
+        ? copy.postNoChannel
+        : channel.status !== "ACTIVE"
+          ? copy.postChannelNotOurs
+          : null;
+    await this.sendScreen(chatId, postResultMenu(copy, { posts, blockedReason }));
     return "handled";
   }
 
@@ -1540,7 +1597,7 @@ export class TelegramBot {
     if (mode.kind === "new") {
       await this.deps.store.setPendingFlow({
         userId,
-        flow: { kind: "tpl_new_name", name: null, body: null, templateId: null, startedAt: this.now() },
+        flow: { kind: "tpl_new_name", name: null, body: null, templateId: null, postId: null, startedAt: this.now() },
         at: this.now(),
       });
       await this.safeSend(chatId, copy.tplAskName, { inlineKeyboard: flowKeyboard(copy).map((row) => [...row]) });
@@ -1553,7 +1610,7 @@ export class TelegramBot {
     }
     await this.deps.store.setPendingFlow({
       userId,
-      flow: { kind: "tpl_edit_body", name: template.name, body: null, templateId: template.id, startedAt: this.now() },
+      flow: { kind: "tpl_edit_body", name: template.name, body: null, templateId: template.id, postId: null, startedAt: this.now() },
       at: this.now(),
     });
     // The old body is quoted so the user edits rather than retypes — and so a mismatch between what
@@ -1612,11 +1669,52 @@ export class TelegramBot {
       }
       await this.deps.store.setPendingFlow({
         userId,
-        flow: { kind: "tpl_new_body", name, body: null, templateId: null, startedAt: flow.startedAt },
+        flow: { kind: "tpl_new_body", name, body: null, templateId: null, postId: null, startedAt: flow.startedAt },
         at: this.now(),
       });
       await this.safeSend(chatId, copy.tplAskBody, { inlineKeyboard: flowKeyboard(copy).map((row) => [...row]) });
       return "handled";
+    }
+
+    // ── a guided POST edit: new bytes on the same row, which revokes the approval ──
+    if (flow.kind === "post_edit_body") {
+      const body = text.trim();
+      if (body.length === 0 || body.length > TEMPLATE_BODY_LIMIT) {
+        await this.safeSend(chatId, copy.postEditInvalid);
+        return "handled";
+      }
+      const postId = flow.postId;
+      if (postId === null) {
+        await this.deps.store.setPendingFlow({ userId, flow: null, at: this.now() });
+        await this.safeSend(chatId, copy.postEditExpiredPost);
+        return "handled";
+      }
+      try {
+        // `edit` is `revisePost`: one statement replaces the body and its hash AND clears the approval,
+        // so what the user tapped "publish" on can never be the text from before the edit (0037's
+        // `approved_hash = content_hash` CHECK is the database half of the same rule).
+        const revised = await service.edit({ userId, postId, body });
+        await this.deps.store.setPendingFlow({ userId, flow: null, at: this.now() });
+        await this.safeSend(chatId, copy.postEdited);
+        // Show the revised bytes with a FRESH approval button — the one they must tap again.
+        const keyboard: InlineKeyboardButton[][] = revised.post.status === "PUBLISHED" || revised.post.status === "CANCELLED"
+          ? [[...backToTemplates(copy)]]
+          : [[
+              { text: copy.btnPublish, callbackData: buildCallbackData("post_pub", revised.post.id) },
+              { text: copy.btnPostEdit, callbackData: buildCallbackData("post_edit", revised.post.id) },
+            ]];
+        await this.safeSend(chatId, clamp(`${copy.postPreviewTitle} — ${revised.post.chatId}\n\n${revised.post.body}`), {
+          inlineKeyboard: keyboard,
+        });
+        return "handled";
+      } catch (err) {
+        await this.deps.store.setPendingFlow({ userId, flow: null, at: this.now() });
+        if (err instanceof TelegramPostError) {
+          await this.safeSend(chatId, err.code === "POST_NOT_EDITABLE" ? copy.postEditNotEditable : copy.postEditInvalid);
+          return "handled";
+        }
+        throw err;
+      }
     }
 
     // The two body steps share everything except which version they write.

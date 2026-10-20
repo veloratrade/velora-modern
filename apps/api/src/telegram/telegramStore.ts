@@ -418,7 +418,7 @@ export interface TelegramTemplateRecord {
 }
 
 /** Closed set of guided flows the menu can have open. A new step is a migration (0042), by design. */
-export type TelegramFlowKind = "tpl_new_name" | "tpl_new_body" | "tpl_edit_body" | "banner_title";
+export type TelegramFlowKind = "tpl_new_name" | "tpl_new_body" | "tpl_edit_body" | "banner_title" | "post_edit_body";
 
 /**
  * A guided flow in progress: which question the bot last asked, and the answers so far.
@@ -431,6 +431,11 @@ export interface TelegramPendingFlow {
   readonly name: string | null;
   readonly body: string | null;
   readonly templateId: string | null;
+  /**
+   * The post a guided EDIT is rewriting (`post_edit_body`). Kept apart from `templateId` because a
+   * template id and a post id are different namespaces — see 0042's `flow_post_id`.
+   */
+  readonly postId: string | null;
   readonly startedAt: Date;
 }
 
