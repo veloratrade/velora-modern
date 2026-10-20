@@ -1730,3 +1730,26 @@ refresh 401, `/admin` 302.
   `post_edit_body` + `flow_post_id` only → accepted; an unknown `flow_kind` → refused 23514.
 - **After the migration:** API `/health` 200, `/api/v1/auth/session` 200; the Telegram Worker is still
   `6f15c6dc` (untouched).
+
+## AC-D5 — 2026-10-20 · The Telegram bot is finally redeployed (v41 → `15cf837b`)
+
+- **Commits:** none (no code change); this entry is the evidence. Previous bot version
+  `6f15c6dc-dc6f-4895-9162-85af8936b2f0` was deployed **2026-10-18T03:27Z**.
+- **Why it was old:** round 7 (`af7653b`, `b30a6f0`, `316792a` — the navigable menu, post editing and the
+  publish-result screen) landed on **2026-10-20**, and that round shipped code only: no Cloudflare
+  credential was held then. Objective D then replaced the *web panel* and added the *API* Worker, and the
+  bot was deliberately left untouched — so the repository was ahead of production for two days.
+- **Deployed:** `velora-telegram-bot` → **`15cf837b-3375-4ddb-9ae8-b00fdaaa0b80`**, 918 KiB / 217 KiB gzip.
+- **Deploy config honesty:** `apps/worker-cf/wrangler.jsonc` is NOT what production runs — it says
+  `crons: ["*/5 * * * *"]` while the live Worker runs `*/4`, and it omits `LATENCY_PROBE`. The deploy used a
+  git-ignored `wrangler.deploy.jsonc` rebuilt from the LIVE settings (vars, Hyperdrive, D1, compat) so the
+  deploy could not silently change behaviour. Secrets were not touched and are all still present
+  (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_TEST_USER_ID`, `TELEGRAM_WEBHOOK_SECRET`, `WORKER_ADMIN_TOKEN`).
+- **Order:** migration **0042 was applied first** (previous entry) — the new code writes `flow_post_id`, so
+  deploying the code before the column existed would have failed at the first menu tap.
+- **Verified after deploy:** `/health` 200 `{mode:private-test, storage:postgres, access:armed}`; `/ready`
+  200 with `database:ok`, `telegram:enabled`; webhook with a bogus or missing secret → **401** (fail-closed);
+  `GET` on the webhook path → **405**; webhook latency 0.06–0.18 s with no CPU-limit errors; and the bundle
+  really carries round 7 (`post_edit` ×7, `postresult` ×2, `ویرایش متن`, `نتیجهٔ انتشار`).
+- **Not verified:** a real Telegram round trip. The bot token is a Worker secret and unreadable from here, so
+  the final check is the owner pressing `/start` and tapping «✏️ ویرایش متن».

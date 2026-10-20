@@ -50,7 +50,30 @@
       "built_by": "@opennextjs/cloudflare 1.20.12 + next 16.4.1 (9421 KiB / 1855 KiB gzip, startup 16 ms)",
       "note": "replaces the hand-uploaded edge shim; UNCHANGED worker name and origin, so no DNS/routes change"
     },
-    "bot_worker": "unchanged \u2014 6f15c6dc-dc6f-4895-9162-85af8936b2f0 (v41)",
+    "bot_worker": {
+      "name": "velora-telegram-bot",
+      "version_id_before": "6f15c6dc-dc6f-4895-9162-85af8936b2f0",
+      "version_id_after": "15cf837b-3375-4ddb-9ae8-b00fdaaa0b80",
+      "deployed_at": "2026-10-20T17:43Z",
+      "why_it_was_old": "round-7 (af7653b, b30a6f0, 316792a) landed in the repository on 2026-10-20, after v41 was deployed on 2026-10-18T03:27Z; the bot was never redeployed because that round shipped code only (no credential in that session). The panel work of Objective D did not touch it either.",
+      "deploy_config": "apps/worker-cf/wrangler.deploy.jsonc (git-ignored) rebuilt to MIRROR the live worker exactly: cron */4 (the repo file says */5), vars APP_ENV=production / LATENCY_PROBE=1 / TELEGRAM_BOT_USERNAME / TELEGRAM_UPDATE_MODE=webhook, Hyperdrive 769298b9\u2026, D1 VELORA_TEST_DB, compat 2026-05-03 + nodejs_compat",
+      "secrets_after_deploy": [
+        "TELEGRAM_BOT_TOKEN",
+        "TELEGRAM_TEST_USER_ID",
+        "TELEGRAM_WEBHOOK_SECRET",
+        "WORKER_ADMIN_TOKEN"
+      ],
+      "preconditions": "migration 0042 was applied FIRST (0051 \u2192 the flow columns the new code writes)",
+      "post_deploy_checks": [
+        "/health \u2192 200 {mode:private-test, storage:postgres, access:armed}",
+        "/ready \u2192 200 {database:ok, telegram:enabled}",
+        "/api/v1/webhooks/telegram with a bogus or missing secret \u2192 401 UNAUTHENTICATED (fail-closed)",
+        "GET on the webhook path \u2192 405 METHOD_NOT_ALLOWED",
+        "webhook latency 0.06\u20130.18 s \u2014 no CPU-limit errors (unlike Argon2 logins)",
+        "bundle contains the round-7 code: post_edit \u00d77, postresult \u00d72, '\u0648\u06cc\u0631\u0627\u06cc\u0634 \u0645\u062a\u0646' \u00d71, '\u0646\u062a\u06cc\u062c\u0647\u0654 \u0627\u0646\u062a\u0634\u0627\u0631' \u00d72"
+      ],
+      "not_verified": "an actual Telegram round trip: the bot token is a Worker secret and is not readable, and no message was sent from the owner's Telegram account. Pressing /start in Telegram is the last check."
+    },
     "railway": "no Railway host is referenced anywhere in the deployed configuration"
   },
   "live_tests_objective_d_item_5": "NOT RUN \u2014 nothing was deployed, so there is no staging surface to test. A rendered login page or a green local gate is explicitly not accepted as success",
