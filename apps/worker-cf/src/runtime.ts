@@ -16,8 +16,22 @@ import { PgAiCoachStore } from "../../api/src/aicoach/aiCoachRoutes.js";
 import { GeminiAiProvider } from "../../api/src/aicoach/geminiProvider.js";
 import { AI_PROVIDERS, PgAiAttemptStore, UnconfiguredAiProvider } from "../../api/src/aicoach/aiProvider.js";
 import { AiCoachService } from "../../api/src/aicoach/aiCoachService.js";
-import { UnconfiguredMediaInterpreter } from "../../api/src/aicoach/mediaInterpreter.js";
 import { poolQuery } from "../../api/src/persistence/pg.js";
+import nodeCrypto from "node:crypto";
+import { PgAiConfigStore } from "../../api/src/ai/aiConfigStore.js";
+import { AiFeatureGuard } from "../../api/src/ai/aiFeatureGuard.js";
+import { AiFeatureRouter } from "../../api/src/ai/aiFeatureRouter.js";
+import { AiRouteResolver } from "../../api/src/ai/aiRouteResolver.js";
+import { AiManager } from "../../api/src/ai/aiManager.js";
+import { AiManagerMediaInterpreter } from "../../api/src/ai/aiManagerMediaInterpreter.js";
+import { AiSearchService } from "../../api/src/ai/aiSearchService.js";
+import { AiBrowserService } from "../../api/src/ai/aiBrowserService.js";
+import { AiAgentPlanner } from "../../api/src/ai/aiAgentPlanner.js";
+import { EnvironmentAiSecretResolver } from "../../api/src/ai/envAiSecretResolver.js";
+import { GeminiExecutor } from "../../api/src/ai/aiExecutors.js";
+import { UnavailableImageAnonymizer } from "../../api/src/ai/imageAnonymizer.js";
+import { TelegramPostService } from "../../api/src/telegram/telegramPostService.js";
+import { createPostDataPort } from "../../api/src/telegram/telegramPostPort.js";
 import { PgRateLimitStore } from "../../api/src/ratelimits/pgRateLimitStore.js";
 import { FixedWindowRateLimiter } from "../../api/src/ratelimits/rateLimiter.js";
 import { HttpTelegramBotApi } from "../../api/src/telegram/telegramApi.js";
@@ -97,6 +111,21 @@ const CONFIG_KEYS = [
   "APP_ORIGIN",
   "APP_ENV",
 ] as const;
+
+/**
+ * The single host a post template's `{{link}}` may point at, or none — parsed, not configured.
+ * A wildcard or a bare domain here is how a template becomes an open redirect; a malformed origin
+ * yields an empty list, which disables link buttons rather than enabling arbitrary ones.
+ */
+const allowedLinkHosts = (appUrl: string | null): readonly string[] => {
+  if (appUrl === null || appUrl.trim() === "") return [];
+  try {
+    const url = new URL(appUrl);
+    return url.protocol === "https:" ? [url.host] : [];
+  } catch {
+    return [];
+  }
+};
 
 export const asEnvRecord = (env: Env): Record<string, string | undefined> => {
   const out: Record<string, string | undefined> = {};
@@ -355,13 +384,93 @@ export function composeRuntime(env: Env, ctx?: Pick<ExecutionContext, "waitUntil
     drafts: store,
     getUserTimezone: async (userId) => (await profileQuery(userId))?.timezone ?? "UTC",
   });
+  /*
+   * ── THE ROUND-3/4 SURFACE, WIRED ────────────────────────────────────────────────────────────────
+   *
+   * WHAT WENT WRONG BEFORE THIS BLOCK EXISTED (and why "deployed" was not the same as "shipped").
+   * `TelegramBot.deps.posts` and `.tools` are both documented as OPTIONAL — "ABSENT is a supported
+   * configuration" — so a runtime that simply never passed them still type-checked, still passed its
+   * tests, still answered `/health` and `/ready`, and still processed journal messages. But `/post`,
+   * `/template`, the inline publish buttons and the agent loop then answered "that capability is not
+   * configured", which is exactly what a user reads as "the bot is old". The optionality is correct
+   * (a local harness genuinely has no channel-publishing wiring); the mistake was leaving them
+   * unwired in the deployment that IS the product's staging surface.
+   *
+   * Everything below is composed over the SAME Hyperdrive pool and the SAME secret resolver as the
+   * rest of this runtime — no second Telegram path, no second AI client, and no admin-decrypted
+   * secrets (D-2 holds: `EnvironmentAiSecretResolver` reads env only).
+   */
+  // Read straight from the binding, NOT through `asEnvRecord` (that record is the Telegram config
+  // subset). A missing binding is `undefined`, never the string "undefined": the secret resolver
+  // and the route resolver both treat "no value" as a real answer.
+  const aiEnv = (key: string): string | undefined => {
+    const value = (env as unknown as Record<string, unknown>)[key];
+    return typeof value === "string" && value.trim() !== "" ? value : undefined;
+  };
+  const aiConfig = new PgAiConfigStore(durablePool as never);
+  const aiSecrets = new EnvironmentAiSecretResolver(aiEnv);
+  const aiRoutes = new AiRouteResolver({ store: aiConfig, env: aiEnv });
+  const aiConsent = new PgAiCoachStore(q);
+  const aiManager = new AiManager({
+    router: new AiFeatureRouter({
+      store: aiConfig,
+      secrets: aiSecrets,
+      routes: aiRoutes,
+      env: aiEnv,
+      // No native Tesseract in workerd: `localOcrAvailable` is answered honestly rather than
+      // assumed, so the router never promises a local fallback this process cannot perform.
+      localOcrAvailable: () => false,
+    }),
+    guard: new AiFeatureGuard({ store: aiConfig }),
+    store: aiConfig,
+    consent: aiConsent,
+    attempts,
+    anonymizer: new UnavailableImageAnonymizer(),
+    executors: {
+      gemini: new GeminiExecutor({
+        apiKey: async () => (await aiSecrets.resolve("GEMINI_API_KEY")).value,
+        relayConfig: async () => ({
+          url: (await aiSecrets.resolve("GEMINI_RELAY_URL")).value,
+          token: (await aiSecrets.resolve("GEMINI_RELAY_TOKEN")).value,
+        }),
+      }),
+    },
+  });
+  // Voice notes and screenshots now go through the governed manager (flag gate, consent, atomic
+  // provider budget, one attempt ledger) instead of the "not configured" interpreter — the same
+  // class the API uses, not a second one.
+  const interpreter = new AiManagerMediaInterpreter(aiManager);
+
+  const searchTools = new AiSearchService({
+    secrets: aiSecrets,
+    providerOverride: () => (aiEnv("AI_SEARCH_PROVIDER") ?? "").trim() || null,
+  });
+  const browserTools = new AiBrowserService({ secrets: aiSecrets, nodeCrypto });
+  const agentPlanner = new AiAgentPlanner({ manager: aiManager });
+
+  const posts = new TelegramPostService({
+    store,
+    data: createPostDataPort({ journal }),
+    api,
+    // Only the app's own host may ever be a button target, parsed here rather than trusted from a
+    // template body (a saved template that named its own host would otherwise be an open redirect).
+    allowedLinkHosts: allowedLinkHosts(resolveTelegramConfig(asEnvRecord(env)).appUrl),
+    // `null` = "this runtime cannot rasterize". @resvg/resvg-js is a native module and has no
+    // workerd build, so the banner card posts as the text card and SAYS SO — the documented
+    // absent-capability behaviour, not a silently substituted image.
+    renderBannerPng: async () => null,
+  });
+
   const bot = new TelegramBot({
     api,
+    posts,
     store,
     links,
     journal,
     analysis: new JournalAnalysisService({ coach, journal }),
-    media: { interpreter: new UnconfiguredMediaInterpreter(), attempts },
+    media: { interpreter, attempts },
+    tools: { search: searchTools, browser: browserTools, planner: agentPlanner },
+    audit: new PgAuditStore(durablePool as never),
     limiter: new FixedWindowRateLimiter(rateStore),
     appUrl: () => resolveTelegramConfig(asEnvRecord(env)).appUrl,
     getUserLocale: async (userId) => (await profileQuery(userId))?.locale ?? null,
