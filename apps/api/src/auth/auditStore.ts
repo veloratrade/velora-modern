@@ -37,47 +37,74 @@ export type AuditTx = QueryFn;
  */
 export type AuditWrite = (tx: AuditTx | undefined) => Promise<void>;
 
-/** Actions recorded by this phase. Mirrors the 0009 CHECK, widened by 0011/0014/0023. */
-export type AuditAction =
-  | "OWNERSHIP_CLAIMED"
-  | "USER_ROLE_CHANGED"
-  | "USER_STATUS_CHANGED"
-  // B-2 credential lifecycle (migration 0011). Representable here; NOT yet
-  // emitted anywhere — the CredentialService wiring is B-3.
-  | "CREDENTIAL_CREATED"
-  | "CREDENTIAL_DELETED"
-  // OD-MP-2 (migration 0014). Authorized credential CONSUMPTION and binding
-  // lifecycle for MetaAPI provisioning.
+/**
+ * Every action this trail may hold, as DATA rather than as a type-only union.
+ *
+ * WHY AN ARRAY AND NOT JUST A UNION: `audit_log_action_check` in PostgreSQL is REPLACED by every
+ * migration that needs a new action (a CHECK cannot be extended), and 0036 quietly lost two actions that
+ * 0027 had added — the union kept them, the database refused them, and nothing noticed for three
+ * migrations because no test wrote those rows. An enumerable vocabulary lets
+ * `auditVocabulary.test.ts` compare this list against the last CHECK in `db/migrations/` on every run,
+ * which turns "someone rewrote the constraint and dropped a name" from a production surprise into a red
+ * test. Add an action HERE, in the SQL, and in that test's expectation — all three, or the build says so.
+ *
+ * The order is the historical one (0009 → 0041), so a reviewer can read the list as a changelog.
+ */
+export const AUDIT_ACTIONS = [
+  // 0009 — the original three: ownership and account lifecycle.
+  "OWNERSHIP_CLAIMED",
+  "USER_ROLE_CHANGED",
+  "USER_STATUS_CHANGED",
+  // 0011 — B-2 credential lifecycle. Representable here; the CredentialService wiring is B-3.
+  "CREDENTIAL_CREATED",
+  "CREDENTIAL_DELETED",
+  // 0014 — OD-MP-2. Authorized credential CONSUMPTION and binding lifecycle for MetaAPI provisioning.
   //
-  // CREDENTIAL_REVEALED remains deliberately absent, and its absence now means
-  // something stronger than it did in 0011: a production consumer exists, but
-  // it does not REVEAL anything. The plaintext is used server-side against
-  // MetaAPI on the owning user's behalf and is never disclosed to any caller,
-  // so an action named "revealed" would describe a capability the system does
-  // not have. OD-MP-2 selects CREDENTIAL_USED for exactly that reason.
-  | "CREDENTIAL_USED"
-  // Bind AND unbind. Direction is carried by beforeState/afterState rather
-  // than by two action names — the same shape USER_ROLE_CHANGED already uses.
-  | "ACCOUNT_BINDING_CHANGED"
-  // Telegram journal client (migration 0023). Linking is an account-affecting
-  // privilege change and belongs in this SAME trail; the widening rationale
-  // (six actions, and why a nonexistent token has no row here at all) is in
-  // 0023 §7.
-  | "TELEGRAM_LINK_STARTED"
-  | "TELEGRAM_LINK_COMPLETED"
-  | "TELEGRAM_LINK_FAILED"
-  | "TELEGRAM_UNLINKED"
-  | "TELEGRAM_CHANNEL_BOUND"
-  | "TELEGRAM_CHANNEL_UNBOUND"
-  // Phase 6 (migration 0027). Both act on ANOTHER user's account without
-  // changing their role or status, which is precisely the class of operation
-  // that would otherwise leave no trace at all: a revoked session looks to the
-  // user like an unexplained logout, and an admin-granted verification is an
-  // authorization grant. `beforeState`/`afterState` carry the direction (how
-  // many sessions were live) and the prior verification state, so neither needs
-  // a second action name.
-  | "USER_SESSIONS_REVOKED"
-  | "USER_EMAIL_VERIFIED";
+  // CREDENTIAL_REVEALED remains deliberately absent, and its absence now means something stronger than it
+  // did in 0011: a production consumer exists, but it does not REVEAL anything. The plaintext is used
+  // server-side against MetaAPI on the owning user's behalf and is never disclosed to any caller, so an
+  // action named "revealed" would describe a capability the system does not have. OD-MP-2 selects
+  // CREDENTIAL_USED for exactly that reason.
+  "CREDENTIAL_USED",
+  // Bind AND unbind. Direction is carried by beforeState/afterState rather than by two action names —
+  // the same shape USER_ROLE_CHANGED already uses.
+  "ACCOUNT_BINDING_CHANGED",
+  // 0023 — Telegram journal client. Linking is an account-affecting privilege change and belongs in this
+  // SAME trail; the widening rationale (six actions, and why a nonexistent token has no row at all) is
+  // in 0023 §7.
+  "TELEGRAM_LINK_STARTED",
+  "TELEGRAM_LINK_COMPLETED",
+  "TELEGRAM_LINK_FAILED",
+  "TELEGRAM_UNLINKED",
+  "TELEGRAM_CHANNEL_BOUND",
+  "TELEGRAM_CHANNEL_UNBOUND",
+  // 0027 — Phase 6 admin console. Both act on ANOTHER user's account without changing their role or
+  // status, which is precisely the class of operation that would otherwise leave no trace at all: a
+  // revoked session looks to the user like an unexplained logout, and an admin-granted verification is an
+  // authorization grant. `beforeState`/`afterState` carry the direction (how many sessions were live) and
+  // the prior verification state, so neither needs a second action name.
+  //
+  // These two are the pair 0036 dropped from the CHECK while keeping them here. Restored by 0040.
+  "USER_SESSIONS_REVOKED",
+  "USER_EMAIL_VERIFIED",
+  // 0036 — the daily checklist's saved state: a record the user can revise, so an admin or support
+  // change to it must not be invisible.
+  "JOURNAL_CHECKLIST_SAVED",
+  // 0040 — publishing is the one Telegram action that reaches past the user: it puts content in front of a
+  // channel's subscribers using a token the PLATFORM holds. 0023 already audits the binding of that
+  // channel for the same reason; the send itself had no row, so "who published what to the audience" was
+  // answerable only from the outbox table, which records the post, not the authority that acted.
+  // `afterState` carries `post:<id> message:<telegram message id>` — correlation, not a copy: the body and
+  // its hash belong to 0037's row, and duplicating them here would only create a second truth.
+  "TELEGRAM_POST_PUBLISHED",
+  // 0041 — an operator pressing "validate" on a tool is not a config change, but it IS an action that
+  // leaves the platform: it spends a provider request, and its verdict is what the panel then shows the
+  // rest of the team. Without a row, "who decided this search key was fine, and when" is unanswerable —
+  // and a stale green badge has no provenance. `afterState` carries `tool:<name> verdict:<ok|code>`.
+  "AI_TOOL_VALIDATED",
+] as const;
+
+export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
 /**
  * Result of the audited attempt. Mirrors the 0011 outcome CHECK.
