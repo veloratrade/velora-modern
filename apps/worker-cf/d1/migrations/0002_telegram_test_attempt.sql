@@ -1,0 +1,23 @@
+-- PRIVATE TEST MODE only. Additive, and deliberately the only D1 migration after 0001's table.
+--
+-- Why the column exists: `CLAIM_SQL` is `INSERT … ON CONFLICT (update_id) DO NOTHING`, so the
+-- primary key is what makes redelivery detection atomic. The property it also created is a trap —
+-- a row that ended `failed` could never be worked on again: Telegram retries a 5xx, the retry
+-- finds the row, the claim answers `duplicate`, and the update is silently and permanently lost
+-- while the response still says 200. `attempt` is what lets the claim tell "already finished" from
+-- "failed, safe to re-attempt", and it makes the retry itself observable (see `/stats`).
+--
+-- Semantics chosen, and why they are the narrow ones:
+--   • DEFAULT 1, so the 12 pre-existing rows each count as one attempt and no number goes negative;
+--   • NOT NULL + STRICT, so a missing attempt is a migration error, not a silent zero;
+--   • nothing else added: no queue, no lease, no backoff column. Retry here means "Telegram asked
+--     again", not "the Worker has a scheduler", and inventing a queue in a test table is how a
+--     private-test surface starts pretending to be the product's ledger.
+--
+-- Reversible by statement (D1's SQLite supports DROP COLUMN); a downgrade is
+--   ALTER TABLE telegram_updates DROP COLUMN attempt;
+-- which is only safe once the code no longer references it, so it is listed, not automated.
+--
+-- Applied by the operator, never by the Worker:
+--   wrangler d1 migrations apply velora-telegram-test --remote
+ALTER TABLE telegram_updates ADD COLUMN attempt INTEGER NOT NULL DEFAULT 1;

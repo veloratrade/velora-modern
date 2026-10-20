@@ -1,0 +1,137 @@
+{
+  // Cloudflare Workers host for the EXISTING Velora Telegram bot.
+  // $schema: "node_modules/wrangler/config-schema.json"
+  // A distinct name, deliberately. `wrangler deploy` REPLACES the script found at
+  // the same name, and this account already runs a Worker called `tgpl` which is an
+  // unauthenticated relay to api.telegram.org (hand-uploaded, no repository behind
+  // it, so an overwrite would be unrecoverable). Confirmed absent immediately
+  // before this config was written: GET .../workers/scripts/velora-telegram-bot
+  // -> 10007 "This Worker does not exist on your account."
+  "name": "velora-telegram-bot",
+  "main": "src/index.ts",
+  // Pinned DOWN on purpose, not stale: wrangler 4.86.0 ships a workerd that refuses
+  // any newer date ("This Worker requires compatibility date 2026-09-01, but the
+  // newest date supported by this server binary is 2026-05-03"). Raise it together
+  // with a wrangler upgrade, not on its own.
+  "compatibility_date": "2026-05-03",
+  "compatibility_flags": ["nodejs_compat"],
+  "send_metrics": false,
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+
+  // No `limits` block. Two independent reasons, both verified:
+  //   * `memory_mb` is not a valid key at all — wrangler's config-schema defines
+  //     UserLimits as { cpu_ms, subrequests } with additionalProperties:false, and
+  //     isolate memory is fixed at 128 MB on every plan. It was silently ignored.
+  //   * `limits` only applies to the paid "standard" usage model, and this account is
+  //     confirmed on Workers Free, so `cpu_ms: 30000` could never take effect here.
+  // It also was not needed: the whole request path (config validation, constant-time
+  // secret compare, decode, zod parse, classify) measures 43 microseconds of CPU,
+  // and Cloudflare does not count the Postgres/Bot API wait time at all — the Free
+  // plan's 10 ms cap is therefore not a constraint for this Worker.
+  // What the Free plan DOES cap, and what to watch instead, is 100 000 requests/day
+  // and ~100 000 Hyperdrive database queries/day (about 4-8 queries per update).
+
+  "routes": [],
+
+  "triggers": { "crons": ["*/5 * * * *"] },
+
+  "vars": {
+    // Non-secret configuration. TELEGRAM_UPDATE_MODE must be "webhook"; "polling"
+    // is refused by the resolver in production (TG-007) and a poller has no
+    // meaning on Workers anyway (no long-lived event loop).
+    "TELEGRAM_UPDATE_MODE": "webhook",
+    "APP_ENV": "production",
+    // Public identity of the existing bot, read from getMe (id 8795186017 → @MyVeloratradeBot).
+    // Without it the resolver reports TG-003 and the /link flow is disabled, because a deep link
+    // needs the username to build `t.me/<bot>/start=…`.
+    "TELEGRAM_BOT_USERNAME": "MyVeloratradeBot"
+    // VELORA_APP_URL / APP_ORIGIN is deliberately NOT set here, and that is a decision, not an
+    // omission: it is the origin that `/link` single-use tokens are sent to. The repo only ever
+    // shows placeholders for it (docs/telegram/DEPLOYMENT.md:137 `https://app.example.com`), so
+    // guessing one would mail a live token to somebody else's domain — the fail-closed answer is
+    // TG-005 + "linking disabled", which is visible, not silent. The owner supplies the real
+    // origin (web app, not the API host) and it goes in this block.
+  },
+
+  // Secrets are NEVER stored here. Provision with:
+  //   wrangler secret put TELEGRAM_BOT_TOKEN
+  //   wrangler secret put TELEGRAM_WEBHOOK_SECRET
+  //   wrangler secret put WORKER_ADMIN_TOKEN
+  //   wrangler secret put TELEGRAM_TEST_USER_ID      <-- REQUIRED, and it is a secret, not a var:
+  //   the numeric Telegram user id this private test bot answers to. It is personal data, and `vars`
+  //   are readable in the dashboard, so putting it there would expose it. The owner enters it in the
+  //   Cloudflare dashboard (Workers → velora-telegram-bot → Settings → Variables and Secrets →
+  //   Secret) or with the command above; nothing in this repository may contain the value.
+  //   Behaviour, all of it pinned by src/privateAccess.test.ts:
+  //     unset            → 503 ACCESS_GATE_UNCONFIGURED for every update (fail closed)
+  //     not a plain id   → 503 ACCESS_GATE_INVALID     (a broken gate must not become an open one)
+  //     other sender     → 200 {"dropped":true} and NO database touch — 200 on purpose: a 4xx makes
+  //                        Telegram redeliver forever and spend the Free-plan request ceiling
+  //     this sender      → the pipeline, as before
+  //   Authority is read only from `from.id` of an update that passed telegramUpdateSchema — never from
+  //   message text, caption, callback data or any other user-writable field.
+
+  // ── D1: PRIVATE TEST STORAGE ─────────────────────────────────────────────────
+
+  // Independent database `velora-telegram-test`, created for the private test and holding
+
+  // ONE table (see d1/migrations/0001_telegram_test.sql). It is not, and must not become,
+
+  // Velora's ledger: there are no trade, journal, audit or AI tables here, so nothing can
+
+  // write product data into it by accident, and `storageMode` in src/index.ts gives
+
+  // PostgreSQL precedence whenever a Hyperdrive binding exists — D1 is never a silent
+
+  // fallback for a missing database, only an explicit test surface.
+
+  // The id below is a resource identifier, not a credential (it is in the dashboard and in
+
+  // every deploy artefact), which is why it may sit in config while no secret may.
+
+  // ── D1: PRIVATE TEST STORAGE ─────────────────────────────────────────────
+  // Independent database `velora-telegram-test`, created for the private test and holding one
+  // table (d1/migrations/0001_telegram_test.sql). It is not, and must not become, Velora's
+  // ledger: there are no trade, journal, audit or AI tables here, so nothing can write product
+  // data into it by accident. `storageMode` in src/index.ts gives PostgreSQL precedence whenever
+  // a Hyperdrive binding exists — D1 is never a silent fallback for a missing database, only an
+  // explicit test surface, and `/ready` reports `storage: "d1-test"` so the difference is visible.
+  // The id below is a resource identifier, not a credential, which is why it may sit in config
+  // while no secret may.
+  "d1_databases": [
+    {
+      "binding": "VELORA_TEST_DB",
+      "database_name": "velora-telegram-test",
+      "database_id": "51314295-7db1-4089-8487-ef087d915a76",
+      // Applied by the operator, never by the Worker:
+      //   npx wrangler d1 migrations apply velora-telegram-test --remote
+      "migrations_dir": "d1/migrations"
+    }
+  ],
+
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      // Create once against the existing Velora Postgres (staging first):
+      //   wrangler hyperdrive create velora-db --connection-string "postgres://…"
+      "id": "REPLACE_WITH_HYPERDRIVE_ID"
+      // No `localConnectionString` key here, and that is a finding, not a preference.
+      // Measured with wrangler 4.86.0 while trying to make local development work:
+      //   * an env placeholder in that field is NOT interpolated — `wrangler dev` died
+      //     with `hyperdrives: { HYPERDRIVE: <the literal text>, ^ Invalid url }`, so a
+      //     reader of the previous revision could not start the Worker locally at all.
+      //   * the variable that does work is binding-suffixed and carries the
+      //     CLOUDFLARE_ prefix (the unprefixed name is silently ignored); wrangler's
+      //     own error message prints it:
+      //       CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="<local connection string>"
+      //   * that string must carry a password (Miniflare refuses a passwordless one: "You
+      //     must provide a password"), which is exactly why no such value is written into
+      //     this file. The repo's own `npm run secret-scan` flags any credential-shaped
+      //     URL, placeholder included — a rule that earns its keep here.
+      //     And because `.dev.vars` is NOT ignored at the repo root, this package now
+      //     ships its own .gitignore covering it (plus .wrangler/ and dist/).
+      // Local dev:  the variable above + `npx wrangler dev --local --port 8787`
+      // Harness:    IT_DATABASE_URL="postgres://…" npm -w @velora/worker-cf run it
+    }
+  ]
+}
