@@ -1,0 +1,60 @@
+{
+  "round": 7,
+  "objective-a": "Telegram UI via buttons and menus",
+  "objective-b": "Web admin panel access recovery",
+  "recorded_at": "2026-10-20",
+  "commits": ["af7653b", "b30a6f0", "6202cf5"],
+  "not_deployed": "Nothing was deployed this round: no Cloudflare credential was held (the ones used earlier were shredded after use, per policy), and no new one was requested in chat.",
+  "gates": {
+    "typecheck_5_projects": "exit 0 (tsc -b --force packages/contracts packages/domain apps/api apps/worker apps/web)",
+    "worker_cf_tsc": "exit 0",
+    "full_tests": "exit 0 — general 1768 (1767 pass / 0 fail / 1 named skip NO_TESSERACT_BINARY), PGlite 86/86",
+    "worker_cf_tests": "65/65",
+    "web_edge_cf_tests": "10/10",
+    "web_production_build": "exit 0 (every route ƒ dynamic, Proxy middleware present)",
+    "wrangler_dry_run_worker_cf": "exit 0",
+    "wrangler_dry_run_web_edge_cf": "exit 0 after the prepare-assets path fix (121 asset files staged)",
+    "migrations": "0042 applies cleanly and idempotently; PGlite asserts each CHECK refuses what it must",
+    "secret_scan": "PASS (0 findings)"
+  },
+  "objective_a": {
+    "menu": ["journal", "posts", "templates", "banner", "AI tools", "settings", "help", "home"],
+    "new_contract_actions": ["tpl_list", "tpl_new", "tpl_edit", "tpl_del", "tpl_delok", "tpl_def", "tpl_pv", "bn_toggle", "bn_title", "ai_status", "flow_cancel"],
+    "new_menu_targets": ["home", "posts", "templates", "banner", "ai", "help"],
+    "persistence": "migration 0042 telegram_post_preferences (default template, banner on/off, banner title, one open guided flow with expiry)",
+    "tests_added": {
+      "telegramMenus.test.ts": "9 — every button on every screen parses AND has a route; routed-action list == contract vocabulary; pagination clamps; default marked; banner states both rasterizer answers; AI names keys not values; prompts carry cancel",
+      "telegramBot.test.ts (appended)": "11 — menu navigation, unlinked-user refusal, template create/edit/delete/default, duplicate-name refusal, /cancel, banner toggle+title persistence, AI status, foreign-identity publish refusal, journal-wins-over-prompt regression",
+      "db/tests/migrations.test.ts": "1 — 0042 constraints"
+    },
+    "verification_levels": {
+      "menu unit + behavioural": "PASS (tests above)",
+      "persistence": "PASS in PGlite and in the memory store; NOT applied to the live Neon staging database (no DB credential this session)",
+      "deployed bot behaviour": "NOT VERIFIED — the live Worker still runs version 6f15c6dc, which predates this round"
+    }
+  },
+  "objective_b": {
+    "staging_url": "https://velora-modern-staging.yadgar-s-ict.workers.dev",
+    "live_route_census": {
+      "/": "200 HTML, per-request CSP nonce (19 occurrences, differs between requests) => rendered, not a stale file",
+      "/login /en/login /register /blog /news /markets": "200",
+      "/dashboard /settings /accounts /trades": "302 -> /login (auth gate working)",
+      "/admin /admin/x /en/admin": "302 -> /login (correct: not public)",
+      "/journal /portfolio": "404 (routes do not exist; correct)",
+      "POST /api/v1/auth/login": "404 {\"status\":\"error\",\"code\":404,\"message\":\"Application not found\"} = the platform's stopped-service envelope"
+    },
+    "diagnosis": "API origin not running. Login cannot be attempted, so no session can exist and the admin gate never opens. Route/deployment, session, role, database and authorization are all ruled out with evidence (docs/deployment/web-admin-staging-recovery.md §3).",
+    "why_not_redeploy_web": "next build reports every route ƒ (dynamic) plus Proxy middleware, and next.config.ts declares rewrites(); output:export is incompatible with rewrites() and middleware needs a server. No OpenNext/adapter exists in the repo.",
+    "fidelity_gap_found": "The live Worker gates /admin,/dashboard,/settings,/accounts with a 302; the reconstructed handler in apps/web-edge-cf proxies instead. Deploying the reconstruction as-is would drop that gate, which is why deploy.sh stays owner-gated.",
+    "admin_panel_accessible": "NOT VERIFIED — and not claimed"
+  },
+  "defects_found_and_fixed": [
+    "prepare-assets.mjs resolved apps/../web (never exists) instead of apps/web: the edge could not be rebuilt from the repository at all",
+    "the edge turned a dead origin into a 404 that read like a missing route"
+  ],
+  "blockers": [
+    "No Cloudflare credential in this session => the menu cannot be deployed; the live bot remains on 6f15d6dc-era code",
+    "No API origin => the web admin panel cannot be exercised end to end (Railway forbidden, no replacement to be invented)",
+    "Staging database not migrated to 0042 (no DB credential); the migration is proven against PGlite, not against Neon"
+  ]
+}

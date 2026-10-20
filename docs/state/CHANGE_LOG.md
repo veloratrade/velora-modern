@@ -1518,3 +1518,49 @@ Post-checks: `/health` 200 `storage:postgres, access:armed` · `/ready` 200 `dat
 **Still open, honestly.** `/post`, templates and the agent loop are now *wired* and *deployed*, but no end-to-end
 message was sent (the webhook secret and an admin bearer are not held in this sandbox) — so the functional label is
 `NOT VERIFIED (live)`, not PASS. The three-message check is in `docs/state/evidence/round6-staging/bot-wiring-v41.json`.
+
+---
+
+## 2026-10-20 (round 7) — `af7653b` `b30a6f0` `6202cf5`: the menu, and what the admin panel is actually waiting on
+
+**Objective A — Telegram UI by button.** `/start` opens a six-section menu (journal · posts · templates ·
+banner/visual · AI tools · settings · help) with back/home on every screen, and the guided flows behind it:
+template create (name → body), edit (a NEW version, compare-and-set on the version shown), delete (ask once,
+then retire), set-default, and a preview that NAMES every variable that had no value. Banner settings persist
+a toggle and a title and state plainly that PNG rendering is unavailable on this host — no image is faked, no
+placeholder "theme" is offered over a renderer that knows one palette. AI status names missing KEY NAMES and
+never a value. The journal parser still wins over an open prompt (a lost trade is worse than a lost template
+body) and the user is told; the prompt then expires on its own.
+
+New persistence: **0042 `telegram_post_preferences`** — one user-scoped row (default template, banner on/off,
+banner title) plus the one open guided flow with a store-written start time. Coherence CHECKs make a half-open
+prompt unrepresentable; `flow_kind` is a closed vocabulary, so a new step is a migration rather than a string.
+
+**Objective B — the admin panel is blocked at the API, not at the login.** Live census (2026-10-20): public
+pages 200 with a **per-request CSP nonce** (19 occurrences, differing between requests — so the pages are
+rendered, not stale files); `/dashboard /settings /accounts /trades /admin` 302 → `/login` (the gate is
+working); `/api/*`, including `POST /api/v1/auth/login`, returns the fronting platform's
+`{"message":"Application not found"}` envelope. No API origin ⇒ no session ⇒ the gate never opens. The five
+candidate causes are separated with evidence in `docs/deployment/web-admin-staging-recovery.md`.
+
+The app cannot be re-shipped as static files: `next build` reports **every route ƒ (dynamic)** plus Proxy
+middleware, and `next.config.ts` declares `rewrites()`; `output: "export"` cannot express either, and the repo
+carries no Next-on-Cloudflare adapter.
+
+**Two real defects fixed.** (1) `apps/web-edge-cf/prepare-assets.mjs` climbed one level too far and looked for
+`<repo>/web/.next/static`, which never exists — the edge could not be rebuilt from the repository at all.
+(2) The edge forwarded a stopped origin's platform 404 verbatim, which reads as "route not found" and sends the
+reader hunting a routing bug; it is now `503 edge_app_origin_unavailable`, matched on that platform sentence
+only, so the app's own 404s keep their status, body and headers.
+
+**Fidelity gap recorded, not papered over.** The deployed edge (version #3) gates four routes with a 302 that
+the reconstructed handler does not implement. Deploying the reconstruction as-is would remove that gate, which
+is precisely why `deploy.sh` stays behind `CONFIRM_EDGE_DEPLOY=yes`.
+
+**Gates:** typecheck (5 projects) 0 · full `npm test` **exit 0** (general 1768: 1767 pass / 0 fail / 1 named
+skip; PGlite 86/86) · worker-cf 65/65 · web-edge-cf 10/10 · web production build 0 · wrangler dry-run both
+packages 0 · secret-scan 0.
+
+**Not deployed, and said so:** no Cloudflare credential was held this session, so the live bot still runs
+`6f15c6dc`; the staging database has not been migrated to 0042 (no DB credential — the migration is proven
+against PGlite, not against Neon); and the admin panel is `NOT VERIFIED`, not claimed.
