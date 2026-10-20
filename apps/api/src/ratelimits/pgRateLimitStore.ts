@@ -39,11 +39,6 @@ export class PgRateLimitStore implements RateLimitStore {
   ): Promise<{ hits: number; windowStartMs: number }> {
     const now = new Date(nowMs);
     const windowStartCutoff = new Date(nowMs - policy.windowSec * 1000);
-    const staleCutoff = new Date(nowMs - STALE_AFTER_MS);
-
-    // Opportunistic 48h hygiene sweep (PHP parity; races are harmless — any
-    // row it can remove is >48h stale, i.e. already expired for every policy).
-    await this.q("DELETE FROM rate_limits WHERE window_start < $1", [staleCutoff]);
 
     // Atomic fixed-window upsert: reset when the bucket's own window expired,
     // increment (window anchored) otherwise. hits is BIGINT → string in pg.
@@ -62,5 +57,24 @@ export class PgRateLimitStore implements RateLimitStore {
       hits: Number(row.hits),
       windowStartMs: (ws instanceof Date ? ws : new Date(String(ws))).getTime(),
     };
+  }
+
+  /**
+   * The 48h hygiene sweep, moved off the request path (was: one DELETE per message).
+   *
+   * It is safe to run only from a schedule because nothing about a bucket depends on it: a row older
+   * than 48 h is already outside every policy window, so `hit()` behaves identically whether or not the
+   * sweep has run. Races are harmless for the same reason. Returns the number of rows removed so the
+   * caller can log a fact instead of a hope.
+   */
+  async sweepExpired(nowMs: number): Promise<number> {
+    const staleCutoff = new Date(nowMs - STALE_AFTER_MS);
+    // Counted in the database, not by shipping rows: a first run after weeks of the old per-message
+    // sweep could legitimately remove thousands of rows, and a Worker invocation should not carry them.
+    const rows = await this.q(
+      `WITH gone AS (DELETE FROM rate_limits WHERE window_start < $1 RETURNING 1) SELECT count(*)::bigint AS removed FROM gone`,
+      [staleCutoff],
+    );
+    return Number(rows[0]?.removed ?? 0);
   }
 }
