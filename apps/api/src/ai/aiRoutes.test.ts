@@ -42,6 +42,9 @@ import { UnavailableImageAnonymizer } from "./imageAnonymizer.js";
 import { AiManager } from "./aiManager.js";
 import { AiAnalysisService, type OwnedTrade } from "./aiAnalysisService.js";
 import { AiAdminService } from "./aiAdminService.js";
+import { AiToolAdminService } from "./aiToolAdmin.js";
+import { AiSearchService } from "./aiSearchService.js";
+import { AiBrowserService } from "./aiBrowserService.js";
 import type { AiExecutor, AiExecutorResult } from "./aiExecutors.js";
 import type { AiCapability } from "./aiRoutes.js";
 import type { AiAdminCapability } from "./aiAdminRoutes.js";
@@ -62,9 +65,13 @@ interface Harness {
   close: () => Promise<void>;
   setExecutor: (behaviour: (call: number) => AiExecutorResult | Promise<AiExecutorResult>) => void;
   consent: { granted: boolean };
+  /** The store the AI admin surface writes its audit rows to (0041). */
+  adminAudit: MemoryAuditStore;
+  /** Every URL the tool services were told to fetch — the evidence that a probe did or did not leave. */
+  toolCalls: string[];
 }
 
-async function build(options: { withAi?: boolean; withAdmin?: boolean; secrets?: Record<string, string>; localOcr?: boolean } = {}): Promise<Harness> {
+async function build(options: { withAi?: boolean; withAdmin?: boolean; secrets?: Record<string, string>; localOcr?: boolean; withTools?: boolean } = {}): Promise<Harness> {
   const verificationTokens: string[] = [];
   const store = new MemoryUserStore();
   const audit = new MemoryAuditStore();
@@ -170,7 +177,33 @@ async function build(options: { withAi?: boolean; withAdmin?: boolean; secrets?:
     providerConfigured: async () => (await router.buildDefaultChain(null)).entries.length > 0,
   };
 
+  const adminAudit = new MemoryAuditStore();
+
+  // The TOOL panel's doubles: real `AiSearchService`/`AiBrowserService` over a fetch that only records.
+  // `raster: null` is deliberately the WORKER shape, so `banner_raster` must come back `unsupported`
+  // rather than `unavailable` — the difference between "no key will help" and "go configure it".
+  const toolCalls: string[] = [];
+  const toolFetch = (async (input: unknown, init?: RequestInit): Promise<Response> => {
+    toolCalls.push(`${String(init?.method ?? "GET")} ${String(input)}`);
+    return new Response(JSON.stringify({ results: [], queries: [], response: "" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as unknown as typeof fetch;
+  const toolServices = options.withTools === true
+    ? {
+        search: new AiSearchService({ secrets: secretService, fetchImpl: toolFetch, now: () => new Date(0) }),
+        browser: new AiBrowserService({ secrets: secretService, fetchImpl: toolFetch, now: () => new Date(0) }),
+      }
+    : null;
+
   const aiAdmin: AiAdminCapability | undefined = options.withAdmin === false ? undefined : {
+    // Required since 0041: a mount that exposes a tool-validation button must also expose the trail that
+    // records who pressed it. The harness keeps the memory store so a route test can read the rows.
+    audit: adminAudit,
+    ...(toolServices === null ? {} : {
+      tools: new AiToolAdminService({ ...toolServices, raster: null, now: () => new Date(0) }),
+    }),
     admin: new AiAdminService({
       store: config,
       secrets: secretService,
@@ -221,7 +254,7 @@ async function build(options: { withAi?: boolean; withAdmin?: boolean; secrets?:
   }
 
   return {
-    base, login, store, config, attempts, ledger, calls, trades, consent,
+    base, login, store, config, attempts, ledger, calls, trades, consent, adminAudit, toolCalls,
     setExecutor: (next) => { behaviour = next; },
     // The listener MUST be closed, or the test file's process never exits and the
     // runner waits for it forever (the phase-6 console battery closes its server
@@ -780,4 +813,157 @@ test("AI admin: the usage drilldown reads the one ledger and its limit is bounde
   const bad = await get(h.base, adminToken, "/api/v1/admin/ai-usage?limit=100000");
   assert.equal(bad.status, 422);
   await h.close();
+});
+
+// ── the ADMIN tool surface: real states, an audit row for every probe, and a 503 that is not a lie ──
+//
+// `apps/api/src/telegram/*` proves what the bot does with these tools; this proves what an OPERATOR is
+// told. The properties are ones only an HTTP test can establish: who may see the panel at all, that a
+// deployment without tool services answers 503 rather than an empty list (an empty list is a claim about
+// the platform, not about the keys), that `unsupported` survives to the client instead of collapsing into
+// "off", and that a validation leaves exactly one audit row carrying a verdict and no secret.
+
+async function fetchTools(h: Harness, token: string | null): Promise<{ status: number; json: Record<string, unknown> }> {
+  const res = await fetch(`${h.base}/api/v1/admin/ai/tools`, {
+    headers: token === null ? {} : { Authorization: `Bearer ${token}` },
+  });
+  return { status: res.status, json: (await res.json()) as Record<string, unknown> };
+}
+
+async function validateTool(h: Harness, token: string, tool: string): Promise<{ status: number; json: Record<string, unknown> }> {
+  const res = await fetch(`${h.base}/api/v1/admin/ai/tools/${tool}/validate`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  return { status: res.status, json: (await res.json()) as Record<string, unknown> };
+}
+
+test("AI admin tools: an anonymous caller is 401 and a plain user is 403, before any provider is touched", async () => {
+  const h = await build({ withTools: true });
+  try {
+    const anon = await fetchTools(h, null);
+    assert.equal(anon.status, 401);
+    const user = await h.login(`tools-user-${Date.now()}@velora.test`);
+    const forbidden = await fetchTools(h, user);
+    assert.equal(forbidden.status, 403, "aiManage is super-admin-ish: a plain account may not read the platform's capability table");
+    assert.equal(h.toolCalls.length, 0, "an unauthorized read must not cost a provider request");
+    // THE ASYMMETRY, pinned: reading the table is `aiManage`; PROVING a tool alive spends a third-party
+    // request on the platform's own credential, so it additionally requires the route-manage permission
+    // that only a super admin holds. An `admin` therefore sees the panel and cannot press its buttons.
+    const admin = await h.login(`tools-readonly-admin-${Date.now()}@velora.test`, "admin");
+    assert.equal((await fetchTools(h, admin)).status, 200, "an admin may read it");
+    const probe = await validateTool(h, admin, "web_search");
+    assert.equal(probe.status, 403, "and may not run a live probe");
+    assert.equal(h.toolCalls.length, 0, "refused BEFORE the provider: the permission is decided before any body or request leaves");
+    assert.equal((await h.adminAudit.list()).length, 0, "and it must not write a trail for an action that never happened");
+  } finally {
+    await h.close();
+  }
+});
+
+test("AI admin tools: the panel reports the runtime's truth, including what it can never do", async () => {
+  const h = await build({ withTools: true });
+  try {
+    const admin = await h.login(`tools-admin-${Date.now()}@velora.test`, "admin");
+    const res = await fetchTools(h, admin);
+    assert.equal(res.status, 200);
+    const data = res.json["data"] as { items: Record<string, unknown>[]; states: string[]; tools: string[] };
+    assert.deepEqual(data.tools, ["web_search", "browser_capture", "banner_raster"]);
+    // The vocabulary travels with the payload so the panel cannot invent a colour for a state it has
+    // never seen.
+    assert.ok(data.states.includes("unsupported") && data.states.includes("verified"));
+    const raster = data.items.find((row) => row["tool"] === "banner_raster");
+    // This harness is the WORKER shape (`raster: null`), so the honest answer is `unsupported` with
+    // runtimeSupported false — never `unavailable`, which would tell an operator to go configure a key
+    // that cannot help.
+    assert.equal(raster?.["state"], "unsupported");
+    assert.equal(raster?.["runtimeSupported"], false);
+    // A read is not an event: the panel refreshing must not fill the audit trail.
+    assert.equal((await h.adminAudit.list()).length, 0);
+  } finally {
+    await h.close();
+  }
+});
+
+test("AI admin tools: with no tool services wired the answer is 503 naming the capability, not an empty list", async () => {
+  const h = await build();
+  try {
+    const admin = await h.login(`tools-absent-${Date.now()}@velora.test`, "super_admin");
+    const res = await fetchTools(h, admin);
+    assert.equal(res.status, 503, "an empty list would claim this platform HAS no tools, which is a statement about code, not keys");
+    assert.match(JSON.stringify(res.json), /aiTools/u);
+    const validate = await validateTool(h, admin, "web_search");
+    assert.equal(validate.status, 503, "and the same for a probe this deployment cannot run");
+    assert.equal((await h.adminAudit.list()).length, 0, "a refused probe is not an audited action");
+  } finally {
+    await h.close();
+  }
+});
+
+test("AI admin tools: a validation is answered, audited, and carries a verdict rather than a secret", async () => {
+  const h = await build({ withTools: true, secrets: { TAVILY_API_KEY: "tvly-secret-do-not-log" } });
+  try {
+    const admin = await h.login(`tools-validator-${Date.now()}@velora.test`, "super_admin");
+    const adminUser = await h.store.findUserByEmail(`tools-validator-${Date.now()}@velora.test`);
+    const res = await validateTool(h, admin, "web_search");
+    assert.equal(res.status, 200, `a provider that answered is a success verdict, saw ${JSON.stringify(res.json)}`);
+    const verdict = res.json["data"] as { tool: string; ok: boolean; state: string };
+    assert.equal(verdict.tool, "web_search");
+    assert.equal(verdict.ok, true);
+    assert.equal(verdict.state, "verified", "verified means WE ASKED, which is why the state cannot come from a config table");
+
+    const rows = (await h.adminAudit.list()).filter((r) => r.action === "AI_TOOL_VALIDATED");
+    assert.equal(rows.length, 1, "exactly one trail per probe");
+    const row = rows[0] as unknown as Record<string, string | null>;
+    assert.equal(row["afterState"], "tool:web_search verdict:ok");
+    assert.equal(row["provider"], null, "the audit provider vocabulary is METAAPI/TELEGRAM; a search vendor does not belong in it");
+    assert.ok(row["requestId"], "a route-path append still carries the request id, or the row cannot be correlated");
+    assert.ok(adminUser === null || row["actorUserId"] === adminUser.id, "the actor is the authenticated admin, never a body field");
+    const serialised = JSON.stringify(row);
+    assert.ok(!serialised.includes("tvly-secret-do-not-log"), "the key never reaches the trail");
+    assert.ok(!serialised.includes("api.tavily.com"), "nor does the endpoint: the verdict is the fact, the URL is infrastructure");
+  } finally {
+    await h.close();
+  }
+});
+
+test("AI admin tools: a failing probe is 424 Failed Dependency, audited with the code it returned", async () => {
+  const h = await build({ withTools: true });
+  try {
+    // No search credential in this harness: the probe cannot succeed, and the route must say so with the
+    // status that means "the dependency is not there" rather than a green 200 carrying ok:false.
+    const admin = await h.login(`tools-failing-${Date.now()}@velora.test`, "super_admin");
+    const res = await validateTool(h, admin, "web_search");
+    assert.equal(res.status, 424, `a negative verdict is not a success, saw ${res.status}`);
+    const verdict = res.json["data"] as { ok: boolean; state: string; errorCode: string | null };
+    assert.equal(verdict.ok, false);
+    assert.ok(["unavailable", "failing"].includes(verdict.state), `state must stay in the vocabulary, saw ${verdict.state}`);
+    const rows = (await h.adminAudit.list()).filter((r) => r.action === "AI_TOOL_VALIDATED");
+    assert.equal(rows.length, 1, "a failed check is the MOST interesting row: an operator learned something about a credential");
+    assert.match(String((rows[0] as unknown as { afterState: string }).afterState), /^tool:web_search verdict:/u);
+    assert.ok(
+      !/^tool:web_search verdict:ok$/u.test(String((rows[0] as unknown as { afterState: string }).afterState)),
+      "a failed probe must not be recorded as `verdict:ok` — that is how a green lie would enter the trail",
+    );
+    assert.equal(verdict.errorCode !== null, true, "the client is told why, not just that it failed");
+  } finally {
+    await h.close();
+  }
+});
+
+test("AI admin tools: an unknown tool is 422 and a Worker-only tool cannot be probed at all", async () => {
+  const h = await build({ withTools: true });
+  try {
+    const admin = await h.login(`tools-unknown-${Date.now()}@velora.test`, "super_admin");
+    const unknown = await validateTool(h, admin, "not_a_tool");
+    assert.equal(unknown.status, 422, "the name is not in the vocabulary — a client error, not a provider one");
+    const raster = await validateTool(h, admin, "banner_raster");
+    assert.equal(raster.status, 503, "this runtime has no rasterizer to verify");
+    assert.match(JSON.stringify(raster.json), /TOOL_NOT_VERIFIABLE/u);
+    assert.equal(h.toolCalls.length, 0, "neither refusal sent a byte anywhere");
+    assert.equal((await h.adminAudit.list()).length, 0, "and neither wrote a row");
+  } finally {
+    await h.close();
+  }
 });

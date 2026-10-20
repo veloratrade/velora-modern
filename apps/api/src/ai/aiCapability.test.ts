@@ -572,7 +572,18 @@ test("relay: an unconfigured relay refuses rather than calling an empty URL", as
 
 // ── the local OCR fallback, against the REAL binary ───────────────────────────
 
-test("OCR: the real tesseract binary reads a real screenshot", async () => {
+/**
+ * This test is the ONLY evidence in the battery that the OCR path works on real bytes, and it needs the
+ * `tesseract` binary — an OS package this sandbox does not have and that this project may not install to
+ * make a suite go green. So the case is skipped BY NAME when the binary is absent, which is a different
+ * outcome from a red assertion in one important way: a failure says "the code is wrong here", a skip says
+ * "nobody has verified this here", and the round report is required to carry the second sentence. The
+ * sibling case below keeps the pressure on the code path that absence takes — no binary must produce
+ * `OCR_UNAVAILABLE`, never an empty string that reads like a successful read.
+ */
+const TESSERACT_PRESENT = new TesseractProvider().isAvailable();
+
+test("OCR: the real tesseract binary reads a real screenshot", { skip: TESSERACT_PRESENT ? false : "NO_TESSERACT_BINARY — environment-limited, reported as unverified" }, async () => {
   assert.ok(existsSync(FIXTURE), "the fixture image must exist");
   const provider = new TesseractProvider();
   assert.equal(provider.isAvailable(), true);

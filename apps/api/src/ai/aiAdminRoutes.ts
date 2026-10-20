@@ -44,6 +44,8 @@ import type { ExtendedRouteContext, RouteResult } from "../routes/types.js";
 import { capabilityAbsent, forbidden, unauthenticated } from "../routes/responses.js";
 import { AI_PROVIDER_NAMES, isAiProvider, type AiCatalogProvider } from "./aiCatalog.js";
 import { AiConfigValidationError, type AiAdminService } from "./aiAdminService.js";
+import { AiToolAdminService } from "./aiToolAdmin.js";
+import type { AuditStore } from "../auth/auditStore.js";
 import { AiSecretMasterKeyMissingError, AiSecretValueInvalidError } from "./aiSecrets.js";
 
 export const AI_ADMIN_OVERVIEW = "/api/v1/admin/ai/overview";
@@ -54,12 +56,17 @@ export const AI_ADMIN_QUOTAS = "/api/v1/admin/ai/quotas";
 export const AI_ADMIN_ROUTE = "/api/v1/admin/ai/route";
 export const AI_ADMIN_RELAY = "/api/v1/admin/ai/relay";
 export const AI_ADMIN_USAGE = "/api/v1/admin/ai-usage";
+/** Tool capability state (0039 round): what the agent may be pointed at, and whether it was proven. */
+export const AI_ADMIN_TOOLS = "/api/v1/admin/ai/tools";
 
 const FEATURE_PROVIDER_ID = /^\/api\/v1\/admin\/ai\/feature-providers\/([^/]+)$/u;
 const FLAG_NAME = /^\/api\/v1\/admin\/ai\/flags\/([^/]+)$/u;
 const QUOTA_PROVIDER = /^\/api\/v1\/admin\/ai\/quotas\/([^/]+)$/u;
 const CREDENTIAL_KEY = /^\/api\/v1\/admin\/ai\/credentials\/([^/]+)$/u;
 const PROVIDER_PROBE = /^\/api\/v1\/admin\/providers\/([^/]+)\/(verify|test-connection)$/u;
+// One tool, one verification, by that tool's own definition of alive. The name is matched against the
+// catalogue inside the service, so an unknown tool is a 422 here rather than a 500 from a switch.
+const TOOL_VALIDATE = /^\/api\/v1\/admin\/ai\/tools\/([a-z_]+)\/validate$/u;
 
 const READ_ROUTES: ReadonlyArray<{ readonly path: string; readonly permission: Permission }> = [
   { path: AI_ADMIN_OVERVIEW, permission: "aiManage" },
@@ -69,10 +76,31 @@ const READ_ROUTES: ReadonlyArray<{ readonly path: string; readonly permission: P
   { path: AI_ADMIN_ROUTE, permission: "aiManage" },
   { path: AI_ADMIN_RELAY, permission: "aiManage" },
   { path: AI_ADMIN_USAGE, permission: "aiManage" },
+  { path: AI_ADMIN_TOOLS, permission: "aiManage" },
 ];
 
 export interface AiAdminCapability {
   readonly admin: AiAdminService;
+  /**
+   * The tool panel. Optional and SEPARATE from `admin` because a deployment can have AI providers
+   * configured and no tool services at all (a Worker, or a staging box with no search key): the routes
+   * then answer 503 with the capability name, which is a truer statement than an empty list — an empty
+   * list would say "this platform has no tools", and that is a claim about the code, not about the keys.
+   */
+  readonly tools?: AiToolAdminService | undefined;
+  /**
+   * The security audit trail, REQUIRED whenever the tool panel is mounted.
+   *
+   * A validation is not a configuration change, but it does spend a provider request on the platform's
+   * credentials and its verdict becomes the fact the rest of the team acts on. `auditStore.append` is the
+   * only way to answer "who asserted this was healthy, and when" — so the mount that exposes the button
+   * must also expose the trail. It is a required field on purpose: making it optional is how a deployment
+   * ends up with a validation surface that records nothing.
+   *
+   * A failure to write is NOT swallowed. `AuditStore.append` propagates by design (the bot's publish audit
+   * does the same), so an operator cannot be shown a green verdict that left no trace behind.
+   */
+  readonly audit: AuditStore;
 }
 
 export async function handleAiAdminRoutes(ctx: ExtendedRouteContext): Promise<RouteResult | null> {
@@ -84,14 +112,16 @@ export async function handleAiAdminRoutes(ctx: ExtendedRouteContext): Promise<Ro
   const quotaMatch = QUOTA_PROVIDER.exec(ctx.path);
   const credentialMatch = CREDENTIAL_KEY.exec(ctx.path);
   const probeMatch = PROVIDER_PROBE.exec(ctx.path);
+  const toolMatch = TOOL_VALIDATE.exec(ctx.path);
   const isReorder = ctx.path === AI_ADMIN_FEATURE_PROVIDERS_REORDER;
 
   const owns = readRoute !== null || featureIdMatch !== null || flagMatch !== null || quotaMatch !== null ||
-    credentialMatch !== null || probeMatch !== null || isReorder ||
+    credentialMatch !== null || probeMatch !== null || toolMatch !== null || isReorder ||
     (ctx.path === AI_ADMIN_FEATURE_PROVIDERS && ctx.method !== "GET");
   if (!owns) return null;
 
   if (capability === null) return capabilityAbsent(ctx, "aiAdmin");
+  const toolAdmin = capability.tools ?? null;
 
   const claims = ctx.authenticate(ctx.req);
   if (claims === null) return unauthenticated(ctx);
@@ -100,7 +130,7 @@ export async function handleAiAdminRoutes(ctx: ExtendedRouteContext): Promise<Ro
   // The permission is decided BEFORE the body is read: an unauthorized caller must
   // not get a validation error that describes the shape of a body they may not
   // send.
-  const permission = permissionFor(ctx, readRoute?.permission ?? null, featureIdMatch, flagMatch, quotaMatch, credentialMatch, probeMatch, isReorder);
+  const permission = permissionFor(ctx, readRoute?.permission ?? null, featureIdMatch, flagMatch, quotaMatch, credentialMatch, probeMatch, toolMatch, isReorder);
   if (!canAct(authority, permission)) return forbidden(ctx);
 
   const service = capability.admin;
@@ -113,6 +143,50 @@ export async function handleAiAdminRoutes(ctx: ExtendedRouteContext): Promise<Ro
     }
     if (ctx.path === AI_ADMIN_FEATURE_PROVIDERS && ctx.method === "GET") {
       return { status: 200, body: ok({ items: await service.listFeatureRoutes() }) };
+    }
+    if (ctx.path === AI_ADMIN_TOOLS && ctx.method === "GET") {
+      // Checked HERE rather than up front so the compiler keeps the guarantee alongside the code that
+      // uses it: a 503 naming the missing capability, never a null dereference dressed as a 500.
+      if (toolAdmin === null) return capabilityAbsent(ctx, "aiTools");
+      return {
+        status: 200,
+        body: ok({
+          items: await toolAdmin.capabilities(),
+          // The vocabulary is returned so the panel renders a state it cannot invent. A UI that maps
+          // `unsupported` onto "off" is how a Worker-only absence becomes a ticket telling someone to
+          // configure a key that would not help.
+          states: [...AiToolAdminService.states()],
+          tools: [...AiToolAdminService.tools()],
+        }),
+      };
+    }
+    if (toolMatch !== null && ctx.method === "POST") {
+      if (toolAdmin === null) return capabilityAbsent(ctx, "aiTools");
+      const outcome = await toolAdmin.validate(toolMatch[1] ?? "");
+      if ("error" in outcome) {
+        return outcome.error === "UNKNOWN_TOOL"
+          ? validation(ctx, { tool: "not an offered tool" })
+          : { status: 503, body: fail("TOOL_NOT_VERIFIABLE", "This runtime cannot verify that tool.", ctx.requestId) };
+      }
+      // 424 Failed Dependency for a negative verdict, not 200 with `ok: false`: a panel that paints
+      // green on a failed probe is the exact lie this whole surface exists to prevent.
+      //
+      // The audit row is appended AFTER the probe and BEFORE the response, and it carries correlation
+      // only: the tool's name and the verdict code. Not the provider's endpoint, not its body, not which
+      // key was used — a vendor error page can hold account identifiers, and the code already says what an
+      // operator needs. `outcome` is `success` for any COMPLETED probe (positive or negative) because the
+      // column records whether the audited action was PERFORMED, not whether the vendor was healthy; a
+      // probe this runtime refused to run wrote no row above this line.
+      await capability.audit.append({
+        action: "AI_TOOL_VALIDATED",
+        actorUserId: actorId,
+        targetUserId: null,
+        beforeState: null,
+        afterState: `tool:${outcome.tool} verdict:${outcome.ok ? "ok" : outcome.errorCode ?? outcome.status}`,
+        requestId: ctx.requestId,
+        occurredAt: new Date(),
+      });
+      return { status: outcome.ok ? 200 : 424, body: ok(outcome) };
     }
     if (ctx.path === AI_ADMIN_FLAGS && ctx.method === "GET") {
       return { status: 200, body: ok({ items: await service.listFlags() }) };
@@ -261,11 +335,14 @@ function permissionFor(
   quotaMatch: RegExpExecArray | null,
   credentialMatch: RegExpExecArray | null,
   probeMatch: RegExpExecArray | null,
+  toolMatch: RegExpExecArray | null,
   isReorder: boolean,
 ): Permission {
   if (readPermission !== null && ctx.method === "GET") return readPermission;
   // Everything that can spend money or move a secret is super-admin-exclusive.
-  if (credentialMatch !== null || probeMatch !== null || quotaMatch !== null) return "aiRouteManage";
+  // A tool verification makes a live third-party request with a stored credential, so it is gated like a
+  // provider probe: the same permission, the same reasoning about spending.
+  if (credentialMatch !== null || probeMatch !== null || quotaMatch !== null || toolMatch !== null) return "aiRouteManage";
   if (ctx.path === AI_ADMIN_ROUTE && ctx.method !== "GET") return "aiRouteManage";
   if (ctx.path === AI_ADMIN_RELAY && ctx.method !== "GET") return "aiRouteManage";
   if (isReorder || featureIdMatch !== null || flagMatch !== null || ctx.path === AI_ADMIN_FEATURE_PROVIDERS) return "aiManage";

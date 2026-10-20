@@ -113,6 +113,12 @@ import { AiManager } from "./ai/aiManager.js";
 import { AiAnalysisService } from "./ai/aiAnalysisService.js";
 import { PgAiLedger } from "./ai/aiLedger.js";
 import { AiAdminService } from "./ai/aiAdminService.js";
+import { AiToolAdminService } from "./ai/aiToolAdmin.js";
+import { AiSearchService } from "./ai/aiSearchService.js";
+import { AiBrowserService } from "./ai/aiBrowserService.js";
+import { bannerRasterizer, probeBannerRaster } from "./telegram/bannerRaster.js";
+import { BANNER_WIDTH } from "@velora/domain";
+import { createHash } from "node:crypto";
 import { PgIntegrationStore } from "./integrations/integrationStore.js";
 import { IntegrationService } from "./integrations/integrationService.js";
 import { PgAdminPlatformStore } from "./adminPlatform/adminPlatformStore.js";
@@ -706,6 +712,11 @@ async function main(): Promise<void> {
         },
       };
       capabilities.aiAdmin = {
+        // The trail this mount requires: an operator's tool validation is audited, so the panel cannot be
+        // exposed without a record of who ran it. A second `PgAuditStore` over the same table is one trail,
+        // not two — the store is stateless beyond its executor (the same reasoning as the Telegram wiring
+        // below), and the `audit_log` table itself is append-only by role (db/roles.sql).
+        audit: new PgAuditStore(pool),
         admin: new AiAdminService({
           store: aiConfig,
           secrets: aiSecrets,
@@ -717,6 +728,26 @@ async function main(): Promise<void> {
           executors: aiExecutors,
           localOcrAvailable: () => tesseract.isAvailable(),
           env: envOf,
+        }),
+        // The agent's tools, over the SAME secret service (`aiSecrets`: admin-managed envelope first,
+        // then env) so a key rotated in the panel is what the tools use, and over the SAME runtime
+        // probe the bot uses. Nothing here can report a capability the process cannot perform: the
+        // rasterizer row is `unsupported` when the native module or the Persian font is absent, and the
+        // browser row names the secret that is missing when no service is configured.
+        tools: new AiToolAdminService({
+          search: new AiSearchService({
+            secrets: aiSecrets,
+            providerOverride: () => (envOf("AI_SEARCH_PROVIDER") ?? "").trim() || null,
+          }),
+          browser: new AiBrowserService({
+            secrets: aiSecrets,
+            nodeCrypto: { createHash: (algorithm: string) => createHash(algorithm) },
+          }),
+          raster: probeBannerRaster,
+          rasterize: async (svg: string): Promise<Buffer | null> => {
+            const raster = await bannerRasterizer();
+            return raster === null ? null : await raster.toPng(svg, { width: BANNER_WIDTH });
+          },
         }),
       };
       // One line at boot, no values: an operator reading the log can see whether

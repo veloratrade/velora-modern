@@ -130,5 +130,25 @@ export const RATE_LIMIT_DEFAULTS = {
   "telegram:journal": { limit: 20, windowSec: 3600 },
   "telegram:analyze": { limit: 8, windowSec: 3600 },
   "telegram:channel": { limit: 10, windowSec: 3600 },
+  // --- Telegram AGENT tools (per-capability buckets) -------------------------
+  // These three exist so a TOOL has a ceiling of its own. Before them the agent's research and chart
+  // capture shared `telegram:analyze` with journal analysis, which meant two things at once: a user
+  // who spent their analysis budget silently lost the ability to search, and the per-tool budget
+  // written in `aiToolCatalog.ts` (TOOL_BUDGETS) was prose rather than an enforced number. Separate
+  // keys are what make "each tool has a budget" true — and the numbers are the catalogue's, asserted
+  // equal in `aiToolBudgets.test.ts`, because two places writing the same limit is a drift waiting to
+  // happen.
+  //
+  // One agent RUN, not one tool call: a run may contain several steps, and the run is what a user
+  // asks for. The per-step ceiling is the loop's own (steps/model-calls/wall-clock); this is the
+  // hourly one. `apps/api/src/telegram/telegramAgent.ts`'s registry names which key each tool
+  // spends, and nothing may fall back to `telegram:update` for an expensive tool.
+  "telegram:agent": { limit: 20, windowSec: 3600 },
+  // `web_search.perUserPerHour`. A search is the cheap-but-not-free tool: a batch of results, one
+  // provider request, no model call beyond the planner.
+  "telegram:search": { limit: 30, windowSec: 3600 },
+  // `browser_capture.perUserPerHour`. A capture is the expensive one — a real Chrome session, a
+  // full-page PNG, and a vision model call to read it — so it is the tightest of the three.
+  "telegram:capture": { limit: 12, windowSec: 3600 },
 } as const;
 export type RateLimitKey = keyof typeof RATE_LIMIT_DEFAULTS;

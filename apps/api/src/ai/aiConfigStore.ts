@@ -28,7 +28,24 @@ import type { CredentialEnvelope } from "../credentials/credentialCrypto.js";
 import type { AiCatalogProvider, AiFeature, AiRoute } from "./aiCatalog.js";
 
 /** Secret keys the admin surface may manage (0028's closed CHECK). */
-export const AI_SECRET_KEYS = ["GEMINI_API_KEY", "OPENAI_API_KEY", "GEMINI_RELAY_URL", "GEMINI_RELAY_TOKEN"] as const;
+/**
+ * The keys an operator may store in the admin panel, and the env names they override. The list is
+ * closed on BOTH sides — this array and 0039's CHECK on `ai_platform_secrets` — and they must stay
+ * equal, because the database is what makes "no arbitrary secrets table" true even if this file is
+ * ever relaxed. The tool keys (0039) are the credentials the agent's search and browser tools resolve
+ * through the SAME envelope store, the SAME master key and the SAME fail-closed rule as the model keys.
+ */
+export const AI_SECRET_KEYS = [
+  "GEMINI_API_KEY",
+  "OPENAI_API_KEY",
+  "GEMINI_RELAY_URL",
+  "GEMINI_RELAY_TOKEN",
+  "TAVILY_API_KEY",
+  "BRAVE_SEARCH_API_KEY",
+  "SERPER_API_KEY",
+  "BROWSERLESS_URL",
+  "BROWSERLESS_TOKEN",
+] as const;
 export type AiSecretKey = (typeof AI_SECRET_KEYS)[number];
 
 export const AI_CREDENTIAL_STATUSES = [
