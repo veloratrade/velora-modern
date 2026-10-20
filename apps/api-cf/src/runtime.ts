@@ -26,7 +26,7 @@ import { PgOwnershipStore } from "../../api/src/auth/pgOwnershipStore.js";
 import { PgAuditStore } from "../../api/src/auth/pgAuditStore.js";
 import { PgAdminConsoleStore } from "../../api/src/admin/adminConsoleStore.js";
 import { AuthService } from "../../api/src/auth/authService.js";
-import { VeloraHasher } from "../../api/src/auth/hashing.js";
+import { WorkersHasher } from "./workersHasher.js";
 import { JwtService } from "../../api/src/auth/jwt.js";
 import { AdminUserService } from "../../api/src/auth/adminUserService.js";
 import { OwnershipService } from "../../api/src/auth/ownershipService.js";
@@ -95,6 +95,11 @@ export function buildApiConfig(env: Env, pool: PoolLike): { config: ApiConfig; b
   // through `PoolLike`. The surface they use (`query(text, values) → { rows }`, `connect`, `end`) is
   // satisfied by both drivers, and `poolQuery` is the single seam that translates one to the other.
   const q = poolQuery(pool as never);
+  // ONE hasher for this host, and it is NOT the Node one: `VeloraHasher` hashes with `hash-wasm`, which a
+  // deployed Worker refuses ("Wasm code generation disallowed by embedder" — measured on staging
+  // 2026-10-20, where registration 500'd and login could not have rehashed). `WorkersHasher` produces the
+  // identical `$argon2id$v=19$m=19456,t=2,p=1$…` encoding in pure TypeScript, and
+  // `workersHasher.test.ts` proves the two verify each other's output in both directions.
   const userStore = new PgUserStore(pool as never);
   const authEventStore = new PgAuthEventStore(pool as never);
   const ownershipStore = new PgOwnershipStore(pool as never);
@@ -146,7 +151,7 @@ export function buildApiConfig(env: Env, pool: PoolLike): { config: ApiConfig; b
     });
     const auth = new AuthService({
       store: userStore,
-      hasher: new VeloraHasher(),
+      hasher: new WorkersHasher(),
       jwt: JwtService.create(boot.jwtSecret),
       mail,
       authEvents: authEventStore,
@@ -161,7 +166,7 @@ export function buildApiConfig(env: Env, pool: PoolLike): { config: ApiConfig; b
       ownership: new OwnershipService({
         ownership: ownershipStore,
         users: userStore,
-        hasher: new VeloraHasher(),
+        hasher: new WorkersHasher(),
         audit: auditStore,
       }),
       adminUsers,

@@ -1678,3 +1678,38 @@ account, and there is no way in. Recorded as a **capability gap**, not a defect,
 account, password, token or role was created, and nothing was written to the staging database. The
 unblocking options are owner-side (existing admin, DB-level provisioning with the app's own `VeloraHasher`,
 or a reviewed ops script) and are listed in `docs/deployment/web-admin-staging-recovery.md` §D5.
+
+## AC-D3 — 2026-10-20 · The Worker's credential path was broken; admin provisioned; every live test closed
+
+- **Commits:** this one (`fix(api-cf): pure-JS Argon2id for the Worker host`) — the previous HEAD is `82632c6`.
+- **Migration impact:** none. **Rows written to staging:** exactly two (the admin below, plus a temporary
+  non-admin probe that is now suspended) — see the report.
+
+**A real outage, found by probing the deployed Worker.** `POST /api/v1/auth/register` answered 500 with
+`WebAssembly.compile(): Wasm code generation disallowed by embedder`: `VeloraHasher` hashes with
+`hash-wasm`, and a deployed Worker refuses runtime WebAssembly. Because `needsRehash()` sends every
+successful bcrypt login through `hash()` too, **login would also have failed** — every route around the
+credential path looked healthy, so nothing else would have caught it.
+
+`apps/api-cf/src/workersHasher.ts` replaces it on this host with Argon2id in pure TypeScript
+(`@noble/hashes/argon2.js`), producing the identical `$argon2id$v=19$m=19456,t=2,p=1$…` encoding, plus
+bcryptjs for `$2a/$2b/$2y`. `workersHasher.test.ts` proves Worker→Node and Node→Worker verification in both
+directions, so the two implementations cannot drift silently. Redeployed as
+`14228323-86ee-4565-845d-b4e56fd6e295`.
+
+**First admin (owner-authorised).** `admin@velora.test` (user 11), `role='admin'`, `active`, verified, hash
+produced by the app's own `VeloraHasher` with the ADR-005 parameters. Provisioned by a single-use local
+script that refuses to run if any admin already exists (`velora-ops/admin-provision/provision.mts`); no
+admin-minting endpoint was deployed. `audit_log` records no row for the provisioning itself — that table's
+action vocabulary is CHECK-constrained and `actor_user_id` is NOT NULL — so the first real audit rows are the
+admin's own actions.
+
+**Live, on the real staging host:** login 200 + `__Host-velora_refresh` cookie; session probe
+`{authenticated:true, role:"admin"}`; **`GET /admin` → 200 with the real admin page**; console API
+`/admin/overview`, `/admin/rbac/self`, `/admin/users` → 200; suspend + reactivate a user → 200 each with
+`audit_log` rows; a `role=user` account → 403 on every console route and 302 `/dashboard` (not `/login`) on
+the page; logout → 200 and the cookie immediately stops working; a revoked session row → probe false,
+refresh 401, `/admin` 302.
+
+**Gates:** typecheck 0 (6 projects) · `npm test` exit 0 (general 1796: 1795 pass / 1 named skip; PGlite
+87/87) · api-cf 25/25 · secret-scan PASS.

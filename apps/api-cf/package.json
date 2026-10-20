@@ -10,6 +10,7 @@
     "bundle": "wrangler deploy --dry-run --outdir dist -c wrangler.jsonc"
   },
   "dependencies": {
+    "@noble/hashes": "2.4.0",
     "postgres": "^3.4.9"
   }
 }

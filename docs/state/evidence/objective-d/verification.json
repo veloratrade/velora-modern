@@ -36,10 +36,11 @@
   "deployed": {
     "api_worker": {
       "name": "velora-api-staging",
-      "version_id": "364ac8ee-d87e-4730-81a8-b8e513d47315",
+      "version_id": "14228323-86ee-4565-845d-b4e56fd6e295",
       "url": "https://velora-api-staging.yadgar-s-ict.workers.dev",
       "deployed_at": "2026-10-20T16:42:47Z",
-      "secret": "JWT_SECRET set via `wrangler secret put` (value generated in-sandbox, piped on stdin, never printed, never in git)"
+      "secret": "JWT_SECRET set via `wrangler secret put` (value generated in-sandbox, piped on stdin, never printed, never in git)",
+      "note": "redeployed with WorkersHasher (pure-JS Argon2id) after a real outage was found \u2014 see workers_hashing_bug"
     },
     "panel_worker": {
       "name": "velora-modern-staging",
@@ -54,9 +55,7 @@
   },
   "live_tests_objective_d_item_5": "NOT RUN \u2014 nothing was deployed, so there is no staging surface to test. A rendered login page or a green local gate is explicitly not accepted as success",
   "blockers_in_order": [
-    "verified staging admin credentials (or the owner runs the login in a browser) \u2014 the ONLY thing left before the panel's live acceptance test can pass; nothing was created or guessed",
-    "migration 0042 still absent from Neon (gates the bot's post-edit/result screens, not the panel)",
-    "the sandbox needs swap (or >=4 GB RAM) for `opennextjs-cloudflare build`: 4 GB of swap was added locally and the build then completed \u2014 this is the documented prerequisite for rebuilding the panel"
+    "migration 0042 still absent from Neon (bot post-edit/result screens, not the panel)"
   ],
   "files_changed": [
     "apps/api/src/kernel/server.ts",
@@ -128,25 +127,41 @@
       },
       {
         "test": "valid login creates a session",
-        "verdict": "BLOCKED",
-        "evidence": "the owner reported on 2026-10-20 that no staging account credentials exist ('\u0631\u0645\u0632 \u0646\u0627\u0645 \u06a9\u0627\u0631\u0628\u0631\u06cc \u0646\u062f\u0627\u0631\u0645'). No account was created and no password guessed."
+        "verdict": "PASS",
+        "evidence": "POST /api/v1/auth/login (admin@velora.test, through the panel origin) \u2192 200, data.tokens.accessToken present, expiresIn 900, and Set-Cookie __Host-velora_refresh=\u2026 (Path=/; HttpOnly; Secure; SameSite=Strict) with the legacy refresh_token cleared"
       },
       {
-        "test": "authorized admin opens the panel and performs main operations",
-        "verdict": "BLOCKED",
-        "evidence": "same \u2014 and there is no supported way to create the FIRST admin through the product: OwnershipService.claim requires the acting row to ALREADY have role exactly 'admin' (apps/api/src/auth/ownershipService.ts \u00a74), AdminUserService requires an authenticated admin to invite, and no ops script seeds one. See first_admin_gap."
+        "test": "session validates",
+        "verdict": "PASS",
+        "evidence": "GET /api/v1/auth/session with the refresh cookie \u2192 {authenticated:true, role:'admin'}"
       },
       {
-        "test": "non-admin blocked from the admin panel (live)",
-        "verdict": "NOT VERIFIED live",
-        "evidence": "needs a non-admin session (which needs a verified account). Proven at the API layer: apps/api/src/admin/adminConsoleRoutes.test.ts (anonymous 401, plain user 403 on every console route, mutations included)"
+        "test": "authorized admin opens the panel",
+        "verdict": "PASS",
+        "evidence": "GET /admin with the admin cookie \u2192 200, 10,633 bytes of the real admin page (Persian UI: '\u0645\u062f\u06cc\u0631\u06cc\u062a'); /en/admin \u2192 200 as well"
       },
       {
-        "test": "logout / session expiry with a live session",
-        "verdict": "NOT VERIFIED live",
-        "evidence": "needs a live session; the API-layer rotation/expiry tests pass (apps/api/src/auth/*)"
+        "test": "authorized admin performs main operations",
+        "verdict": "PASS",
+        "evidence": "GET /api/v1/admin/overview \u2192 200 (5 users, 1 admin); /admin/rbac/self \u2192 200 with the permission list; /admin/users \u2192 200; PATCH /admin/users/12/status suspend \u2192 200, reactivate \u2192 200, each recorded in audit_log (USER_STATUS_CHANGED, actor_user_id 11 \u2192 target 12, before/after state)"
+      },
+      {
+        "test": "non-admin blocked from the admin panel",
+        "verdict": "PASS",
+        "evidence": "signed in as rbac-probe@velora.test (role user): GET /api/v1/admin/overview and /admin/users \u2192 403 FORBIDDEN; GET /admin and /en/admin \u2192 302 to /dashboard (authenticated but not authorized \u2014 not to /login); /dashboard \u2192 200"
+      },
+      {
+        "test": "logout ends the session",
+        "verdict": "PASS",
+        "evidence": "POST /api/v1/auth/logout \u2192 200 {loggedOut:true}; the SAME cookie then: /auth/session \u2192 authenticated:false, POST /auth/refresh \u2192 401 INVALID_TOKEN, GET /admin \u2192 302 /login"
+      },
+      {
+        "test": "session invalidation/expiry mechanism",
+        "verdict": "PASS",
+        "evidence": "after a fresh login, the session row was revoked in the database (user_sessions.revoked_at=now(), expires_at was 2026-11-19): session probe \u2192 authenticated:false, refresh \u2192 401, /admin \u2192 302 /login. (Calendar expiry not waited out \u2014 the same revocation check is what expiry relies on)"
       }
-    ]
+    ],
+    "verdict": "ALL Acceptance items for Objective D item 5 now PASS on the real staging host"
   },
   "ci": {
     "run": "ci @ 0c1db06 \u2014 success (GitHub Actions, public repo)",
@@ -160,6 +175,25 @@
       "DB-level provisioning by the owner (Neon staging credentials): insert/update a users row with role='admin', status='active', email_verified_at set, and a password_hash produced by the app's own VeloraHasher so the password policy is not bypassed",
       "a reviewed ops script that does the above with the app's own hasher (not written here \u2014 it creates an account, which is an owner decision)"
     ],
-    "not_done_on_purpose": "no account, password, token or role was invented; nothing was written to the staging database"
+    "not_done_on_purpose": "no account, password, token or role was invented; nothing was written to the staging database",
+    "resolved": {
+      "at": "2026-10-20T17:13Z",
+      "how": "owner authorised a database-level provisioning; the password hash was produced by the app's own VeloraHasher (Argon2id, ADR-005 parameters) and the row carries role='admin', status='active', email_verified_at=now()",
+      "account": {
+        "email": "admin@velora.test",
+        "user_id": 11,
+        "role": "admin",
+        "verified": true
+      },
+      "tool": "a single-use local script (velora-ops/admin-provision/provision.mts) using the owner's Neon key; it refuses to run if any admin already exists, and the deployed credential it replaced was removed \u2014 no admin-minting endpoint exists on Cloudflare",
+      "audit_note": "no audit_log row was written for the provisioning itself: that table's action vocabulary is CHECK-constrained and actor_user_id is NOT NULL. The first real audit rows are the admin's own actions (USER_STATUS_CHANGED, actor 11)"
+    }
+  },
+  "workers_hashing_bug": {
+    "found": "2026-10-20, on staging",
+    "symptom": "POST /api/v1/auth/register \u2192 500 INTERNAL; login could not have rehashed either",
+    "cause": "VeloraHasher uses hash-wasm, which the Workers runtime refuses: 'WebAssembly.compile(): Wasm code generation disallowed by embedder'. needsRehash() sends every successful bcrypt login through hash() too, so BOTH credential paths were broken while every other route looked healthy",
+    "fix": "apps/api-cf/src/workersHasher.ts \u2014 Argon2id in pure TypeScript (@noble/hashes/argon2.js) producing the identical $argon2id$v=19$m=19456,t=2,p=1$\u2026 encoding, bcryptjs for $2a/$2b/$2y, constant-time compare, parameters read from each hash so a future cost bump still verifies old credentials",
+    "proof": "apps/api-cf/src/workersHasher.test.ts (6 tests): Worker\u2192Node and Node\u2192Worker verification both directions, identical encoded shape, bcrypt incl. Legacy $2y$, foreign/malformed hashes refused; plus a live register on staging returning 201 and a live admin login returning 200"
   }
 }
