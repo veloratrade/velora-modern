@@ -41,8 +41,19 @@ import {
  * it is pinned by `proxy.headers.test.ts`.
  */
 import { resolveApiOrigin } from "./lib/apiOrigin";
-/** A page render must not wait on a hung probe; expiry fails closed. */
-const SESSION_PROBE_TIMEOUT_MS = 1500;
+/**
+ * A page render must not wait on a hung probe; expiry fails closed.
+ *
+ * 1500 ms was too tight for the two cold-start taxes this deployment pays on the free plan: a Worker
+ * isolate that has not served lately, and a Neon database that has scaled to zero after five idle
+ * minutes. Measured on staging (2026-10-21, after a 5-minute idle): the probe took 1.69 s, 1.81 s and
+ * 0.98 s — so a legitimate session was being refused and the browser bounced back to /login right after
+ * a successful login. 4 s clears the measured cold path with room to spare, and the probe is retried
+ * once before the gate fails closed.
+ */
+const SESSION_PROBE_TIMEOUT_MS = 4000;
+/** One retry: a cold isolate answers the second attempt quickly. Both must fail for a refusal. */
+const SESSION_PROBE_ATTEMPTS = 2;
 
 /**
  * Ask the API whether this request carries a live session.
@@ -55,27 +66,35 @@ async function probeSession(
   request: NextRequest,
 ): Promise<{ ok: true; authenticated: boolean; role: string | null } | { ok: false }> {
   const cookie = request.headers.get("cookie");
-  try {
-    const origin = resolveApiOrigin();
-    if (origin === null) return { ok: false };
-    const res = await fetch(`${origin}/api/v1/auth/session`, {
-      method: "GET",
-      headers: cookie === null ? {} : { cookie },
-      cache: "no-store",
-      signal: AbortSignal.timeout(SESSION_PROBE_TIMEOUT_MS),
-    });
-    if (res.status !== 200) return { ok: false };
-    const payload: unknown = await res.json();
-    const data = (payload as { data?: unknown }).data;
-    if (data === null || typeof data !== "object") return { ok: false };
-    const { authenticated, role } = data as { authenticated?: unknown; role?: unknown };
-    if (typeof authenticated !== "boolean") return { ok: false };
-    return { ok: true, authenticated, role: typeof role === "string" ? role : null };
-  } catch {
-    // Unreachable / timed out / not JSON: fail closed — never serve protected
-    // HTML on an unanswered check (Legacy: `$sessionIsValid = false`).
-    return { ok: false };
+  const origin = resolveApiOrigin();
+  if (origin === null) return { ok: false };
+
+  // Every attempt must produce a POSITIVE answer. A 200 that says "not authenticated" is an answer, not
+  // a failure, so it is returned immediately; only a transport-level failure (timeout, refused, non-JSON)
+  // is retried. The gate still fails CLOSED when no attempt produced an answer.
+  let lastFailure = false;
+  for (let attempt = 1; attempt <= SESSION_PROBE_ATTEMPTS; attempt += 1) {
+    try {
+      const res = await fetch(`${origin}/api/v1/auth/session`, {
+        method: "GET",
+        headers: cookie === null ? {} : { cookie },
+        cache: "no-store",
+        signal: AbortSignal.timeout(SESSION_PROBE_TIMEOUT_MS),
+      });
+      if (res.status !== 200) return { ok: false };
+      const payload: unknown = await res.json();
+      const data = (payload as { data?: unknown }).data;
+      if (data === null || typeof data !== "object") return { ok: false };
+      const { authenticated, role } = data as { authenticated?: unknown; role?: unknown };
+      if (typeof authenticated !== "boolean") return { ok: false };
+      return { ok: true, authenticated, role: typeof role === "string" ? role : null };
+    } catch {
+      // Unreachable / timed out / not JSON. Retry once; if the last attempt also failed, deny.
+      lastFailure = true;
+    }
   }
+  // Fail closed — never serve protected HTML on an unanswered check (Legacy: `$sessionIsValid = false`).
+  return lastFailure ? { ok: false } : { ok: false };
 }
 
 type GateVerdict =

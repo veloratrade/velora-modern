@@ -1783,3 +1783,28 @@ INVALID_CREDENTIALS` → `POST /register` `201` (hash produced by the database) 
 
 **Gates:** typecheck 0 (6 projects) · `npm test` exit 0 (general 1806: 1805 pass / 1 named skip; PGlite
 87/87) · api-cf 31/31 · domain passwords 10/10 · secret-scan PASS.
+
+## AC-D7 — 2026-10-21 · "Can't get into the panel": the session gate refused COLD sessions
+
+- **Commits:** this one. **Deployed:** `velora-modern-staging` → `b4a493d9-1bfe-43c7-b677-1c54a9daceb0`.
+
+**The report was accurate, and the cause was not the password.** `auth_events` shows the owner's browser
+(Android Chrome) logging in **successfully twice** on 2026-10-21 (03:19:59Z and 03:25:37Z, user 13), so the
+credential was accepted — the refusal happened *after* login.
+
+**Root cause.** `apps/web/src/proxy.ts` gates every protected page by probing `GET /api/v1/auth/session`
+with a **1500 ms** timeout and failing **closed**. On the free plan two cold-start taxes stack up: a Worker
+isolate that has not served recently, and a Neon database that has scaled to zero after five idle minutes.
+Measured cold on staging: **1.69 s, 1.81 s, 0.98 s**. So a perfectly valid session was refused and the
+browser was bounced to `/login` immediately after a successful login — a loop that looks exactly like
+"wrong password".
+
+**Fix.** `SESSION_PROBE_TIMEOUT_MS` 1500 → **4000 ms**, plus **one retry** before denying. Only
+transport-level failures are retried; a `200 {"authenticated":false}` is an *answer* and returns at once. The
+gate still fails closed, which `apps/web/src/proxy.headers.test.ts` pins against an unreachable API.
+
+**Verified cold, after the fix:** login `200` (3.3 s) → `/dashboard` `200` (1.86 s) → `/admin` `200` (1.38 s)
+→ `/settings` `200` (2.00 s). Every one of those was at or above the old budget.
+
+**Gates:** typecheck 0 (6 projects) · `npm test` exit 0 (general 1806: 1805 pass / 1 named skip; PGlite
+87/87) · secret-scan PASS.

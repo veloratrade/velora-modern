@@ -44,7 +44,7 @@
     },
     "panel_worker": {
       "name": "velora-modern-staging",
-      "version_id": "fe2f82b6-b335-4c83-8995-191a5b71e0c7",
+      "version_id": "b4a493d9-1bfe-43c7-b677-1c54a9daceb0",
       "url": "https://velora-modern-staging.yadgar-s-ict.workers.dev",
       "deployed_at": "2026-10-20T16:44:50Z",
       "built_by": "@opennextjs/cloudflare 1.20.12 + next 16.4.1 (9421 KiB / 1855 KiB gzip, startup 16 ms)",
@@ -258,5 +258,13 @@
     "legacy_rows": "argon2id rows still verify through the in-worker fallback (workersHasher); the two admin rows were converted to bcrypt so no login takes that slow path",
     "live_check": "8 consecutive logins succeeded before the API's own auth:login limiter (8 per 300 s) answered 429 TOO_MANY_REQUESTS \u2014 no 1102 at all; after the window, login 200 \u2192 /admin 200 \u2192 /admin/overview 200 \u2192 session authenticated:true \u2192 wrong password 401 INVALID_CREDENTIALS \u2192 register 201 (DB-side hash) \u2192 logout 200",
     "artifacts": "apps/api-cf/src/pgCryptoHasher.ts + 6 unit tests; workersHasher.ts + 6 cross-verification tests; 4 domain tests for the policy"
+  },
+  "session_gate_cold_start": {
+    "symptom_reported": "\"\u0646\u0645\u06cc\u0634\u0647 \u0648\u0627\u0631\u062f \u067e\u0646\u0644 \u0628\u0634\u0645\" \u2014 the owner could not get past the login screen",
+    "what_the_logs_showed": "auth_events: the owner's browser (Android Chrome) logged in SUCCESSFULLY twice on 2026-10-21 (03:19:59Z, 03:25:37Z, user 13). So the credentials were right and the API accepted them \u2014 the failure was AFTER login.",
+    "root_cause": "the panel's edge gate (src/proxy.ts) probes GET /api/v1/auth/session with a 1500 ms timeout and fails CLOSED. Measured cold on staging after a 5-minute idle (Neon Free scales to zero): 1.69 s, 1.81 s, 0.98 s. A legitimate session was therefore refused on the cold path and the browser was redirected back to /login immediately after a successful login.",
+    "fix": "SESSION_PROBE_TIMEOUT_MS 1500 -> 4000, plus one retry before denying (only a transport-level failure is retried; a 200 saying 'not authenticated' is an answer and returns at once). The gate still fails CLOSED \u2014 apps/web/src/proxy.headers.test.ts pins that with an unreachable API.",
+    "verified_cold_after_fix": "/dashboard 200 in 1.86 s, /admin 200 in 1.38 s, /settings 200 in 2.00 s \u2014 all previously above or near the old budget",
+    "deployed": "velora-modern-staging b4a493d9-1bfe-43c7-b677-1c54a9daceb0"
   }
 }
