@@ -1,0 +1,20 @@
+# Objective E — live checks of the Cloudflare staging pair (2026-10-21)
+
+Hosts: panel https://velora-modern-staging.yadgar-s-ict.workers.dev · API https://velora-api-staging.yadgar-s-ict.workers.dev
+
+## API health
+GET /health → HTTP 200
+
+## The API's OWN 404 envelope (not a platform envelope)
+{"status":"error","data":null,"error":{"code":"NOT_FOUND","message":"no such route","requestId":"36650257-a873-4ca2-b2f6-1ae6b4fe1cf9"},"timestamp":"2026-10-21T20:07:29+00:00"}
+
+## Panel login page
+GET /login → HTTP 200
+
+## The panel's /api/* hop reaching the real API (a wrong password, never a valid one)
+{"status":"error","data":null,"error":{"code":"INVALID_CREDENTIALS","message":"Invalid credentials.","requestId":"ecbf783b-c156-4259-8d05-4aabf977da48"},"timestamp":"2026-10-21T20:07:32+00:00"}
+HTTP 401
+
+Reading: the answer carries the API kernel's own {status,data,error{code,message,requestId},timestamp}
+envelope with INVALID_CREDENTIALS — so the request REACHED the API. The 404 "Application not found"
+platform envelope of the original defect is gone.

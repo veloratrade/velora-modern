@@ -1918,3 +1918,21 @@ bytes the user signed off on.
 `-1003245304814` still requires the owner's explicit approval in the flow. The bias card keeps a footnote counting
 non-checklist fields the template names but no data supplies. Screenshot OCR stays refused on the Worker
 (`IMAGE_NOT_ANONYMIZED`).
+
+### AC-D10a — 2026-10-21 · two follow-ups recorded with their own evidence
+
+**Objective E (panel + API on Cloudflare staging), re-checked live** — transcript
+`docs/state/evidence/round8/objective-e-panel-live.txt`: `GET /health` on `velora-api-staging` → 200; an unknown
+API path answers the **kernel's own** `{status,data,error{code,message,requestId},timestamp}` envelope
+(`NOT_FOUND`), not a platform envelope; `GET /login` on `velora-modern-staging` → 200; and a login POST through
+the panel's `/api/*` hop comes back `401 INVALID_CREDENTIALS` **from the API**. That last line is the one that
+matters: the request reached the real API, and the `404 Application not found` platform envelope that defined the
+original defect is gone. A wrong password was used on purpose — no credential was created, guessed or reused.
+
+**Objective C (image anonymiser), decided rather than postponed** —
+`docs/state/evidence/round8/objective-c-anonymizer-decision.md`. `sharp@0.35.5` is present only transitively
+through `apps/web` → `next@16.4.1`; it is not a declared dependency of `apps/api` and must not be imported as if
+it were. Adding it would not help the deployed Worker (native binding, no `workerd` build) and would turn an
+honest, fail-closed refusal into a difference between two hosts. The capability stays **BLOCKED on a
+Workers-compatible redaction primitive**; the user-visible behaviour stays `IMAGE_NOT_ANONYMIZED`, and local OCR
+remains the no-egress path.
