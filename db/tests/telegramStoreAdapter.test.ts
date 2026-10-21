@@ -586,3 +586,31 @@ test("an image file id is written WITH the transition and can never be wiped by 
     await h.engine.close();
   }
 });
+
+// ── THE PENDING-FLOW UPSERT ───────────────────────────────────────────────────────────────────────────
+// REGRESSION (found 2026-10-21 by driving the real bot end to end): `setPendingFlow` bound ONE parameter to
+// both `flow_started_at` and `updated_at`. Clearing a flow sends `null` for the start time BY DEFINITION, so
+// `/cancel` — the command that exists only to clear a flow — raised 23502 (not-null violation on
+// `updated_at`) and the user got "خطایی رخ داد" instead of a cancellation. Both directions are pinned
+// below, because the bug lives in the pair: starting a flow always passed (the parameter was non-null) and
+// only the clearing path was broken.
+test("a flow can be started AND cleared: updated_at never borrows the flow's start time", async () => {
+  const h = await harness();
+  try {
+    const alice = await h.user("flow@velora.test");
+
+    await h.store.setPendingFlow({ userId: alice, flow: { kind: "tpl_new_name", name: null, body: null, templateId: null, postId: null, startedAt: at(1) }, at: at(1) });
+    assert.equal((await h.store.getPostPreferences(alice)).pendingFlow?.kind, "tpl_new_name");
+
+    // The clearing path: this is what `/cancel` and every finished flow call.
+    await h.store.setPendingFlow({ userId: alice, flow: null, at: at(2) });
+    assert.equal((await h.store.getPostPreferences(alice)).pendingFlow, null, "the flow is cleared, not kept");
+
+    // And it is reusable afterwards — the row is an upsert keyed by user, so a second start must work too.
+    // `tpl_edit_body` is the shape that carries a template id (0042's check requires it for this kind).
+    await h.store.setPendingFlow({ userId: alice, flow: { kind: "tpl_edit_body", name: null, body: null, templateId: "1", postId: null, startedAt: at(3) }, at: at(3) });
+    assert.equal((await h.store.getPostPreferences(alice)).pendingFlow?.kind, "tpl_edit_body");
+  } finally {
+    await h.engine.close();
+  }
+});

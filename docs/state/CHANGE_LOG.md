@@ -1846,3 +1846,29 @@ never satisfy the bot. The owner chose to grant consent on user 7 rather than re
 movement, and reversible with `UPDATE users SET ai_consent_at = NULL WHERE id = 7`). After the update the same
 production call ran with the REAL consent store and no test doubles: `status=generated`,
 `gemini-3.6-flash`, 18.8 s, reply «دستیار با موفقیت متصل شد.».
+
+## AC-D9 — 2026-10-21 · the whole bot driven end to end; `/cancel` was broken
+
+**Method.** `bot-suite.mts` composes the deployed bot's own runtime (`composeRuntime`) over the real staging
+database and the real Gemini key, and replaces the Bot API with a local recorder: 23 synthetic updates go in,
+every outbound call is captured and printed, nothing is sent to Telegram. Telegram itself was checked live:
+`getMe` → `@MyVeloratradeBot`, `getWebhookInfo` → the Worker URL, **0 pending updates, no last error**.
+
+**Bug 1 — `/cancel` never worked when there was something to cancel.** `PgTelegramStore.setPendingFlow` bound
+ONE parameter (`$7`) to both `flow_started_at` and `updated_at`. Clearing a flow passes `null` as the start
+time *by definition*, so the upsert raised **23502 (not-null violation on `updated_at`)** and the user got
+«⚠️ خطایی رخ داد» instead of «لغو شد». `input.at` was in the input and simply never bound. Fixed with its own
+parameter, and pinned by `db/tests/telegramStoreAdapter.test.ts` (start → clear → start again).
+
+**Bug 2 — the analysis path inherited a rate-limited model.** `AiCoachService` builds `GeminiAiProvider`
+directly, so `ai_feature_routes.model` never applied to `/analyze`; the default was `gemini-3.6-flash`. Twelve
+measured calls: `gemini-3.6-flash` **0/4** (503/429), `gemini-3.5-flash` **0/4** (429), `gemini-flash-latest`
+**0/4** (503/429), `gemini-flash-lite-latest` **4/4 in ~2.0 s**. Default and all six route rows are now
+`gemini-flash-lite-latest`; a transient-failure retry policy (3 attempts inside ONE deadline, 429/5xx only) was
+added, with five tests covering retry, non-retry of 404, the attempt cap and the budget floor.
+
+**Result:** 23 cases, 21 pass. Analysis generated live in 3.2 s with the real numbers; the voice path
+transcribes; `/cancel`, all menu buttons and every journal command answer correctly.
+
+**Reported, not hidden:** screenshot OCR is refused by design on the Worker (`IMAGE_NOT_ANONYMIZED`, no
+anonymizer in workerd); `/post` stays blocked with `CHANNEL_UNVERIFIED` and 23 unfilled fields.

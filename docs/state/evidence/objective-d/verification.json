@@ -309,5 +309,52 @@
     },
     "live_call_with_real_consent": "user 7, production classes, real consent store, no doubles: status=generated, gemini-3.6-flash, 18.8 s, reply \u00ab\u062f\u0633\u062a\u06cc\u0627\u0631 \u0628\u0627 \u0645\u0648\u0641\u0642\u06cc\u062a \u0645\u062a\u0635\u0644 \u0634\u062f.\u00bb (197/39 tokens)",
     "remaining_unverified": "the Telegram transport itself: the owner must send /analyze (or a voice note) in the chat; everything up to the transport is proven"
+  },
+  "bot_full_suite_2026_10_21": {
+    "method": "the deployed bot's own code (composeRuntime from apps/worker-cf) against the real staging database and the real Gemini key, with the Bot API replaced by a local recorder that captures (never sends) every outbound call; Telegram itself checked live with getMe/getWebhookInfo",
+    "cases": 23,
+    "commands_passing": [
+      "/start",
+      "/help",
+      "/journal",
+      "plain-text journal entry",
+      "/last",
+      "/history",
+      "/stats",
+      "/stats week",
+      "/checklist",
+      "/checklist coverage",
+      "/trade <id>",
+      "/settings",
+      "/channel",
+      "/channel list",
+      "/template",
+      "/cancel",
+      "menu:home",
+      "menu:stats",
+      "voice note (transcribe)",
+      "photo"
+    ],
+    "live_ai_call": "coach/analysis generated with gemini-flash-lite-latest in 3.2 s (Persian summary citing the real numbers)",
+    "bugs_found_and_fixed": [
+      {
+        "bug": "/cancel NEVER worked when there was something to cancel",
+        "cause": "PgTelegramStore.setPendingFlow bound ONE parameter ($7) to both flow_started_at and updated_at; clearing a flow passes null for the start time by definition, so the upsert raised 23502 not-null violation on updated_at",
+        "effect": "user saw \u00ab\u26a0\ufe0f \u062e\u0637\u0627\u06cc\u06cc \u0631\u062e \u062f\u0627\u062f\u00bb instead of \u00ab\u0644\u063a\u0648 \u0634\u062f\u00bb",
+        "fix": "own parameter ($8) for updated_at = input.at",
+        "regression_test": "db/tests/telegramStoreAdapter.test.ts \u2014 'a flow can be started AND cleared'"
+      },
+      {
+        "bug": "the analysis path could not pick a model, so it inherited a rate-limited default",
+        "cause": "AiCoachService constructs GeminiAiProvider directly, so no ai_feature_routes.model applies; the default was gemini-3.6-flash",
+        "measurement": "12 calls: gemini-3.6-flash 0/4 (503/429), gemini-3.5-flash 0/4 (429), gemini-flash-latest 0/4 (503/429), gemini-flash-lite-latest 4/4 in ~2.0 s",
+        "fix": "default model = gemini-flash-lite-latest in geminiProvider and mediaInterpreter; all six route rows set to it as well"
+      }
+    ],
+    "known_limitations_reported": [
+      "photo/screenshot AI extraction is REFUSED by design on the Worker: the anonymizer is UnavailableImageAnonymizer (no redaction in workerd), so the ledger records IMAGE_NOT_ANONYMIZED and the user is told to send text. This is a privacy decision, not a fault \u2014 but it means screenshot OCR does not work on Cloudflare.",
+      "/post shows \u26d4 CHANNEL_UNVERIFIED and 23 unfilled fields: the channel is not verified and the daily-bias data is incomplete, so publishing stays blocked by design.",
+      "gemini free-tier models are genuinely flaky (503/429); the new retry policy makes short bursts recover, but a sustained 429 still surfaces as \u00ab\u062a\u062d\u0644\u06cc\u0644 \u0628\u0627 \u062e\u0637\u0627 \u0645\u0648\u0627\u062c\u0647 \u0634\u062f\u00bb."
+    ]
   }
 }

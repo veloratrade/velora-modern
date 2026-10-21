@@ -922,7 +922,7 @@ export class PgTelegramStore implements TelegramStore {
     await this.q(
       `INSERT INTO telegram_post_preferences
               (user_id, flow_kind, flow_name, flow_body, flow_template_id, flow_post_id, flow_started_at, updated_at)
-            VALUES ($1::bigint, $2, $3, $4, $5::bigint, $6::bigint, $7::timestamptz, $7::timestamptz)
+            VALUES ($1::bigint, $2, $3, $4, $5::bigint, $6::bigint, $7::timestamptz, $8::timestamptz)
        ON CONFLICT (user_id) DO UPDATE SET
               flow_kind = EXCLUDED.flow_kind,
               flow_name = EXCLUDED.flow_name,
@@ -939,6 +939,11 @@ export class PgTelegramStore implements TelegramStore {
         f === null || f.templateId === null ? null : f.templateId,
         f === null || f.postId === null ? null : f.postId,
         f === null ? null : f.startedAt.toISOString(),
+        // `updated_at` gets its OWN parameter. It used to reuse `$7`, which is NULL by definition when the
+        // flow is being CLEARED — so `/cancel` raised 23502 (not-null violation) precisely in the case it
+        // exists for, and the user saw "خطایی رخ داد" instead of the cancellation. Found by running the bot
+        // end to end on 2026-10-21; `at` was already in the input and simply never bound.
+        input.at.toISOString(),
       ],
     );
   }

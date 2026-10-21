@@ -131,7 +131,7 @@ export interface GeminiInterpreterOptions {
  * `gemini-3.6-flash` answered 200 on the same key, and the per-route `model` column still wins wherever an
  * operator sets one.
  */
-const DEFAULT_GEMINI_MODEL = "gemini-3.6-flash";
+const DEFAULT_GEMINI_MODEL = "gemini-flash-lite-latest";
 const DEFAULT_GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 /**

@@ -58,7 +58,7 @@ test("the key travels in a header, never in the URL, the body or an error", asyn
   // The facts WERE sent (that is the point of the call) but nothing else was.
   assert.ok((call.init?.body ?? "").includes("tradeCount"));
   // And the model is named in the URL, so the ledger's `model` is not a guess.
-  assert.ok(call.url.includes("/models/gemini-3.6-flash:generateContent"));
+  assert.ok(call.url.includes("/models/gemini-flash-lite-latest:generateContent"));
 });
 
 test("a structured answer becomes an insight, with usage recorded and no invented cost", async () => {
@@ -66,7 +66,7 @@ test("a structured answer becomes an insight, with usage recorded and no invente
   const provider = new GeminiAiProvider({ apiKey: KEY, fetchImpl: fetchImpl as never });
   const result = await provider.generate(REQUEST);
 
-  assert.equal(result.model, "gemini-3.6-flash");
+  assert.equal(result.model, "gemini-flash-lite-latest");
   assert.equal(result.insight["summary"], "two losing trades");
   assert.deepEqual(result.insight["weaknesses"], ["late entries"]);
   assert.equal(result.tokensIn, 120);
@@ -139,4 +139,64 @@ test("no key means no provider — refused before any request", async () => {
   void fetchImpl;
   const provider = new GeminiAiProvider({ apiKey: KEY, fetchImpl: fetchImpl as never });
   assert.equal(provider.name, "gemini");
+});
+
+// ── TRANSIENT UPSTREAM FAILURES ────────────────────────────────────────────────────────────────────────
+// Measured live on 2026-10-21: a valid key got `503 "This model is currently experiencing high demand"`
+// on `gemini-3.6-flash` twice in a row, minutes after the same model answered 200. Without a retry that
+// becomes a user-facing "analysis failed" for a problem that fixes itself. These tests pin the policy:
+// transient statuses are retried within ONE deadline, permanent ones are not retried at all.
+
+function errorResponse(status: number) {
+  return { ok: false, status, json: async () => ({}) };
+}
+
+test("a 503 burst that clears is a success, not a failed analysis", async () => {
+  const { calls, fetchImpl } = fakeFetch([
+    errorResponse(503),
+    errorResponse(503),
+    providerResponse({ summary: "ok", strengths: [], weaknesses: [], patterns: [], risk_notes: [], suggestions: [] }),
+  ]);
+  const provider = new GeminiAiProvider({ apiKey: KEY, fetchImpl: fetchImpl as never, timeoutMs: 8_000 });
+  const result = await provider.generate({ userId: "u", promptVersion: "v1", facts: {} });
+  assert.equal(result.model, "gemini-flash-lite-latest");
+  assert.equal(calls.length, 3);
+});
+
+test("a 429 is retried as well — it is rate, not shape", async () => {
+  const { calls, fetchImpl } = fakeFetch([
+    errorResponse(429),
+    providerResponse({ summary: "ok", strengths: [], weaknesses: [], patterns: [], risk_notes: [], suggestions: [] }),
+  ]);
+  const provider = new GeminiAiProvider({ apiKey: KEY, fetchImpl: fetchImpl as never, timeoutMs: 8_000 });
+  await provider.generate({ userId: "u", promptVersion: "v1", facts: {} });
+  assert.equal(calls.length, 2);
+});
+
+test("a permanent status is NOT retried: a retired model must not be hammered", async () => {
+  const { calls, fetchImpl } = fakeFetch([errorResponse(404)]);
+  const provider = new GeminiAiProvider({ apiKey: KEY, fetchImpl: fetchImpl as never, timeoutMs: 8_000 });
+  await assert.rejects(
+    () => provider.generate({ userId: "u", promptVersion: "v1", facts: {} }),
+    (err: unknown) => err instanceof AiProviderTransportError && err.status === 404,
+  );
+  assert.equal(calls.length, 1);
+});
+
+test("retries are bounded: three transient failures stay a classified failure", async () => {
+  const { calls, fetchImpl } = fakeFetch([errorResponse(503)]);
+  const provider = new GeminiAiProvider({ apiKey: KEY, fetchImpl: fetchImpl as never, timeoutMs: 8_000 });
+  await assert.rejects(
+    () => provider.generate({ userId: "u", promptVersion: "v1", facts: {} }),
+    (err: unknown) => err instanceof AiProviderTransportError && err.status === 503,
+  );
+  assert.equal(calls.length, 3);
+});
+
+test("no attempt starts with almost no budget left", async () => {
+  const { calls, fetchImpl } = fakeFetch([errorResponse(503)]);
+  // 1 s of budget: below MIN_ATTEMPT_BUDGET_MS, so exactly one attempt is made and the wait is skipped.
+  const provider = new GeminiAiProvider({ apiKey: KEY, fetchImpl: fetchImpl as never, timeoutMs: 1_000 });
+  await assert.rejects(() => provider.generate({ userId: "u", promptVersion: "v1", facts: {} }));
+  assert.equal(calls.length, 1);
 });

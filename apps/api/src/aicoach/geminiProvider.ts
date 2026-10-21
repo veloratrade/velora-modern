@@ -37,6 +37,24 @@ import {
 /** Bounded: an analysis runs inside a user-visible request, not a batch job. */
 export const GEMINI_GENERATION_TIMEOUT_MS = 20_000;
 
+/**
+ * Upstream answers that mean "try again", not "your request is wrong".
+ *
+ * Measured on 2026-10-21 with a valid key: `gemini-3.6-flash` answered **503 "This model is currently
+ * experiencing high demand"** on two of two calls, then 200 minutes later, while `gemini-flash-lite-latest`
+ * answered 200 twice. A single 503 therefore must not become a user-facing "analysis failed" — the provider
+ * is asking to be retried, and that is exactly what a transient-failure policy is for. 429 is the same
+ * class (rate, not shape). Everything else (400, 403, 404) is a real answer and is never retried: a
+ * retired model must not be hammered.
+ */
+export const GEMINI_RETRYABLE_STATUSES: readonly number[] = [429, 500, 502, 503, 504];
+/** Total attempts, not "extra" ones. Three tries cost at most two short waits on a transient fault. */
+export const GEMINI_MAX_ATTEMPTS = 3;
+/** Waits between attempts; the last one is dropped when the deadline is closer than that. */
+const RETRY_DELAYS_MS: readonly number[] = [400, 900];
+/** Attempts only start while this much of the caller's budget is left. */
+const MIN_ATTEMPT_BUDGET_MS = 3_000;
+
 type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal }) => Promise<{
   ok: boolean;
   status: number;
@@ -58,10 +76,13 @@ export interface GeminiProviderOptions {
  * keys: on 2026-10-21 a live call with the owner's key answered 404 "This model models/gemini-2.0-flash is
  * no longer available to new users". A retired default is not a cosmetic problem — every path that does
  * not carry a per-route model would fail with PROVIDER_UNAVAILABLE, which reads like the key is broken.
- * `gemini-3.6-flash` answered 200 on the same key, and the per-route `model` column still wins wherever an
- * operator sets one.
+ * `gemini-3.6-flash` answered 200 on the same key — but only sometimes: 12 measured calls on 2026-10-21 gave
+ * `503 high demand` and `429` for `gemini-3.6-flash`, `gemini-3.5-flash` and `gemini-flash-latest`, while
+ * `gemini-flash-lite-latest` answered **4/4 in ~2 s**. A default that is occasionally retired is bad; a default
+ * that is occasionally rate-limited is worse, because it looks like a bug in this code. The default is therefore
+ * the stable `-latest` alias, and the per-route `model` column still wins wherever an operator sets one.
  */
-const DEFAULT_MODEL = "gemini-3.6-flash";
+const DEFAULT_MODEL = "gemini-flash-lite-latest";
 const DEFAULT_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 /**
@@ -81,6 +102,8 @@ const SYSTEM_PROMPT = [
   "- Never state or imply a profit guarantee, an expected return, or advice to take a specific position.",
   "- Write in the language of the facts' `locale` field when present, otherwise in English.",
 ].join("\n");
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class GeminiAiProvider implements AiProvider {
   readonly name = "gemini" as const;
@@ -118,24 +141,52 @@ export class GeminiAiProvider implements AiProvider {
       },
     });
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
-    let response: Awaited<ReturnType<FetchLike>>;
-    try {
-      response = await this.#fetch(`${this.#baseUrl}/models/${encodeURIComponent(this.model)}:generateContent`, {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-goog-api-key": this.#apiKey },
-        body,
-        signal: controller.signal,
-      });
-    } catch (err) {
-      // The message of a fetch failure can embed the URL; the URL carries no key
-      // (the key travels in a header), but the classification is what callers
-      // need, so nothing from the original error is propagated.
-      throw new AiProviderTransportError((err as Error)?.name === "AbortError" ? "TIMEOUT" : "NETWORK");
-    } finally {
-      clearTimeout(timer);
+    // ONE deadline for the whole call, retries included: the caller's budget is the contract, not each
+    // attempt's. A retry that would start with almost no budget left is skipped rather than started and
+    // aborted — an aborted attempt still spends a provider request.
+    const deadline = Date.now() + this.#timeoutMs;
+    let response: Awaited<ReturnType<FetchLike>> | null = null;
+    for (let attempt = 1; attempt <= GEMINI_MAX_ATTEMPTS; attempt += 1) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        throw new AiProviderTransportError("TIMEOUT");
+      }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), remaining);
+      try {
+        response = await this.#fetch(`${this.#baseUrl}/models/${encodeURIComponent(this.model)}:generateContent`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-goog-api-key": this.#apiKey },
+          body,
+          signal: controller.signal,
+        });
+      } catch (err) {
+        // The message of a fetch failure can embed the URL; the URL carries no key
+        // (the key travels in a header), but the classification is what callers
+        // need, so nothing from the original error is propagated.
+        const timedOut = (err as Error)?.name === "AbortError";
+        if (!timedOut && attempt < GEMINI_MAX_ATTEMPTS && deadline - Date.now() > MIN_ATTEMPT_BUDGET_MS) {
+          await sleep(Math.min(RETRY_DELAYS_MS[attempt - 1] ?? 900, Math.max(0, deadline - Date.now() - MIN_ATTEMPT_BUDGET_MS)));
+          continue;
+        }
+        throw new AiProviderTransportError(timedOut ? "TIMEOUT" : "NETWORK");
+      } finally {
+        clearTimeout(timer);
+      }
+
+      if (response.ok || !GEMINI_RETRYABLE_STATUSES.includes(response.status)) {
+        break;
+      }
+      // A transient status: wait (jittered, bounded by the deadline) and ask again.
+      if (attempt < GEMINI_MAX_ATTEMPTS && deadline - Date.now() > MIN_ATTEMPT_BUDGET_MS) {
+        const base = RETRY_DELAYS_MS[attempt - 1] ?? 900;
+        const jitter = Math.floor(Math.random() * 200);
+        await sleep(Math.min(base + jitter, Math.max(0, deadline - Date.now() - MIN_ATTEMPT_BUDGET_MS)));
+        continue;
+      }
+      break;
     }
+    if (response === null) throw new AiProviderTransportError("NETWORK");
 
     if (!response.ok) {
       // Status only. A provider's error body can echo the request, and the
