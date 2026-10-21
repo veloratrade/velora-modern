@@ -266,5 +266,34 @@
     "fix": "SESSION_PROBE_TIMEOUT_MS 1500 -> 4000, plus one retry before denying (only a transport-level failure is retried; a 200 saying 'not authenticated' is an answer and returns at once). The gate still fails CLOSED \u2014 apps/web/src/proxy.headers.test.ts pins that with an unreachable API.",
     "verified_cold_after_fix": "/dashboard 200 in 1.86 s, /admin 200 in 1.38 s, /settings 200 in 2.00 s \u2014 all previously above or near the old budget",
     "deployed": "velora-modern-staging b4a493d9-1bfe-43c7-b677-1c54a9daceb0"
+  },
+  "telegram_ai_gemini": {
+    "date": "2026-10-21",
+    "requested_by_owner": "connect a Gemini API key so the Telegram bot can use AI",
+    "key_set_as_worker_secret": "GEMINI_API_KEY on velora-telegram-bot (wrangler secret put, value never logged, never in the repo)",
+    "key_validated": "GET /v1beta/models -> 200; generateContent 200 on gemini-3.6-flash and gemini-3.5-flash; gemini-2.0-flash -> 404 'no longer available to new users'",
+    "retired_default_model_fixed": "DEFAULT_MODEL / DEFAULT_GEMINI_MODEL gemini-2.0-flash -> gemini-3.6-flash (a retired default fails every path that carries no per-route model)",
+    "db_gates_opened": {
+      "flags_enabled": [
+        "ai_assistant",
+        "ai_trade_analysis",
+        "ai_weekly_report"
+      ],
+      "routes_added": {
+        "assistant": "gemini-3.6-flash",
+        "trade_analysis": "gemini-3.6-flash",
+        "weekly_report": "gemini-3.6-flash",
+        "transcribe": "gemini-3.6-flash",
+        "vision_extract": "gemini-3.6-flash",
+        "screenshot_extraction": "gemini-3.6-flash (model was NULL before)"
+      }
+    },
+    "live_calls_through_production_code": {
+      "assistant": "status=generated provider=gemini model=gemini-3.6-flash latency=7689ms tokens 198/40",
+      "transcribe": "status=generated provider=gemini model=gemini-3.6-flash latency=13518ms (0.5s silent WAV \u2014 proves the audio transport is accepted; text is a hallucination, as expected for silence)"
+    },
+    "consent_gate": "Before consent the same call answered refused/CONSENT_REQUIRED \u2014 the gate is real. owner@veloratrade.ir (id 13) granted consent at 2026-10-21T15:33:40Z, after which the call generated.",
+    "open_identity_issue": "telegram_identities maps the owner's chat 449106486 to user 7 (tg-owner-fixture@velora.test, ai_consent_at NULL). The bot reads consent from the LINKED user, so the bot chat still answers CON sent_REQUIRED until user 7 gets consent or the chat is re-linked to user 13.",
+    "bot_version": "d179d5a3-fdd1-4895-b1be-f4e81e1ede0c"
   }
 }

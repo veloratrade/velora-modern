@@ -58,7 +58,7 @@ test("the key travels in a header, never in the URL, the body or an error", asyn
   // The facts WERE sent (that is the point of the call) but nothing else was.
   assert.ok((call.init?.body ?? "").includes("tradeCount"));
   // And the model is named in the URL, so the ledger's `model` is not a guess.
-  assert.ok(call.url.includes("/models/gemini-2.0-flash:generateContent"));
+  assert.ok(call.url.includes("/models/gemini-3.6-flash:generateContent"));
 });
 
 test("a structured answer becomes an insight, with usage recorded and no invented cost", async () => {
@@ -66,7 +66,7 @@ test("a structured answer becomes an insight, with usage recorded and no invente
   const provider = new GeminiAiProvider({ apiKey: KEY, fetchImpl: fetchImpl as never });
   const result = await provider.generate(REQUEST);
 
-  assert.equal(result.model, "gemini-2.0-flash");
+  assert.equal(result.model, "gemini-3.6-flash");
   assert.equal(result.insight["summary"], "two losing trades");
   assert.deepEqual(result.insight["weaknesses"], ["late entries"]);
   assert.equal(result.tokensIn, 120);

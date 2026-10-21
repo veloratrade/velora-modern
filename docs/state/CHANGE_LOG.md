@@ -1808,3 +1808,33 @@ gate still fails closed, which `apps/web/src/proxy.headers.test.ts` pins against
 
 **Gates:** typecheck 0 (6 projects) · `npm test` exit 0 (general 1806: 1805 pass / 1 named skip; PGlite
 87/87) · secret-scan PASS.
+
+## AC-D8 — 2026-10-21 · Gemini connected to the Telegram bot; a retired model default found
+
+- **Commit:** this one. **Deployed:** `velora-telegram-bot` → `d179d5a3-fdd1-4895-b1be-f4e81e1ede0c`.
+
+**What the owner asked for:** connect a Gemini API key so the bot can use AI. Three separate things were
+missing, and only the first one is the key.
+
+1. **No key on the Worker.** `wrangler secret list` on `velora-telegram-bot` had only the Telegram tokens and
+   `WORKER_ADMIN_TOKEN`. The bot resolves AI credentials through `EnvironmentAiSecretResolver` (env only, by
+   design — D-2), so there is no panel form and no DB row that could have supplied it. The key is now a
+   Worker secret.
+2. **The AI gates in the database were closed.** `ai_assistant`, `ai_trade_analysis` and `ai_weekly_report`
+   were all `enabled=false`, and `ai_feature_routes` held exactly one chain (screenshot). With no route a
+   feature answers `NO_PROVIDER_AVAILABLE` even with a perfect key. Flags are now on (100 %) and five chains
+   point at gemini.
+3. **The code's default model was retired.** `gemini-2.0-flash` answers `404 "no longer available to new
+   users"` on a fresh key. Any path without a per-route model (and the coach, which constructs the provider
+   directly) would have failed with `PROVIDER_UNAVAILABLE` — the failure that looks like a bad key. Default
+   is now `gemini-3.6-flash`; the per-route `model` column still wins wherever an operator sets one.
+
+**Verified through the production classes, against the staging database and the real API** (not a mock):
+`assistant` → `status=generated`, `gemini-3.6-flash`, 7.7 s, 198/40 tokens; `transcribe` → `generated`,
+13.5 s. Before the owner granted consent the same call answered `refused/CONSENT_REQUIRED`, so the consent
+gate is real and is not bypassed for the test.
+
+**Still open (reported, not hidden):** `telegram_identities` maps the owner's chat `449106486` to user **7**
+(`tg-owner-fixture@velora.test`, `ai_consent_at` NULL), while the consent just granted sits on user 13. The
+bot reads consent from the linked user, so the chat itself still answers "consent required" until that
+identity is re-linked to user 13 or user 7 is given consent.

@@ -51,7 +51,17 @@ export interface GeminiProviderOptions {
   readonly baseUrl?: string;
 }
 
-const DEFAULT_MODEL = "gemini-2.0-flash";
+/**
+ * The model used when a caller (or a route row) does not name one.
+ *
+ * `gemini-2.0-flash` was the default while it was current, and Google has since retired it for new API
+ * keys: on 2026-10-21 a live call with the owner's key answered 404 "This model models/gemini-2.0-flash is
+ * no longer available to new users". A retired default is not a cosmetic problem — every path that does
+ * not carry a per-route model would fail with PROVIDER_UNAVAILABLE, which reads like the key is broken.
+ * `gemini-3.6-flash` answered 200 on the same key, and the per-route `model` column still wins wherever an
+ * operator sets one.
+ */
+const DEFAULT_MODEL = "gemini-3.6-flash";
 const DEFAULT_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 /**
