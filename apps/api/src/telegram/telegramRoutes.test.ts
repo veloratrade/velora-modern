@@ -73,7 +73,7 @@ class FakeBotApi implements TelegramBotApi {
     return { id: chatId, type: "channel" as const, title: "Journal" };
   }
   async getChatMember() {
-    return { status: "administrator" as const, canPostMessages: true };
+    return { status: "administrator" as const, canPostMessages: true, canSendMessages: true };
   }
   async getMe() {
     return { id: "1", username: BOT_USERNAME };

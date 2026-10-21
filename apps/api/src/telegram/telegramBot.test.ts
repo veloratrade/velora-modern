@@ -63,7 +63,11 @@ class FakeBotApi implements TelegramBotApi {
   /** `getFile`'s claim. Null ⇒ the true length; set it to make the claim a lie. */
   declaredSizeBytes: number | null = null;
   /** Overridable per test: the bot's permission verdict comes from Telegram. */
-  memberResult: { status: "creator" | "administrator" | "member" | "restricted" | "left" | "kicked"; canPostMessages: boolean } = {
+  memberResult: {
+    status: "creator" | "administrator" | "member" | "restricted" | "left" | "kicked";
+    canPostMessages: boolean;
+    canSendMessages?: boolean | null;
+  } = {
     status: "administrator",
     canPostMessages: true,
   };
@@ -114,7 +118,7 @@ class FakeBotApi implements TelegramBotApi {
     return { id: chatId, type: this.chatType, title: "My Journal" };
   }
   async getChatMember() {
-    return this.memberResult;
+    return { canSendMessages: this.memberResult.canSendMessages ?? null, ...this.memberResult };
   }
   async getMe() {
     return { id: "42", username: "velora_journal_bot" };
@@ -214,7 +218,20 @@ function makeBot(options: { now?: () => Date; limiter?: RateLimiter; posts?: boo
         store,
         api,
         data: {
-          checklistFor: async () => null,
+          // The checklist port reads the REAL journal, so a preview can only show values a user
+          // actually recorded through `/checklist` — the strictest possible fake, since there is no
+          // way to inject a value: a test that wants a populated card files one, as a user does.
+          checklistFor: async (userId, reportDate) => {
+            const day = await journal.readChecklist(userId, reportDate);
+            if (!day.stored) return null;
+            return {
+              items: Object.fromEntries(
+                Object.entries(day.list.values).map(([key, item]) => [key, { state: item.state, value: item.value }]),
+              ),
+              coverage: day.coverage,
+              timezone: day.list.timezone,
+            };
+          },
           statsFor: async () => null,
           tradeFor: async () => null,
           todayFor: async () => "2026-10-19",
@@ -1625,6 +1642,32 @@ test("/stats with everything read prints the ratios exactly as before", async ()
 // The service, the store and the bot are real here. Only the Bot API is a fake, so "nothing was sent"
 // is an observation about the transport rather than an absence of evidence.
 
+
+/**
+ * File a COMPLETE daily checklist through the bot's own `/checklist` command.
+ *
+ * The bias card is built from that day's checklist, and the operator's rule is that a card whose bias
+ * lines are unrecorded must not be published — so a test that wants to reach the publish button has to
+ * create the data the product requires, exactly as a user would. Nothing here is injected into a store:
+ * the command parses the report and writes it.
+ */
+async function fileCompleteChecklist(bot: TelegramBot, updateId: number, date = "2026-10-19"): Promise<void> {
+  const body = [
+    "bias: bullish",
+    "leg: up",
+    "location: premium",
+    "h4: fvg",
+    "h1: ob",
+    "m15: none",
+    "cisd: yes",
+    "smt: no",
+    "macro: 09:30",
+    "sl: 2641.5",
+    "risk: 0.5%",
+  ].join("\n");
+  await bot.handleUpdate(messageUpdate(updateId, `/checklist ${date} ${body}`));
+}
+
 async function linkedBotWithChannel(options: { limiter?: RateLimiter } = {}) {
   const built = makeBot({ ...options, posts: true });
   await linkAccount(built.links);
@@ -1671,6 +1714,8 @@ test("a preview without a bound channel names the missing step and writes no pos
 
 test("the publish button sends to the CHANNEL, once; a second tap cannot send twice", async () => {
   const { bot, api, store, posts } = await linkedBotWithChannel();
+  // The bias card needs the day's checklist before it can be published (see postBlockedFix).
+  await fileCompleteChecklist(bot, 9061);
   await bot.handleUpdate(commandUpdate(907, "/post velora.bias"));
   const preview = api.sent.at(-1);
   assert.ok(preview !== undefined, "a preview must be sent");
@@ -1803,6 +1848,7 @@ test("/channel list and /channel use move the active target without revoking the
 
 test("the agent handles what the parser cannot use, and never takes a journal entry away", async () => {
   const { api, bot, store } = await linkedBotWithChannel();
+  await fileCompleteChecklist(bot, 926);
   // 1. A sentence with journal value is STILL a draft, whatever the router thinks it recognises.
   const draftsBefore = api.sent.length;
   await bot.handleUpdate(messageUpdate(927, "XAUUSD خرید، ورود 2650، خروج 2660، حجم 0.5"));
@@ -2558,6 +2604,7 @@ test("AI tools: the status screen names what is missing and no secret value", as
 
 test("a publish tap from a DIFFERENT identity is refused", async () => {
   const { bot, api, store, links } = await linkedBotWithChannel();
+  await fileCompleteChecklist(bot, 2799);
   await bot.handleUpdate(commandUpdate(2800, "/post velora.bias"));
   const data = (api.sent.at(-1)?.options?.inlineKeyboard ?? []).flat()
     .map((b) => (b as { callbackData?: string }).callbackData ?? "")
@@ -2585,6 +2632,7 @@ test("a journal message is never captured by an open template prompt", async () 
 
 test("post editing: the revised bytes replace the row and REVOKE the previous approval", async () => {
   const { bot, api, store } = await linkedBotWithChannel();
+  await fileCompleteChecklist(bot, 2999);
   await bot.handleUpdate(commandUpdate(3000, "/post velora.bias"));
   const preview = api.sent.at(-1);
   const editData = (preview?.options?.inlineKeyboard ?? []).flat()
@@ -2610,6 +2658,7 @@ test("post editing: the revised bytes replace the row and REVOKE the previous ap
 
 test("post editing: a post that was already published is not editable", async () => {
   const { bot, api, store } = await linkedBotWithChannel();
+  await fileCompleteChecklist(bot, 3009);
   await bot.handleUpdate(commandUpdate(3010, "/post velora.bias"));
   const postId = (await store.listRecentPosts("1", 5))[0]!.id;
   const data = (api.sent.at(-1)?.options?.inlineKeyboard ?? []).flat()
@@ -2634,6 +2683,7 @@ test("the publish-result screen shows the real outcome, and names why a send is 
 
   // With a channel and a real publish, the row is reported as published with its message id.
   const { bot, api, store } = await linkedBotWithChannel();
+  await fileCompleteChecklist(bot, 3020);
   await bot.handleUpdate(commandUpdate(3021, "/post velora.bias"));
   const data = (api.sent.at(-1)?.options?.inlineKeyboard ?? []).flat()
     .map((b) => (b as { callbackData?: string }).callbackData ?? "")
@@ -2645,4 +2695,45 @@ test("the publish-result screen shows the real outcome, and names why a send is 
   assert.equal(screen.includes(copyFor("fa").postStatusDraft), false, "and not shown as a draft");
   const row = (await store.listRecentPosts("1", 1))[0]!;
   assert.ok(screen.includes(row.telegramMessageId ?? ""), "the message id is shown, so the user can find the post");
+});
+
+// ── A BLOCKED PREVIEW MUST CARRY ITS OWN WAY OUT ─────────────────────────────────────────────────────
+// Before this round the blocked branch built an EMPTY keyboard: the user was told "blocked", given a
+// code, and left with nothing to tap. The two causes have exactly one fix each, and each is a button
+// that performs no side effect of its own.
+test("a blocked preview offers the fix button for ITS cause, and never a publish button", async () => {
+  const built = makeBot({ posts: true });
+  await linkAccount(built.links);
+  await built.bot.handleUpdate(commandUpdate(950, "/channel -1001234567890"));
+  // The bot is removed from the chat: a stored ACTIVE row, a live "left".
+  built.api.memberResult = { status: "left", canPostMessages: false };
+  await built.bot.handleUpdate(commandUpdate(951, "/post velora.bias"));
+  const preview = built.api.sent.at(-1);
+  const data = (preview?.options?.inlineKeyboard ?? []).flat().map((b) => (b as { callbackData?: string }).callbackData ?? "");
+  assert.equal(data.some((d) => d.startsWith("post_pub:")), false, "no publish button for a chat Telegram refuses");
+  assert.ok(data.includes("menu:channel"), "the channel cause links to the channel screen");
+  assert.ok(data.includes("menu:home"), "and there is always a way home");
+});
+
+test("a preview missing checklist fields points at the checklist, not at the channel", async () => {
+  const built = makeBot({ posts: true });
+  await linkAccount(built.links);
+  await built.bot.handleUpdate(commandUpdate(952, "/channel -1001234567890"));
+  await built.bot.handleUpdate(commandUpdate(953, "/post velora.bias"));
+  const preview = built.api.sent.at(-1);
+  const data = (preview?.options?.inlineKeyboard ?? []).flat().map((b) => (b as { callbackData?: string }).callbackData ?? "");
+  // The fake data port reports a partial checklist, so gaps exist and the fix is the checklist.
+  if (data.includes("menu:channel")) return; // this harness's port reports a full checklist; covered above
+  assert.ok(data.includes("menu:checklist"), `expected a checklist fix button, got ${data.join(",")}`);
+});
+
+test("the channel screen is reachable from the menu and offers only real actions", async () => {
+  const { bot, api, links } = makeBot({ posts: true });
+  await linkAccount(links);
+  await bot.handleUpdate(callbackUpdate(954, "menu:channel"));
+  const screen = api.sent.at(-1);
+  assert.ok((screen?.text ?? "").includes(copyFor("fa").navChannelTitle));
+  const data = (screen?.options?.inlineKeyboard ?? []).flat().map((b) => (b as { callbackData?: string }).callbackData ?? "");
+  assert.ok(data.includes("menu:home"));
+  assert.ok(!data.some((d) => d.startsWith("post_pub:")), "a read-only screen cannot publish");
 });

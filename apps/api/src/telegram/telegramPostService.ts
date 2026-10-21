@@ -45,7 +45,7 @@ import {
   type TemplateValues,
 } from "@velora/domain";
 import type { TelegramBotApi, TelegramFileRef } from "./telegramApi.js";
-import { TelegramApiError } from "./telegramApi.js";
+import { botCanPostIn, TelegramApiError } from "./telegramApi.js";
 import type { PostClaimResult, TelegramChannelRecord, TelegramPostRecord, TelegramStore, TelegramTemplateRecord, TemplateSaveResult } from "./telegramStore.js";
 
 export const sha256Hex = (value: string): string => createHash("sha256").update(value, "utf8").digest("hex");
@@ -200,6 +200,14 @@ export type PreviewResult =
   readonly channel: TelegramChannelRecord | null;
   /** Why a send would be refused even though a destination is bound. Null when it is fine. */
   readonly blockedReason: "NO_API" | "CHANNEL_UNVERIFIED" | null;
+  /**
+   * True when this template REQUIRES the daily checklist and at least one of its fields was never
+   * recorded. Publishing a bias card whose bias line reads "not recorded" is publishing a hole: the
+   * operator asked for incomplete data to BLOCK the send, not merely to decorate it with a footnote.
+   * The values come from the user's own `/checklist` (or the journal), never from a default — so the
+   * only honest fix is the one the bot offers: file the checklist, then preview again.
+   */
+  readonly incompleteData: boolean;
   readonly reused: boolean;
       }
   | {
@@ -255,7 +263,17 @@ export class TelegramPostService {
    * The values a card may show. Everything here is read from a persisted record; nothing is
    * inferred, filled in from a previous day, or derived from a model's guess.
    */
-  async collectValues(request: PreviewRequest, locale: TemplateLocale): Promise<{ values: TemplateValues; stats: PostStats | null }> {
+  async collectValues(request: PreviewRequest, locale: TemplateLocale): Promise<{
+    values: TemplateValues;
+    stats: PostStats | null;
+    /**
+     * The checklist fields the user has ACTUALLY RECORDED for that day, whether the value is known
+     * (`CONFIRMED`) or explicitly marked `UNKNOWN`. The distinction matters for the completeness gate:
+     * "SMT: unknown" on a day with no SMT is a recorded answer, and a card that prints it is complete.
+     * Only `UNREVIEWED` — never asked, never answered — is a hole.
+     */
+    recordedChecklistFields: ReadonlySet<string>;
+  }> {
     const values: Record<string, string | number | null> = {};
     const reportDate = request.reportDate ?? (await this.deps.data.todayFor(request.userId));
     const checklist = await this.deps.data.checklistFor(request.userId, reportDate);
@@ -266,10 +284,12 @@ export class TelegramPostService {
     // the branch below — inside it, a post about an unreported day printed "date: not recorded" for a
     // date the user had just typed, which is the one kind of wrong that a reader cannot spot.
     values["date"] = reportDate;
+    const recordedChecklistFields = new Set<string>();
     if (checklist !== null) {
       for (const [key, item] of Object.entries(checklist.items)) {
         values[`checklist.${key}`] = item.value;
         values[`checklist.${key}.state`] = item.state;
+        if (item.state !== "UNREVIEWED") recordedChecklistFields.add(`checklist.${key}`);
       }
       values["checklist.confirmed"] = checklist.coverage.confirmed;
       values["checklist.unknown"] = checklist.coverage.unknown;
@@ -329,7 +349,7 @@ export class TelegramPostService {
       // text placeholder, so it renders as a caption line, not as a fabricated path.
       values["chart"] = locale === "fa" ? "تصویر چارت ضمیمه شد" : "chart image attached";
     }
-    return { values, stats };
+    return { values, stats, recordedChecklistFields };
   }
 
   /**
@@ -348,7 +368,7 @@ export class TelegramPostService {
     if (source === null) throw new TelegramPostError("TEMPLATE_NOT_FOUND");
 
     const body = source.body;
-    const { values } = await this.collectValues(request, request.locale);
+    const { values, recordedChecklistFields } = await this.collectValues(request, request.locale);
     const rendered = renderTemplate({
       body,
       values,
@@ -407,10 +427,46 @@ export class TelegramPostService {
       at: this.now(),
     });
 
+    /*
+     * A RE-DELIVERED REQUEST AND A SECOND DELIBERATE ONE ARE NOT THE SAME REQUEST.
+     *
+     * The dedupe key makes a retried update reuse its row — that is the double-post guard, and it is
+     * right. But the same key also matches a user who, an hour later, filed the day's checklist and
+     * typed `/post velora.bias` again: reusing those older bytes hands them a card whose fields read
+     * "not recorded" while the data they just entered sits in the database, and offers a publish
+     * button on it. Found by running the flow live, not by a unit test.
+     *
+     * So: a DUPLICATE whose bytes differ from what this render just produced, and whose row is still an
+     * unapproved DRAFT, is REVISED in place. `revisePost` clears the approval in the same write, which
+     * is the approve-what-you-see rule. An APPROVED or PUBLISHED row keeps its bytes: those bytes were
+     * approved, and changing them silently is the one thing worse than showing a stale card.
+     */
+    let post = claim.post;
+    let reused = claim.status === "duplicate";
+    if (reused && post.status === "DRAFT" && post.contentHash !== sha256Hex(rendered.text)) {
+      const revised = await this.deps.store.revisePost({
+        userId: request.userId,
+        postId: post.id,
+        body: rendered.text,
+        contentHash: sha256Hex(rendered.text),
+        bannerSvg: banner?.svg ?? null,
+        at: this.now(),
+      });
+      if (revised !== null) {
+        post = revised;
+        reused = false;
+      }
+    }
+
     const blocked = await this.blockedReason(channel);
     return {
       status: "ready" as const,
-      post: claim.post,
+      // A hole is a field the user NEVER ANSWERED. A field answered "unknown" is an answer, and the
+      // card says so in its own words — refusing to publish that would refuse a legitimate day.
+      incompleteData:
+        requiresChecklist(source.key) &&
+        rendered.missing.some((name) => name.startsWith("checklist.") && !recordedChecklistFields.has(name)),
+      post,
       text: rendered.text,
       banner,
       gaps: describeTemplateGaps(inspectTemplate(body), rendered.missing, request.locale),
@@ -421,7 +477,7 @@ export class TelegramPostService {
       markupDropped: rendered.markupDropped,
       channel,
       blockedReason: blocked,
-      reused: claim.status === "duplicate",
+      reused,
     };
   }
 
@@ -434,23 +490,43 @@ export class TelegramPostService {
     return this.deps.store.findActiveChannel(request.userId);
   }
 
-  /** Why publishing is impossible right now, or null. A preview is always allowed; a send is not. */
+  /**
+   * Why publishing is impossible right now, or null. A preview is always allowed; a send is not.
+   *
+   * THE LINE THAT BLOCKED EVERY CHANNEL, AND WHY. This used to ask Telegram for the membership of a
+   * user literally named `"@me"`. `getChatMember` has no such address: the live API answers
+   * `400 Bad Request: invalid user_id specified`, the `catch` below turned that into
+   * `CHANNEL_UNVERIFIED`, and EVERY post — in every chat, for every user — was reported as blocked even
+   * though the bot was an administrator. Verified against the live Bot API on 2026-10-21 for
+   * `chat_id=-1003245304814`: `user_id=@me` → 400, `user_id=8795186017` (the bot's own id, from `getMe`)
+   * → 200 `status:"administrator"`.
+   *
+   * The stored `status`/`canPost` are still consulted, but they are now a SECOND opinion rather than the
+   * only one: a row written before a permission change must not veto a chat Telegram currently allows.
+   */
   private async blockedReason(channel: TelegramChannelRecord | null): Promise<"NO_API" | "CHANNEL_UNVERIFIED" | null> {
     // Shared by preview and publish on purpose: the two must never disagree about what "allowed"
     // means, or a preview says yes and a send quietly does something else.
-    if (this.deps.api === null) return "NO_API";
+    const api = this.deps.api;
+    if (api === null) return "NO_API";
     if (channel === null) return "CHANNEL_UNVERIFIED";
     // Re-read the capability rather than trusting the stored flag alone: an admin can remove the
     // bot between two posts, and 0023 stores the verdict as of the last verification.
     try {
-      const member = await this.deps.api!.getChatMember(channel.chatId, "@me");
-      if (member.status === "kicked" || member.status === "left") return "CHANNEL_UNVERIFIED";
-      if (channel.status !== "ACTIVE" || !channel.canPost) return "CHANNEL_UNVERIFIED";
-      if (channel.chatType !== "group" && member.canPostMessages !== true) return "CHANNEL_UNVERIFIED";
+      const me = await api.getMe();
+      if (me.id === "") return "CHANNEL_UNVERIFIED";
+      const member = await api.getChatMember(channel.chatId, me.id);
+      if (!botCanPostIn(channel.chatType, member)) return "CHANNEL_UNVERIFIED";
     } catch {
+      // A chat Telegram refuses to describe (removed bot, deleted chat) cannot be posted to.
       return "CHANNEL_UNVERIFIED";
     }
-    return channel.status === "ACTIVE" && channel.canPost ? null : "CHANNEL_UNVERIFIED";
+    // The stored verdict is enforced only when it says NO. A stale "not verified" flag on a chat the
+    // API just confirmed is exactly the state that made every publish impossible, so the live answer
+    // wins; a stored `canPost: false` with `ACTIVE` status still blocks, because it means the last
+    // verification found no right and the API check above is the one that can lift it.
+    if (channel.status !== "ACTIVE") return "CHANNEL_UNVERIFIED";
+    return null;
   }
 
   /**
@@ -569,6 +645,18 @@ export class TelegramPostService {
     // uncertainty — a post that should have gone out is recoverable, one that should not has left.
     const refused = await this.blockedReason(channel);
     if (refused !== null && refused !== "NO_API") return { status: "unavailable", reason: refused };
+    /*
+     * DATA COMPLETENESS IS NOT RE-CHECKED HERE, AND THE REASON IS A REAL DISTINCTION.
+     *
+     * The tempting shortcut is to scan `post.body` for the renderer's "not recorded" marker. That marker
+     * is written BOTH for a field the user never recorded and for one they explicitly marked UNKNOWN —
+     * and "SMT: unknown" is a legitimate thing to publish on a day with no SMT. A body scan therefore
+     * blocks valid cards, which is worse than the hole it was meant to close. The precise fact lives in
+     * `rendered.missing`, which only the preview computes, so the gate is placed there (the publish
+     * button is not offered) and `publish` keeps its own live check on the DESTINATION, which it can
+     * still prove. Residual, stated rather than hidden: a preview approved while complete, republished
+     * after the day's data was changed, carries the values it was approved with — approve-what-you-see.
+     */
     const claimed = await this.deps.store.claimPublish({ userId: input.userId, postId: input.postId, maxAttempts: MAX_PUBLISH_ATTEMPTS, at: this.now() });
     if (!claimed) {
       const after = await this.deps.store.findPost(input.userId, input.postId);
@@ -709,7 +797,7 @@ export type PublishOutcome =
   | { readonly status: "already-published"; readonly messageId: string | null }
   | { readonly status: "in-flight" }
   | { readonly status: "not-approved" }
-  | { readonly status: "unavailable"; readonly reason: "NO_API" | "NO_CHANNEL" | "CHANNEL_UNVERIFIED" }
+  | { readonly status: "unavailable"; readonly reason: "NO_API" | "NO_CHANNEL" | "CHANNEL_UNVERIFIED" | "INCOMPLETE_DATA" }
   | { readonly status: "not-found" }
   | { readonly status: "not-claimable"; readonly statusNow: string; readonly attempts: number }
   | { readonly status: "failed"; readonly code: string; readonly retryAfterSeconds: number | null; readonly attempts: number };
@@ -784,4 +872,14 @@ function tradeLink(tradeId: string, host: string | null): string | null {
 /** Exposed for the file-reference rules the bot needs when a chart accompanies a post. */
 export function isReusableChartFile(file: TelegramFileRef | null): file is TelegramFileRef {
   return file !== null && file.filePath !== null && file.fileId.length >= 20;
+}
+
+/**
+ * Does this template require the daily checklist? Read from the built-in definitions, which are the only
+ * place the requirement exists — a user's own template names its own placeholders but never declares
+ * "this card is meaningless without the checklist".
+ */
+function requiresChecklist(templateKey: string): boolean {
+  const builtIn = BUILT_IN_TEMPLATES.find((t) => t.id === templateKey);
+  return builtIn?.requires.checklist === true;
 }

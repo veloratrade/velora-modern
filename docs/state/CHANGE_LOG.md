@@ -1872,3 +1872,49 @@ transcribes; `/cancel`, all menu buttons and every journal command answer correc
 
 **Reported, not hidden:** screenshot OCR is refused by design on the Worker (`IMAGE_NOT_ANONYMIZED`, no
 anonymizer in workerd); `/post` stays blocked with `CHANNEL_UNVERIFIED` and 23 unfilled fields.
+
+## AC-D10 — 2026-10-21 · the post flow, driven end to end against Telegram and the staging database
+
+**Method.** `apps/worker-cf/scripts/live-post-flow.mjs` runs the DEPLOYED worker entry over the REAL staging
+database (Neon `velora_journal`) with the real Bot API behind a local recorder that forwards READ methods
+(`getMe`, `getChat`, `getChatMember`) to `api.telegram.org` verbatim and answers every write locally. So the
+rights the bot reports are Telegram's own answers, and nothing can reach the channel from a test run. Transcript:
+`docs/state/evidence/round8/live-post-flow.txt` (27 checks, all pass). Structured record:
+`docs/state/evidence/round8/verification.json`.
+
+**Bug 1 — every channel read lied about permissions.** `blockedReason()` called
+`getChatMember(chatId, "@me")`; Telegram answers **400 `invalid user_id specified`** for a non-numeric id, so a
+chat where the bot is an administrator came back `CHANNEL_UNVERIFIED`. Now `getMe().id` supplies the numeric id
+and one shared predicate decides: a channel needs `canPostMessages`, a restricted group member needs
+`canSendMessages`, everyone else is decided by live membership. A stale `can_post=false` row no longer vetoes a
+live-confirmed chat.
+
+**Bug 2 — a blocked preview was a dead end.** The refusal branch could build an EMPTY keyboard. It now always
+offers `menu:channel` + `menu:home`, and `menu:checklist` when checklist gaps exist; the `unavailable` publish
+outcome attaches the same fixes. `menu:channel` is a real destination with its own screen.
+
+**Bug 3 — a publish button on a card full of holes.** `PreviewResult.incompleteData` is true when a
+checklist-bearing template prints at least one checklist field that was **never answered** (`UNREVIEWED`). A field
+answered `UNKNOWN` is an answer, not a hole, and does not block — a day with no SMT is legitimate. The bot offers
+publish only when `blockedReason === null && !incompleteData`.
+
+**Bug 4 — a second deliberate `/post` re-showed the old draft.** Found by running it, not by a unit test: file no
+checklist → `/post` stores a "not recorded" draft → file the checklist → `/post` again → the dedupe key matched,
+the OLD bytes came back, and a publish button appeared on a card that did not contain the data just entered. Now a
+duplicate whose freshly rendered bytes differ, and whose row is still an unapproved DRAFT, is revised in place;
+`revisePost` clears the approval in the same write (approve-what-you-see). An APPROVED or PUBLISHED row keeps the
+bytes the user signed off on.
+
+**Also:** `classifyProviderFailure()` reads the provider's own `err.code`/`err.status`, and the copy splits 429 /
+503 / timeout into three sentences that each say what to do.
+
+**Gates:** `tsc -b` 6 projects exit 0 · `npm test` **ALL TEST FILES PASSED** — general 1853 ok / 0 fail, PGlite
+88/88 · `secret-scan` PASS (0) · telegram suites 103 + 27 + 11 + 15 + 9 · contracts `telegramCallback` 3/3.
+
+**Deployed:** `velora-telegram-bot` version **`16dbe9b6-0f36-43d1-937d-34ac1f0b7684`** (previous
+`41b7dbac-…`); `/health` 200; `getWebhookInfo` → 0 pending, no last error.
+
+**Reported, not hidden:** the live publish was RECORDED, not delivered — a real message to
+`-1003245304814` still requires the owner's explicit approval in the flow. The bias card keeps a footnote counting
+non-checklist fields the template names but no data supplies. Screenshot OCR stays refused on the Worker
+(`IMAGE_NOT_ANONYMIZED`).

@@ -1,0 +1,79 @@
+{
+  "round": 8,
+  "objective": "D — the Telegram bot's post flow, end to end, on Cloudflare staging",
+  "recorded_at": "2026-10-21",
+  "railway": "still not used anywhere in this path",
+  "question_answered": "Does a prepared post actually reach the channel from the bot's own menu, with the real Telegram rights, without inventing data?",
+  "defects_found_by_running_it": [
+    {
+      "id": "R8-1",
+      "symptom": "`/post` refused with CHANNEL_UNVERIFIED for a chat where the bot is an administrator",
+      "root_cause": "`blockedReason()` asked `getChatMember(chatId, \"@me\")`; Telegram answers 400 `invalid user_id specified` for a non-numeric user id, so every verification failed",
+      "fix": "resolve the bot's own numeric id with `getMe().id`, then decide with `botCanPostIn(chatType, member)`: a channel needs `canPostMessages`; a restricted group member needs `canSendMessages`; every other member is decided by live membership. A stored `can_post=false` no longer vetoes a live-confirmed chat — only `status !== \"ACTIVE\"` does",
+      "pinned_by": "telegramPostService.test.ts (bot's own id is asked of getChatMember; supergroup admin without can_post_messages is publishable; memberStatus=left is CHANNEL_UNVERIFIED), telegramApi.test.ts (vocabulary)"
+    },
+    {
+      "id": "R8-2",
+      "symptom": "A blocked preview left the user with an EMPTY keyboard: a code and no way out",
+      "root_cause": "the refusal branch built an either/or keyboard, and with a channel bound but unverified both rows could come out empty",
+      "fix": "the blocked preview always carries `menu:channel` + `menu:home`, plus `menu:checklist` when checklist gaps exist; the publish `unavailable` outcome attaches the same fixes",
+      "pinned_by": "telegramBot.test.ts (blocked preview offers the fix for ITS cause; preview missing checklist fields points at the checklist)"
+    },
+    {
+      "id": "R8-3",
+      "symptom": "A publish button was offered on a bias card whose bias lines all read 'not recorded'",
+      "root_cause": "nothing connected the template's checklist requirement to the render's missing-field list",
+      "fix": "`PreviewResult.incompleteData` = the template requires a checklist AND at least one checklist field was NEVER ANSWERED (`UNREVIEWED`). A field answered `UNKNOWN` is an answer and does not block — a day with no SMT is legitimate. The bot offers publish only when `blockedReason === null && !incompleteData`",
+      "pinned_by": "telegramPostService.test.ts"
+    },
+    {
+      "id": "R8-4",
+      "symptom": "Re-running `/post` after filing the checklist re-showed the OLD draft (all fields 'not recorded') with a publish button on it",
+      "root_cause": "the dedupe key that stops a re-delivered update from double-posting also matched a second DELIBERATE request; the stored bytes were returned unchanged",
+      "fix": "a duplicate whose rendered bytes differ and whose row is still an unapproved DRAFT is revised in place (`revisePost`, which clears the approval in the same write); an APPROVED or PUBLISHED row keeps the bytes the user signed off on",
+      "pinned_by": "telegramPostService.test.ts (a duplicate key whose bytes changed refreshes an unapproved draft; identical bytes stay a reuse, and an APPROVED row is never rewritten)"
+    },
+    {
+      "id": "R8-5",
+      "symptom": "`/analyze` and agent requests surfaced a provider failure as a generic error",
+      "fix": "`classifyProviderFailure()` reads the provider's own `err.code`/`err.status` and the copy splits 429 (rate limited), 503 (busy) and timeout into three sentences that say what to do",
+      "pinned_by": "aicoach tests"
+    }
+  ],
+  "gates": {
+    "typecheck": "tsc -b packages/contracts packages/domain apps/api apps/worker apps/web apps/api-cf → exit 0",
+    "unit": "npm test → ALL TEST FILES PASSED · general 1853 ok / 0 fail · PGlite 88/88",
+    "secret_scan": "PASS (0 findings)",
+    "telegram_suites": "telegramBot 103/103 · telegramPostService 27/27 · telegramMenus 11/11 · telegramApi 15/15 · telegramRoutes 9/9",
+    "contracts": "telegramCallback 3/3 (MENU_TARGETS now includes `channel`, which exists only because sendChannelScreen answers it)"
+  },
+  "deployment": {
+    "worker": "velora-telegram-bot",
+    "version_id": "16dbe9b6-0f36-43d1-937d-34ac1f0b7684",
+    "previous_version_id": "41b7dbac-a4b0-49f6-a7fb-e86d5da6aa61",
+    "dry_run": "bundles; Hyperdrive + D1 bindings resolved",
+    "health": "GET /health → 200",
+    "webhook": "getWebhookInfo → url set, pending_update_count 0, last_error null"
+  },
+  "live_test": {
+    "harness": "apps/worker-cf/scripts/live-post-flow.mjs",
+    "what_runs": "the deployed worker entry (src/index.ts → composeRuntime → the reused apps/api bot) over the REAL staging database (Neon velora_journal) with the REAL Bot API behind a local recorder",
+    "recorder_rule": "read methods (getMe/getChat/getChatMember) are FORWARDED to api.telegram.org verbatim; every write is answered locally and never forwarded, so no message can reach the real channel from this run — the owner's rule is that a real post needs an explicit approval in the flow",
+    "checks": "27/27 PASS — transcript docs/state/evidence/round8/live-post-flow.txt",
+    "highlights": [
+      "getChat + getChatMember reached Telegram itself and the channel screen rendered from their answers",
+      "`/post` with no checklist: no publish button, and checklist+channel+home offered",
+      "`/checklist` wrote 11 confirmed fields into the staging database (rows=1)",
+      "`/post` after filing: publish button offered, card shows BULLISH, no checklist line reads 'not recorded'",
+      "publish tap: exactly one sendMessage to -1003245304814, NOT forwarded → nothing was posted",
+      "the row ended PUBLISHED with the channel's message id; a second tap answered 'already published' and sent nothing",
+      "`/postresult` labels the row published with its message id; `/journal`, `/stats today` unaffected; `/cancel` no longer trips 23502"
+    ],
+    "staging_side_effects": "a disposable user + identity + channel row were created and deleted in the same run (audit rows scoped to that probe actor are removed with it); the owner's own user 7 data was not touched"
+  },
+  "reported_not_hidden": [
+    "The publish in the live run was recorded, not delivered: a real post to -1003245304814 needs the owner's explicit approval in the flow.",
+    "The bias card still prints a footnote counting NON-checklist fields the template names but no data supplies (symbol/timeframe/…); those are not part of the completeness gate.",
+    "Screenshot OCR stays refused by design on the Worker (IMAGE_NOT_ANONYMIZED, no anonymizer in workerd)."
+  ]
+}

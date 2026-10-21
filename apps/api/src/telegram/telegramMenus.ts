@@ -276,6 +276,43 @@ export function aiMenu(
   };
 }
 
+/**
+ * The journal channel — the one section that used to exist only as `/channel <id>`.
+ *
+ * WHY A SCREEN AND NOT JUST A COMMAND. A blocked publish now sends the user here, and advice without a
+ * button is advice a user cannot follow on a phone. The screen states the state it can see (which chats
+ * are bound, which one is active, whether the API confirms the right) and keeps the ONLY binding path
+ * honest: `/channel <id>`, verified against Telegram rather than against a title.
+ */
+export function channelMenu(
+  copy: TelegramCopy,
+  options: {
+    readonly channels: readonly { readonly chatId: string; readonly title: string | null; readonly status: string; readonly canPost: boolean }[];
+    readonly apiWired: boolean;
+  },
+): MenuScreen {
+  const active = options.channels.find((c) => c.status === "ACTIVE") ?? null;
+  const lines = options.channels.map((c) => {
+    const state = c.status === "ACTIVE" ? copy.channelStatusActive : c.status === "STANDBY" ? copy.channelStatusStandby : c.status;
+    return `• ${c.chatId} ${c.title ?? ""} — ${state}${c.canPost ? "" : copy.channelNoRightsShort}`;
+  });
+  const rows: InlineKeyboardButton[][] = [];
+  if (active !== null && options.apiWired) {
+    // The one action that sends a REAL message to the channel, so it is a deliberate tap and it says so.
+    rows.push([{ text: copy.btnChannelTest, callbackData: buildCallbackData("channel_test", "channel") }]);
+  }
+  rows.push([{ text: copy.btnPostResult, callbackData: buildCallbackData("menu", "postresult") }]);
+  rows.push(backAndHome(copy, "settings"));
+  return {
+    text: `${copy.navChannelTitle}\n\n${copy.navChannelBody({
+      channels: lines,
+      active: active === null ? null : `${active.chatId} ${active.title ?? ""}`.trim(),
+      hint: copy.navChannelHow,
+    })}`,
+    keyboard: rows,
+  };
+}
+
 /** Help: the buttons are the primary path, the commands are the compatibility layer. */
 export function helpMenu(copy: TelegramCopy, body: string): MenuScreen {
   return {

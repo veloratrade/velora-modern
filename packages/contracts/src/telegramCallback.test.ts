@@ -63,9 +63,11 @@ test("the menu targets the bot can render are exactly the ones the keyboard can 
   // refuses a button whose target has no case, so an entry here and no `case "post"` fails that one.
   // Round 7 adds the six sections the menu is built from, plus `home` (the way back). The journal
   // destinations are unchanged, which is the compatibility promise: every old button keeps working.
+  // `channel` is added WITH its handler (`sendChannelScreen`): the publish fix buttons point here, so
+  // the target exists only because a screen answers it — the same rule as `post`.
   assert.deepEqual(
     [...MENU_TARGETS],
-    ["home", "journal", "last", "history", "analyze", "stats", "checklist", "post", "posts", "postresult", "templates", "banner", "ai", "settings", "help"],
+    ["home", "journal", "last", "history", "analyze", "stats", "checklist", "post", "posts", "postresult", "templates", "banner", "ai", "settings", "help", "channel"],
   );
 });
 

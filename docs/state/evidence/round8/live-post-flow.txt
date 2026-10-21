@@ -1,0 +1,47 @@
+fixtures: user 22 · telegram 779270 · channel row -1003245304814 (ACTIVE)
+
+── live: the channel screen reads Telegram itself ──
+  PASS  getChat was forwarded to the real Bot API
+  PASS  getChatMember was forwarded with the BOT's own id
+  PASS  the screen names the chat and its rights  → "✅ کانال «ICT» تأیید و فعال شد."
+  PASS  the screen is the channel screen, not the generic menu
+
+── live: /post with no checklist is blocked, with a way out ──
+  PASS  no publish button is offered  → menu:checklist,menu:channel,menu:postresult,menu:home
+  PASS  the checklist fix is offered
+  PASS  the channel screen is offered
+  PASS  home is always offered
+  PASS  the card says the fields are unrecorded
+
+── live: filing the checklist through the bot ──
+  PASS  the checklist card came back with coverage  → "✅ چک‌لیست معامله — 2026-10-21\n\n✅ dailyBias: BULLISH\n✅ marketLeg: up\n✅ priceLocat"
+  PASS  the row is in the staging database, not in memory  → rows=1
+  PASS  all eleven fields are recorded as confirmed  → confirmed=11
+
+── live: the preview now offers a publish button ──
+  PASS  a publish button is offered  → post_pub:18,post_edit:18,post_no:18
+  PASS  the card shows the RECORDED bias, not a placeholder  → "📋 پیش‌نویس پست برای کانال — -1003245304814\n⚠️ 3 فیلد ثبت‌نشده دارد؛ همان‌طور که هست نمایش داده می‌شود.\n\n<b>VELORA | بایاس روزانه<"
+  PASS  no checklist line reads 'not recorded'  → "📋 پیش‌نویس پست برای کانال — -1003245304814\n⚠️ 3 فیلد ثبت‌نشده دارد؛ همان‌طور که هست نمایش داده می‌شود.\n\n<b>VELORA | بایاس روزانه<"
+
+── live: publishing is confirmed in-flow, and nothing leaves this machine ──
+{"level":"info","event":"telegram_post_outcome","outcome":"published"}
+  PASS  the publish call was made against the CHANNEL chat id  → calls=1
+  PASS  …and it was NOT forwarded to Telegram (no real post)
+  PASS  the user got a receipt  → "✅ منتشر شد (پیام 5005)."
+  PASS  the row is PUBLISHED with the channel's message id  → {"status":"PUBLISHED","telegram_message_id":"5005"}
+
+── live: a second tap cannot send twice ──
+{"level":"info","event":"telegram_post_outcome","outcome":"already-published"}
+  PASS  the second tap sent nothing to the channel
+  PASS  the second tap answers instead of crashing  → "این پست قبلاً منتشر شده؛ دوباره ارسال نمی‌کنم."
+
+── live: the result screen and the rest of the menu still work ──
+  PASS  the result screen reports the published post  → "📬 <b>نتیجهٔ انتشار</b>\n\n• 2026-10-21 20:06 — <b>منتشر شد</b> (پیام 5005)\n  <i>&lt;b&gt;VELORA | بایاس روزانه&"
+  PASS  /journal still answers  → "📝 معامله را با زبان خودتان بنویسید یا پیام صوتی/تصویری بفرستید. مثال:"
+  PASS  /stats today still answers  → "📭 در بازهٔ «امروز» رکورد تأییدشده‌ای نیست. برای همهٔ تاریخچه /stats را بدون پار"
+  PASS  /cancel answers without the crash it had (23502)  → "✖️ لغو شد؛ چیزی ذخیره نشد."
+
+── cleanup ──
+  PASS  the disposable user is gone
+
+SUMMARY: ALL PASS · Bot API reads forwarded live: 9 · writes recorded and withheld: 14

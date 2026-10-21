@@ -36,7 +36,18 @@ export interface ConsentPort {
 export type GenerationOutcome =
   | { readonly status: "generated"; readonly id: string; readonly model: string; readonly insight: Record<string, unknown> }
   | { readonly status: "refused"; readonly code: "CONSENT_REQUIRED" | "PROVIDER_NOT_CONFIGURED" | "PAYLOAD_TOO_LARGE" }
-  | { readonly status: "error"; readonly code: "PROVIDER_ERROR" | "INVALID_PROVIDER_OUTPUT" | "PROVIDER_NAME_INVALID" };
+  | {
+      readonly status: "error";
+      /**
+       * WHY THE PROVIDER CALLS ARE ENUMERATED RATHER THAN COLLAPSED INTO `PROVIDER_ERROR`. The three
+       * transport outcomes mean different things to the person reading the message: a 429 is the
+       * provider's own rate limit (wait), a 5xx is the model being busy (retry shortly), a timeout is a
+       * deadline (retry). Reporting all three as "the analysis failed" leaves a user unable to tell a
+       * two-minute wait from a broken deployment. Every code is also what 0017 stores, so the ledger and
+       * the message agree.
+       */
+      readonly code: "PROVIDER_ERROR" | "PROVIDER_UNAVAILABLE" | "PROVIDER_TIMEOUT" | "RATE_LIMITED" | "INVALID_PROVIDER_OUTPUT" | "PROVIDER_NAME_INVALID";
+    };
 
 export interface GenerationInput {
   readonly userId: string;
@@ -55,6 +66,22 @@ export interface GenerationInput {
 function safeErrorCode(code: string): string {
   const cleaned = code.toUpperCase().replace(/[^A-Z0-9_]/g, "_").slice(0, 48);
   return cleaned === "" ? "UNKNOWN" : cleaned;
+}
+
+/**
+ * Turn a transport failure into one of the fixed codes — never into prose.
+ *
+ * The status is read from the error's own field (the Gemini transport records it), so this does not
+ * parse a provider message: provider text can echo the request, and it is never stored.
+ */
+function classifyProviderFailure(err: unknown): "PROVIDER_ERROR" | "PROVIDER_UNAVAILABLE" | "PROVIDER_TIMEOUT" | "RATE_LIMITED" {
+  const code = (err as { code?: unknown })?.code;
+  const status = (err as { status?: unknown })?.status;
+  if (code === "RATE_LIMITED") return "RATE_LIMITED";
+  if (code === "TIMEOUT") return "PROVIDER_TIMEOUT";
+  if (typeof status === "number" && status >= 500) return "PROVIDER_UNAVAILABLE";
+  if (code === "NETWORK" || code === "MALFORMED_RESPONSE" || code === "EMPTY_RESULT" || code === "UNPARSEABLE_OUTPUT") return "PROVIDER_ERROR";
+  return "PROVIDER_ERROR";
 }
 
 export class AiCoachService {
@@ -111,9 +138,9 @@ export class AiCoachService {
       if (err instanceof AiProviderNotConfiguredError) {
         return this.refuse(base, "PROVIDER_NOT_CONFIGURED");
       }
-      // The provider's message may quote user content; it is never stored or
-      // returned — only a fixed, shape-valid code.
-      return this.error(base, "PROVIDER_ERROR");
+      // The provider's message may quote user content; it is never stored or returned — only a fixed,
+      // shape-valid code, chosen from what the transport reported rather than from its text.
+      return this.error(base, classifyProviderFailure(err));
     }
 
     // 5. VALIDATE BEFORE PERSISTING
@@ -157,7 +184,7 @@ export class AiCoachService {
 
   private async error(
     base: Omit<AiAttemptRecord, "insight" | "tokensIn" | "tokensOut" | "costMicroUsd" | "outcome" | "errorCode">,
-    code: "PROVIDER_ERROR" | "INVALID_PROVIDER_OUTPUT" | "PROVIDER_NAME_INVALID",
+    code: "PROVIDER_ERROR" | "PROVIDER_UNAVAILABLE" | "PROVIDER_TIMEOUT" | "RATE_LIMITED" | "INVALID_PROVIDER_OUTPUT" | "PROVIDER_NAME_INVALID",
   ): Promise<GenerationOutcome> {
     await this.deps.attempts.record({
       ...base,

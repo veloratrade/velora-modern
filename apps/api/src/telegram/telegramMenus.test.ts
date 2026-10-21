@@ -20,6 +20,7 @@ import {
   TEMPLATES_PER_PAGE,
   aiMenu,
   bannerMenu,
+  channelMenu,
   flowKeyboard,
   helpMenu,
   journalMenu,
@@ -101,6 +102,17 @@ function everyScreen(): { name: string; screen: MenuScreen }[] {
       }),
     },
     { name: "help", screen: helpMenu(fa, "…commands…") },
+    {
+      name: "channel (one active)",
+      screen: channelMenu(fa, {
+        channels: [{ chatId: "-1003245304814", title: "ICT", status: "ACTIVE", canPost: true }],
+        apiWired: true,
+      }),
+    },
+    {
+      name: "channel (empty, no api)",
+      screen: channelMenu(en, { channels: [], apiWired: false }),
+    },
   ];
   return screens;
 }
@@ -212,4 +224,27 @@ test("the AI screen names missing keys and never a value", () => {
 test("a guided prompt always carries its own cancel button", () => {
   const cancels = flowKeyboard(fa).flat().map((b) => parseCallbackData((b as { callbackData?: string }).callbackData ?? ""));
   assert.deepEqual(cancels.map((c) => c?.action), ["flow_cancel"]);
+});
+
+test("the channel screen says what it can see and offers no fake verification", () => {
+  const screen = channelMenu(fa, {
+    channels: [{ chatId: "-1003245304814", title: "ICT", status: "ACTIVE", canPost: true }],
+    apiWired: true,
+  });
+  assert.ok(screen.text.includes("-1003245304814"), "the bound chat id is shown");
+  assert.ok(screen.text.includes(fa.navChannelHow), "the binding rule is stated on the screen itself");
+  // The only real side effect offered is a test message; binding is `/channel <id>`, never a button that
+  // could "verify" a chat the user merely named.
+  const actions = screen.keyboard.flat().map((b) => (b as { callbackData?: string }).callbackData ?? "");
+  assert.ok(actions.includes("channel_test:channel"));
+  assert.ok(!actions.some((a) => a.startsWith("menu:channel")), "the screen does not link to itself");
+  assert.ok(actions.includes("menu:home"), "no screen is a dead end");
+});
+
+test("an active channel with no post right is labelled, not hidden", () => {
+  const screen = channelMenu(fa, {
+    channels: [{ chatId: "-100", title: "Old", status: "ACTIVE", canPost: false }],
+    apiWired: true,
+  });
+  assert.ok(screen.text.includes(fa.channelNoRightsShort));
 });

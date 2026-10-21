@@ -52,7 +52,7 @@ class FakeApi {
     this.sent.push({ kind, chatId, body, ...(photo === undefined ? {} : { photo }), options });
   }
   async getChatMember() {
-    return { status: this.memberStatus, canPostMessages: this.canPost };
+    return { status: this.memberStatus, canPostMessages: this.canPost, canSendMessages: this.canPost };
   }
   async getChat(chatId: string) {
     return { id: chatId, type: "channel" as const, title: "Velora Journal" };
@@ -525,4 +525,145 @@ test("the Persian card renders Persian labels and keeps eastern digits in the us
   // above is the observable proof. What must NOT appear is the English label.
   assert.equal(out.text.includes("Daily bias"), false);
   assert.equal(out.banner, null, "no banner was requested for this preview");
+});
+
+// ── THE MEMBERSHIP LOOKUP THAT BLOCKED EVERY CHANNEL ─────────────────────────────────────────────────
+// REGRESSION (measured against the live Bot API on 2026-10-21): this service asked Telegram for the
+// membership of a user literally named "@me". `getChatMember` has no such address — the API answers
+// `400 Bad Request: invalid user_id specified` — the refusal was caught, and EVERY preview in EVERY chat
+// came back `CHANNEL_UNVERIFIED` even where the bot was an administrator. The tests below pin both
+// halves: the id that is asked for, and the supergroup case that used to be misjudged by vocabulary.
+
+test("the membership check asks with the BOT'S OWN ID, never with \"@me\"", async () => {
+  const { service, api } = await build();
+  const asked: string[] = [];
+  (api as unknown as { getChatMember: (chatId: string, userId: string) => Promise<unknown> }).getChatMember =
+    (chatId: string, userId: string) => {
+      asked.push(userId);
+      return Promise.resolve({ status: "administrator", canPostMessages: true, canSendMessages: true });
+    };
+  const out = await service.preview(req());
+  assert.equal(out.status, "ready");
+  if (out.status !== "ready") return;
+  assert.equal(out.blockedReason, null, "an administrator's chat is publishable");
+  assert.deepEqual(asked, ["7"], "the fake getMe answers id 7 — that is the id Telegram must be asked about");
+});
+
+test("a supergroup the bot administers is publishable even though Telegram omits can_post_messages there", async () => {
+  const store = new MemoryTelegramStore();
+  await store.upsertChannel({
+    userId: USER,
+    chatId: CHAT,
+    title: "ICT",
+    chatType: "supergroup",
+    status: "ACTIVE",
+    canPost: true,
+    at: T0,
+  });
+  const api = new FakeApi();
+  // The live API's exact shape for a supergroup administrator: no can_post_messages at all.
+  (api as unknown as { getChatMember: () => Promise<unknown> }).getChatMember = () =>
+    Promise.resolve({ status: "administrator", canPostMessages: false, canSendMessages: true });
+  const service = new TelegramPostService({
+    store,
+    data: dataPort(),
+    api: api.asApi,
+    allowedLinkHosts: ["app.veloratrade.ir"],
+    now: () => T0,
+  });
+  const out = await service.preview(req());
+  assert.equal(out.status, "ready");
+  if (out.status !== "ready") return;
+  assert.equal(out.blockedReason, null);
+});
+
+test("a bot that was removed from the chat is still refused, and says so", async () => {
+  // The fix must not turn the check into a rubber stamp: a stored ACTIVE row plus a live "left" is a
+  // refusal, which is exactly the state an admin creates by kicking the bot.
+  const api = new FakeApi();
+  api.memberStatus = "left";
+  const { service } = await build({ api });
+  const out = await service.preview(req());
+  assert.equal(out.status, "ready");
+  if (out.status !== "ready") return;
+  assert.equal(out.blockedReason, "CHANNEL_UNVERIFIED");
+});
+
+// ── A SECOND DELIBERATE REQUEST IS NOT A RE-DELIVERED ONE ────────────────────────────────────────
+// Found by running the flow against the real database: `/post` before the day's checklist is filed
+// stores a draft whose fields read "not recorded"; the user then files the checklist and types
+// `/post` again. The dedupe key matched, the OLD bytes were re-shown, and a publish button appeared
+// on a card that did not contain the data the user had just entered.
+
+/** Every checklist field the bias card prints, so "filed" means the card is genuinely complete. */
+function completeChecklist(bias: string) {
+  return {
+    items: {
+      dailyBias: { state: "CONFIRMED", value: bias },
+      marketLeg: { state: "CONFIRMED", value: "up" },
+      priceLocation: { state: "CONFIRMED", value: "premium" },
+      pdArrayH4: { state: "CONFIRMED", value: "fvg" },
+      pdArrayH1: { state: "CONFIRMED", value: "ob" },
+      pdArrayM15: { state: "CONFIRMED", value: "none" },
+      m1Cisd: { state: "CONFIRMED", value: "yes" },
+      smt: { state: "UNKNOWN", value: null },
+      macroTiming: { state: "CONFIRMED", value: "09:30" },
+      stopLoss: { state: "CONFIRMED", value: "2641.5" },
+      risk: { state: "CONFIRMED", value: "0.5%" },
+    },
+    coverage: { confirmed: 10, unknown: 1, unreviewed: 0 },
+    timezone: "Asia/Tehran",
+  };
+}
+
+test("a duplicate key whose bytes changed refreshes an unapproved draft instead of re-showing it", async () => {
+  let filed: ReturnType<typeof completeChecklist> | null = null;
+  const { service, store } = await build({ data: { checklistFor: async () => filed } });
+
+  const first = await service.preview(req());
+  assert.equal(first.status, "ready");
+  if (first.status !== "ready") return;
+  assert.equal(first.incompleteData, true, "with no checklist the card is a hole and is not publishable");
+
+  filed = completeChecklist("bullish");
+
+  const second = await service.preview(req()); // the SAME dedupe key: the user retyped the command
+  assert.equal(second.status, "ready");
+  if (second.status !== "ready") return;
+  assert.equal(second.reused, false, "a changed render is a refreshed draft, not a re-delivery");
+  assert.equal(second.post.id, first.post.id, "and it is still ONE post row, not a second one");
+  assert.ok(second.text.includes("bullish"), "the card now shows the recorded value");
+  assert.equal(second.incompleteData, false, "with the checklist filed the card is publishable");
+  const stored = await store.findPost(USER, second.post.id);
+  assert.equal(stored?.contentHash, sha256Hex(second.text), "the stored bytes are the new bytes");
+  assert.notEqual(stored?.contentHash, sha256Hex(first.text), "…and definitely not the old ones");
+});
+
+test("identical bytes stay a reuse, and an APPROVED row is never rewritten behind the user's back", async () => {
+  let filed: ReturnType<typeof completeChecklist> = completeChecklist("bullish");
+  const { service, store } = await build({ data: { checklistFor: async () => filed } });
+
+  const first = await service.preview(req());
+  assert.equal(first.status, "ready");
+  if (first.status !== "ready") return;
+  const again = await service.preview(req());
+  assert.equal(again.status, "ready");
+  if (again.status !== "ready") return;
+  assert.equal(again.reused, true, "the same bytes are the same request: the double-post guard still holds");
+  assert.equal(again.post.id, first.post.id);
+
+  // Approve those bytes, then let the day's data change underneath them.
+  const approved = await service.approve({ userId: USER, postId: first.post.id });
+  assert.notEqual(approved, null);
+  filed = completeChecklist("bearish");
+
+  const afterApproval = await service.preview(req());
+  assert.equal(afterApproval.status, "ready");
+  if (afterApproval.status !== "ready") return;
+  assert.equal(afterApproval.reused, true, "an approved row is re-shown as approved, not rewritten");
+  assert.equal(afterApproval.post.id, first.post.id);
+  const row = await store.findPost(USER, first.post.id);
+  assert.equal(row?.status, "APPROVED", "and the row is still approved");
+  assert.equal(row?.contentHash, sha256Hex(first.text), "the approved bytes were not replaced");
+  assert.ok(row?.body.includes("bullish") === true, "the approved card still says what the user signed off on");
 });

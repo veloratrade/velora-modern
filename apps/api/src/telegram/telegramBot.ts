@@ -51,7 +51,7 @@ import {
 import type { JournalAnalysisService } from "../journal/journalAnalysisService.js";
 import type { AttachmentService } from "../attachments/attachmentService.js";
 import type { AiAttemptStore } from "../aicoach/aiProvider.js";
-import { TELEGRAM_MAX_DOWNLOAD_BYTES, TelegramApiError, type InlineKeyboardButton, type TelegramBotApi } from "./telegramApi.js";
+import { botCanPostIn, TELEGRAM_MAX_DOWNLOAD_BYTES, TelegramApiError, type InlineKeyboardButton, type TelegramBotApi } from "./telegramApi.js";
 import type { AuditStore } from "../auth/auditStore.js";
 import { interpretImageAndRecord, transcribeAndRecord, type MediaInterpreter } from "../aicoach/mediaInterpreter.js";
 import type { RateLimiter } from "../ratelimits/rateLimiter.js";
@@ -61,6 +61,7 @@ import { TelegramPostError, type TelegramPostService } from "./telegramPostServi
 import {
   aiMenu,
   bannerMenu,
+  channelMenu,
   helpMenu,
   journalMenu,
   mainMenu,
@@ -667,6 +668,8 @@ export class TelegramBot {
         return this.sendAnalysis(chatId, userId, tgId, locale);
       case "settings":
         return this.sendSettings(chatId, userId, locale);
+      case "channel":
+        return this.sendChannelScreen(chatId, userId, locale);
       case "stats":
         return this.sendStats(chatId, userId, locale);
       case "checklist":
@@ -1425,15 +1428,34 @@ export class TelegramBot {
     if (out.unsupportedPlaceholders.length > 0) lines.push(copy.postUnsupportedExpr);
     if (out.truncated) lines.push(copy.postTruncated);
     if (out.markupDropped) lines.push(copy.postMarkupDropped);
-    if (out.blockedReason !== null) lines.push(copy.postBlocked(out.blockedReason));
+    if (out.blockedReason !== null || out.incompleteData) {
+      if (out.blockedReason !== null) lines.push(copy.postBlocked(out.blockedReason));
+      // A blocked preview is a dead end unless the answer comes with the way out. Two causes exist and
+      // each has exactly one fix: unrecorded fields are filed with the checklist, and an unverified
+      // channel is bound with `/channel <id>` (the screen explains what Telegram must answer).
+      lines.push(copy.postBlockedFix(out.incompleteData ? Math.max(out.gaps.length, 1) : 0));
+    }
     // "Edit" sits with the publish button because it edits THAT preview: a second tap path to the same
     // text, where the edit revokes the approval the publish button would have taken.
+    // A publish button appears ONLY when the destination is writable AND the card has no unrecorded
+    // checklist field: the two facts are separate, so both are required.
+    const publishable = out.blockedReason === null && !out.incompleteData;
     const keyboard: InlineKeyboardButton[][] =
-      out.blockedReason === null
+      publishable
         ? [[{ text: copy.btnPublish, callbackData: buildCallbackData("post_pub", post.id) },
             { text: copy.btnPostEdit, callbackData: buildCallbackData("post_edit", post.id) },
             { text: copy.btnDismiss, callbackData: buildCallbackData("post_no", post.id) }]]
-        : [];
+        : [
+            // The fix buttons. Neither publishes anything: the checklist one opens the entry prompt and
+            // the channel one is a read-only screen. BOTH are offered when both causes apply, because a
+            // user looking at "blocked" should not have to fix one thing to be told about the next.
+            [
+              ...(out.gaps.length > 0 ? [{ text: copy.btnChecklist, callbackData: buildCallbackData("menu", "checklist") }] : []),
+              { text: copy.btnManageChannel, callbackData: buildCallbackData("menu", "channel") },
+            ],
+            [{ text: copy.btnPostResult, callbackData: buildCallbackData("menu", "postresult") },
+             { text: copy.btnHome, callbackData: buildCallbackData("menu", "home") }],
+          ];
     // `safeSend` sends HTML by default, so the rendered markup needs no flag — and the buttons are
     // attached ONLY when nothing blocks the send: offering "Publish" for a destination Telegram would
     // refuse is a button that lies.
@@ -1554,9 +1576,19 @@ export class TelegramBot {
         await this.safeSend(chatId, copy.postNotApproved);
         return "rejected";
       case "unavailable":
-        // The three reasons are the ones the service can actually prove, and each needs a different
-        // next step from the user — so the code is shown verbatim rather than smoothed into prose.
-        await this.safeSend(chatId, copy.postBlocked(outcome.reason));
+        // The reasons are the ones the service can actually prove, and each needs a different next step
+        // from the user — so the code is shown verbatim rather than smoothed into prose, and the two
+        // fixable ones arrive with the button that fixes them.
+        await this.safeSend(chatId, copy.postBlocked(outcome.reason), {
+          inlineKeyboard:
+            outcome.reason === "INCOMPLETE_DATA"
+              ? [[{ text: copy.btnChecklist, callbackData: buildCallbackData("menu", "checklist") }],
+                 [{ text: copy.btnHome, callbackData: buildCallbackData("menu", "home") }]]
+              : outcome.reason === "CHANNEL_UNVERIFIED" || outcome.reason === "NO_CHANNEL"
+                ? [[{ text: copy.btnManageChannel, callbackData: buildCallbackData("menu", "channel") }],
+                   [{ text: copy.btnHome, callbackData: buildCallbackData("menu", "home") }]]
+                : undefined,
+        });
         return "rejected";
       case "not-claimable":
         // A row already claimed by another attempt is NOT retried here: `attempts` has moved, and a
@@ -1840,15 +1872,26 @@ export class TelegramBot {
     if (out.truncated) lines.push(copy.postTruncated);
     if (out.markupDropped) lines.push(copy.postMarkupDropped);
     if (out.blockedReason !== null) lines.push(copy.postBlocked(out.blockedReason));
+    if (out.incompleteData) lines.push(copy.postBlockedFix(Math.max(out.gaps.length, 1)));
     // The publish button is offered only when nothing blocks the send — a button that cannot work is
-    // the kind of promise this bot does not make.
+    // the kind of promise this bot does not make. Two independent facts gate it: the destination must
+    // accept the post, and the card must have no unrecorded required field.
+    const publishable = out.blockedReason === null && !out.incompleteData;
     const keyboard: InlineKeyboardButton[][] =
-      out.blockedReason === null
+      publishable
         ? [[
             { text: copy.btnPublish, callbackData: buildCallbackData("post_pub", post.id) },
             { text: copy.btnDismiss, callbackData: buildCallbackData("post_no", post.id) },
           ], [...backToTemplates(copy)]]
-        : [[...backToTemplates(copy)]];
+        : [
+            ...(out.incompleteData
+              ? [[{ text: copy.btnChecklist, callbackData: buildCallbackData("menu", "checklist") }]]
+              : []),
+            ...(out.blockedReason !== null
+              ? [[{ text: copy.btnManageChannel, callbackData: buildCallbackData("menu", "channel") }]]
+              : []),
+            [...backToTemplates(copy)],
+          ];
     await this.safeSend(chatId, clamp(`${lines.join("\n")}\n\n${out.text}`), { inlineKeyboard: keyboard });
     if (out.banner !== null) {
       // No rasterizer ⇒ say so in one sentence; never claim an image was produced.
@@ -2633,10 +2676,11 @@ ${copy.channelStandbyNow}`);
       // follows the API's own vocabulary rather than a single membership test:
       // channels and supergroups answer `can_post_messages`, and a plain group
       // only needs the bot to still be in it.
-      const canPost =
-        chat.type === "channel" || chat.type === "supergroup"
-          ? member.canPostMessages
-          : member.status === "creator" || member.status === "administrator" || member.status === "member";
+      // ONE RULE, SHARED WITH THE PUBLISH PATH (`botCanPostIn`). The local version of this predicate
+      // required `can_post_messages` for a supergroup, a field Telegram only reports for channels, so
+      // binding a supergroup the bot administers answered "no posting rights" — and the publish path
+      // separately asked for the membership of a user called "@me", which the API rejects outright.
+      const canPost = botCanPostIn(chat.type, member);
       const record: TelegramChannelRecord = await this.deps.store.upsertChannel({
         userId,
         chatId: chat.id,
@@ -2659,6 +2703,24 @@ ${copy.channelStandbyNow}`);
       await this.safeSend(chatId, code === "CHAT_NOT_FOUND" ? copy.channelNotFound : copy.genericError);
       return "rejected";
     }
+  }
+
+  /**
+   * The channel section.
+   *
+   * It renders the rows the binding path wrote, and it does NOT offer a "verify" button: verification is
+   * `/channel <id>`, because the only trustworthy answer comes from Telegram's own membership check for
+   * a chat id the user obtained themselves. A button that "verified" a name would be exactly the guess
+   * this path exists to refuse.
+   */
+  private async sendChannelScreen(chatId: string, userId: string, locale: Locale | null): Promise<UpdateOutcome> {
+    const { copy } = this.copyFor(locale, { media: this.mediaAvailable });
+    const channels = await this.deps.store.listChannels(userId);
+    await this.sendScreen(chatId, channelMenu(copy, {
+      channels: channels.map((c) => ({ chatId: c.chatId, title: c.title, status: c.status, canPost: c.canPost })),
+      apiWired: this.deps.api !== undefined,
+    }));
+    return "handled";
   }
 
   private async testChannel(chatId: string, userId: string, locale: Locale | null): Promise<UpdateOutcome> {
@@ -2716,6 +2778,10 @@ ${copy.channelStandbyNow}`);
     const result = await this.deps.analysis.analyze(userId);
     if (result.status !== "ok") {
       if (result.status === "error") this.deps.log({ level: "warn", event: "ai_analysis_failed", code: result.code });
+      // ONE SENTENCE PER REAL CAUSE. A 429, a 503 and a timeout are three different facts to a user:
+      // "wait a few minutes", "the provider is busy", "it did not answer in time". Collapsing them into
+      // "the analysis failed" is the ambiguity this mapping exists to remove — and none of the branches
+      // invents a result.
       const text =
         result.code === "PROVIDER_NOT_CONFIGURED"
           ? copy.analyzeDisabled
@@ -2723,7 +2789,13 @@ ${copy.channelStandbyNow}`);
             ? copy.analyzeConsent
             : result.code === "NO_DATA"
               ? copy.analyzeEmpty
-              : copy.analyzeFailed;
+              : result.code === "RATE_LIMITED"
+                ? copy.analyzeRateLimited
+                : result.code === "PROVIDER_UNAVAILABLE" || result.code === "PROVIDER_BUSY"
+                  ? copy.analyzeBusy
+                  : result.code === "PROVIDER_TIMEOUT"
+                    ? copy.analyzeTimeout
+                    : copy.analyzeFailed;
       await this.safeSend(chatId, text);
       return "handled";
     }

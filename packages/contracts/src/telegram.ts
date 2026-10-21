@@ -274,6 +274,10 @@ export const MENU_TARGETS = [
   // three journal shortcuts that were already here and stay reachable from the journal section.
   "home", "journal", "last", "history", "analyze", "stats", "checklist", "post",
   "posts", "postresult", "templates", "banner", "ai", "settings", "help",
+  // `channel` was the one capability reachable ONLY by typing `/channel <id>`. Binding a channel is
+  // where a blocked publish sends the user, so the screen that explains it must be a destination like
+  // every other section — otherwise "fix your channel" is advice with no button behind it.
+  "channel",
 ] as const;
 export type MenuTarget = (typeof MENU_TARGETS)[number];
 

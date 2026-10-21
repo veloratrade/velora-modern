@@ -145,8 +145,39 @@ export interface TelegramChatRef {
 }
 export interface TelegramMemberRef {
   readonly status: "creator" | "administrator" | "member" | "restricted" | "left" | "kicked";
-  /** True when the bot may post to the chat (channels/supergroups). */
+  /**
+   * The bot's post right IN A CHANNEL (`can_post_messages`). Telegram sends this field for channels and
+   * omits it for groups and supergroups, where posting is governed by the chat's own permissions — so a
+   * supergroup administrator legitimately answers `undefined` here.
+   */
   readonly canPostMessages: boolean;
+  /**
+   * The bot's send right in a group or supergroup. Derived from `can_send_messages` for a restricted
+   * member and true for a live membership otherwise; null where Telegram has no opinion to give.
+   */
+  readonly canSendMessages: boolean | null;
+}
+
+/**
+ * Can the bot post into this chat, as Telegram itself describes it?
+ *
+ * WHY THIS IS ONE FUNCTION. It is asked in two places that MUST agree — binding a channel
+ * (`/channel <id>`) and deciding whether a preview may be published — and they previously disagreed
+ * with Telegram's own vocabulary: both required `can_post_messages` for a SUPERGROUP, where Telegram
+ * only reports that field for channels. A supergroup the bot administers was therefore reported as
+ * unwritable, and publishing in it was blocked forever. Measured against the live API on 2026-10-21:
+ * an administrator of the ICT supergroup answers `status:"administrator"`, `can_post_messages` absent,
+ * while the chat reports `permissions.can_send_messages: true`.
+ */
+export function botCanPostIn(chatType: "private" | "group" | "supergroup" | "channel", member: TelegramMemberRef): boolean {
+  if (member.status === "left" || member.status === "kicked") return false;
+  // A channel post right is `can_post_messages` — for creators the transport already reports true.
+  if (chatType === "channel") return member.canPostMessages;
+  // Groups and supergroups: live membership is the right. A RESTRICTED member only has what the
+  // restriction left them, so its own flag is the answer; everything else is enforced by Telegram at
+  // send time (slow mode, topics, …), which is where those failures belong.
+  if (member.status === "restricted") return member.canSendMessages === true;
+  return true;
 }
 
 /** The request shape this client is willing to make: JSON or one multipart upload, nothing else. */
@@ -439,9 +470,14 @@ export class HttpTelegramBotApi implements TelegramBotApi {
     // (Telegram omits it for plain members), so membership alone is enough
     // outside a channel — the failure then surfaces at publish time.
     const canPost = isAdmin && result["can_post_messages"] !== false;
+    // `can_send_messages` is only meaningful for a restricted member; for everyone else Telegram does
+    // not send it and its absence is not a refusal.
+    const canSend =
+      status === "restricted" ? result["can_send_messages"] === true : status === "member" || isAdmin ? true : null;
     return {
       status: known ? status : "left",
       canPostMessages: status === "creator" ? true : canPost,
+      canSendMessages: canSend,
     };
   }
 

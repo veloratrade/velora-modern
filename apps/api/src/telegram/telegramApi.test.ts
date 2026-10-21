@@ -20,7 +20,7 @@
 //     writable, because that decision binds a user's journal to a chat.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { HttpTelegramBotApi, TELEGRAM_CAPTION_LIMIT, TELEGRAM_MAX_DOWNLOAD_BYTES, TelegramApiError, isSendablePhotoRef } from "./telegramApi.js";
+import { botCanPostIn, HttpTelegramBotApi, TELEGRAM_CAPTION_LIMIT, TELEGRAM_MAX_DOWNLOAD_BYTES, TelegramApiError, isSendablePhotoRef } from "./telegramApi.js";
 import type { SecretValue } from "./telegramConfig.js";
 
 const TOKEN = "123456789:AAFakeTokenValueForTestsOnly_000000000000";
@@ -271,4 +271,30 @@ test("an unsendable photo ref is refused before the request, and the token never
   assert.equal(err!.code, "INVALID_REQUEST");
   assert.ok(!String(err!.message).includes(TOKEN));
   assert.equal(calls.length, 0, "nothing left the process");
+});
+
+// ── ONE POST-RIGHT PREDICATE, SHARED BY BINDING AND PUBLISHING ────────────────────────────────────────
+// The live API on 2026-10-21 reported a supergroup administrator as `status:"administrator"` with NO
+// `can_post_messages` (that field exists for channels only). Both call sites used to demand it anyway,
+// so a supergroup the bot runs was reported unwritable. These cases pin the vocabulary that the live
+// answers actually use.
+test("botCanPostIn follows Telegram's per-chat vocabulary, not one field for every chat kind", () => {
+  const member = (over: Partial<Parameters<typeof botCanPostIn>[1]>) => ({
+    status: "administrator" as const,
+    canPostMessages: true,
+    canSendMessages: null,
+    ...over,
+  });
+  // Channels: the post right is can_post_messages, and nothing else substitutes for it.
+  assert.equal(botCanPostIn("channel", member({ canPostMessages: true })), true);
+  assert.equal(botCanPostIn("channel", member({ canPostMessages: false })), false);
+  // Supergroups/groups: membership is the right; can_post_messages is absent there and must not veto.
+  assert.equal(botCanPostIn("supergroup", member({ canPostMessages: false, canSendMessages: true })), true);
+  assert.equal(botCanPostIn("group", member({ status: "member", canPostMessages: false, canSendMessages: true })), true);
+  // A restricted member only has what the restriction left them.
+  assert.equal(botCanPostIn("supergroup", member({ status: "restricted", canSendMessages: false })), false);
+  assert.equal(botCanPostIn("supergroup", member({ status: "restricted", canSendMessages: true })), true);
+  // Gone is gone, in every chat kind.
+  assert.equal(botCanPostIn("channel", member({ status: "left" })), false);
+  assert.equal(botCanPostIn("group", member({ status: "kicked" })), false);
 });
