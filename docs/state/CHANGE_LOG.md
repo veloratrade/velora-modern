@@ -1838,3 +1838,11 @@ gate is real and is not bypassed for the test.
 (`tg-owner-fixture@velora.test`, `ai_consent_at` NULL), while the consent just granted sits on user 13. The
 bot reads consent from the linked user, so the chat itself still answers "consent required" until that
 identity is re-linked to user 13 or user 7 is given consent.
+
+### AC-D8, follow-up — consent on the account the bot actually resolves
+
+`telegram_identities` maps the owner's chat to user **7**, so the consent granted on user 13 in the panel could
+never satisfy the bot. The owner chose to grant consent on user 7 rather than re-link the identity (no data
+movement, and reversible with `UPDATE users SET ai_consent_at = NULL WHERE id = 7`). After the update the same
+production call ran with the REAL consent store and no test doubles: `status=generated`,
+`gemini-3.6-flash`, 18.8 s, reply «دستیار با موفقیت متصل شد.».

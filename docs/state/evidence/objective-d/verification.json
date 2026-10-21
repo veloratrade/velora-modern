@@ -294,6 +294,20 @@
     },
     "consent_gate": "Before consent the same call answered refused/CONSENT_REQUIRED \u2014 the gate is real. owner@veloratrade.ir (id 13) granted consent at 2026-10-21T15:33:40Z, after which the call generated.",
     "open_identity_issue": "telegram_identities maps the owner's chat 449106486 to user 7 (tg-owner-fixture@velora.test, ai_consent_at NULL). The bot reads consent from the LINKED user, so the bot chat still answers CON sent_REQUIRED until user 7 gets consent or the chat is re-linked to user 13.",
-    "bot_version": "d179d5a3-fdd1-4895-b1be-f4e81e1ede0c"
+    "bot_version": "d179d5a3-fdd1-4895-b1be-f4e81e1ede0c",
+    "consent_granted_on_linked_user": {
+      "decision": "owner chose 'set consent on user 7' (the account the bot resolves for chat 449106486)",
+      "before": {
+        "id": 7,
+        "ai_consent_at": null
+      },
+      "after": {
+        "id": 7,
+        "ai_consent_at": "2026-10-21T16:09:15.841Z"
+      },
+      "reversible": "UPDATE users SET ai_consent_at = NULL WHERE id = 7"
+    },
+    "live_call_with_real_consent": "user 7, production classes, real consent store, no doubles: status=generated, gemini-3.6-flash, 18.8 s, reply \u00ab\u062f\u0633\u062a\u06cc\u0627\u0631 \u0628\u0627 \u0645\u0648\u0641\u0642\u06cc\u062a \u0645\u062a\u0635\u0644 \u0634\u062f.\u00bb (197/39 tokens)",
+    "remaining_unverified": "the Telegram transport itself: the owner must send /analyze (or a voice note) in the chat; everything up to the transport is proven"
   }
 }
