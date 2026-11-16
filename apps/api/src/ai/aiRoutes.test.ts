@@ -50,6 +50,9 @@ import type { AiCapability } from "./aiRoutes.js";
 import type { AiAdminCapability } from "./aiAdminRoutes.js";
 import { MasterKey } from "../credentials/credentialCrypto.js";
 
+/** SSRF-DNS seam: destinations resolve to a public documentation address; tests never touch real DNS. */
+const TEST_PUBLIC_DNS = async (): Promise<readonly string[]> => ["93.184.215.14"];
+
 const JWT_SECRET = "phase7-ai-route-test-secret-0123456789abcdef";
 const PASSWORD = "a-strong-password-123";
 
@@ -193,7 +196,7 @@ async function build(options: { withAi?: boolean; withAdmin?: boolean; secrets?:
   const toolServices = options.withTools === true
     ? {
         search: new AiSearchService({ secrets: secretService, fetchImpl: toolFetch, now: () => new Date(0) }),
-        browser: new AiBrowserService({ secrets: secretService, fetchImpl: toolFetch, now: () => new Date(0) }),
+        browser: new AiBrowserService({ lookupHost: TEST_PUBLIC_DNS, secrets: secretService, fetchImpl: toolFetch, now: () => new Date(0) }),
       }
     : null;
 
