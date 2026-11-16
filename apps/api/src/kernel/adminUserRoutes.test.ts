@@ -10,6 +10,7 @@ import { createApp, listen } from "./server.js";
 import { AuthService } from "../auth/authService.js";
 import { LogMailProvider } from "../mail/logMailProvider.js";
 import { MemoryUserStore } from "../auth/memoryUserStore.js";
+import { sessionTokenFor } from "../auth/sessionTokenFixture.js";
 import { VeloraHasher } from "../auth/hashing.js";
 import { JwtService } from "../auth/jwt.js";
 import { AdminUserService } from "../auth/adminUserService.js";
@@ -25,8 +26,12 @@ interface Envelope<T = unknown> {
   error: { code: string; message: string } | null;
 }
 
-function tokenFor(sub: string, role: string): string {
-  return JwtService.create(SECRET).sign({ sub, role }, 900);
+/** The running harness's user store: tokens are minted against a live session in it (AUTH-REVOKE). */
+let activeUsers: MemoryUserStore | null = null;
+
+async function tokenFor(sub: string, role: string): Promise<string> {
+  if (activeUsers === null) throw new Error("tokenFor called outside a harness");
+  return sessionTokenFor(activeUsers, SECRET, sub, role);
 }
 
 async function withServer(
@@ -34,6 +39,7 @@ async function withServer(
   opts: { withService?: boolean } = {},
 ): Promise<void> {
   const userStore = new MemoryUserStore();
+  activeUsers = userStore;
   const auth = new AuthService({
     store: userStore,
     hasher: new VeloraHasher(),
@@ -98,7 +104,7 @@ test("E2: a plain user is FORBIDDEN from listing users", async () => {
   await withServer(async (base, store) => {
     const id = await seed(store, "plain@example.com");
     const res = await fetch(`${base}/api/v1/admin/users`, {
-      headers: authHeaders(tokenFor(id, "user")),
+      headers: authHeaders(await tokenFor(id, "user")),
     });
     assert.equal(res.status, 403);
     const body = (await res.json()) as Envelope;
@@ -111,7 +117,7 @@ test("E3: an admin CAN list users, and no password hash is ever returned", async
     const adminId = await seed(store, "admin@example.com", "admin");
     await seed(store, "plain@example.com");
     const res = await fetch(`${base}/api/v1/admin/users`, {
-      headers: authHeaders(tokenFor(adminId, "admin")),
+      headers: authHeaders(await tokenFor(adminId, "admin")),
     });
     assert.equal(res.status, 200);
     const raw = await res.text();
@@ -129,7 +135,7 @@ test("E4: an admin is FORBIDDEN from changing a role (super_admin only)", async 
     const targetId = await seed(store, "plain@example.com");
     const res = await fetch(`${base}/api/v1/admin/users/${targetId}/role`, {
       method: "PATCH",
-      headers: authHeaders(tokenFor(adminId, "admin")),
+      headers: authHeaders(await tokenFor(adminId, "admin")),
       body: JSON.stringify({ role: "admin" }),
     });
     assert.equal(res.status, 403);
@@ -146,7 +152,7 @@ test("E5: a super_admin CAN change a role over HTTP", async () => {
     const targetId = await seed(store, "plain@example.com");
     const res = await fetch(`${base}/api/v1/admin/users/${targetId}/role`, {
       method: "PATCH",
-      headers: authHeaders(tokenFor(superId, "super_admin")),
+      headers: authHeaders(await tokenFor(superId, "super_admin")),
       body: JSON.stringify({ role: "admin" }),
     });
     assert.equal(res.status, 200);
@@ -181,7 +187,7 @@ test("E7: a client-supplied role header/query cannot escalate", async () => {
   await withServer(async (base, store) => {
     const id = await seed(store, "plain@example.com");
     const res = await fetch(`${base}/api/v1/admin/users?role=super_admin`, {
-      headers: { ...authHeaders(tokenFor(id, "user")), "x-role": "super_admin" },
+      headers: { ...authHeaders(await tokenFor(id, "user")), "x-role": "super_admin" },
     });
     assert.equal(res.status, 403);
   });
@@ -193,7 +199,7 @@ test("E8: an admin can suspend a plain user over HTTP", async () => {
     const targetId = await seed(store, "plain@example.com");
     const res = await fetch(`${base}/api/v1/admin/users/${targetId}/status`, {
       method: "PATCH",
-      headers: authHeaders(tokenFor(adminId, "admin")),
+      headers: authHeaders(await tokenFor(adminId, "admin")),
       body: JSON.stringify({ status: "suspended" }),
     });
     assert.equal(res.status, 200);
@@ -209,7 +215,7 @@ test("E9: an invalid status is rejected with 400 INVALID_STATUS", async () => {
     const targetId = await seed(store, "plain@example.com");
     const res = await fetch(`${base}/api/v1/admin/users/${targetId}/status`, {
       method: "PATCH",
-      headers: authHeaders(tokenFor(adminId, "admin")),
+      headers: authHeaders(await tokenFor(adminId, "admin")),
       body: JSON.stringify({ status: "deleted" }),
     });
     assert.equal(res.status, 400);
@@ -223,7 +229,7 @@ test("E10: self-action is blocked at the HTTP boundary too", async () => {
     const superId = await seed(store, "super@example.com", "super_admin");
     const res = await fetch(`${base}/api/v1/admin/users/${superId}/role`, {
       method: "PATCH",
-      headers: authHeaders(tokenFor(superId, "super_admin")),
+      headers: authHeaders(await tokenFor(superId, "super_admin")),
       body: JSON.stringify({ role: "user" }),
     });
     assert.equal(res.status, 403);
@@ -238,7 +244,7 @@ test("E11: GET /admin/users/:id returns the safe projection", async () => {
     const adminId = await seed(store, "admin@example.com", "admin");
     const targetId = await seed(store, "plain@example.com");
     const res = await fetch(`${base}/api/v1/admin/users/${targetId}`, {
-      headers: authHeaders(tokenFor(adminId, "admin")),
+      headers: authHeaders(await tokenFor(adminId, "admin")),
     });
     assert.equal(res.status, 200);
     const raw = await res.text();
@@ -252,7 +258,7 @@ test("E12: unknown target => 404 USER_NOT_FOUND", async () => {
   await withServer(async (base, store) => {
     const adminId = await seed(store, "admin@example.com", "admin");
     const res = await fetch(`${base}/api/v1/admin/users/no-such-id`, {
-      headers: authHeaders(tokenFor(adminId, "admin")),
+      headers: authHeaders(await tokenFor(adminId, "admin")),
     });
     assert.equal(res.status, 404);
     const body = (await res.json()) as Envelope;
@@ -265,7 +271,7 @@ test("E13: routes fail CLOSED (503) when the capability is not configured", asyn
     async (base, store) => {
       const adminId = await seed(store, "admin@example.com", "admin");
       const res = await fetch(`${base}/api/v1/admin/users`, {
-        headers: authHeaders(tokenFor(adminId, "admin")),
+        headers: authHeaders(await tokenFor(adminId, "admin")),
       });
       assert.equal(res.status, 503);
       const body = (await res.json()) as Envelope;

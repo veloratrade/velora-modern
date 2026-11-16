@@ -476,11 +476,11 @@ test("REVOKE: revoking every session of a user ends them, reports the count, and
     assert.equal(entries[0]!.beforeState, `live:${liveBefore}`);
     assert.equal(entries[0]!.afterState, "live:0");
 
-    // The user's own access token is unaffected (it is a stateless 15-minute
-    // JWT); what ends is the ability to RENEW. That is the existing mechanism
-    // suspension already relies on, and the console does not invent a new one.
-    const stillReads = await fetch(`${base}/api/v1/auth/me`, { headers: bearer(bob) });
-    assert.equal(stillReads.status, 200);
+    // AUTH-REVOKE (Legacy AuthService::authenticate parity): the access token
+    // is bound to its session, so revoking every session ends the user's
+    // CURRENT access immediately too — not just the ability to renew.
+    const afterRevoke = await fetch(`${base}/api/v1/auth/me`, { headers: bearer(bob) });
+    assert.equal(afterRevoke.status, 401);
   });
 });
 

@@ -1313,3 +1313,18 @@ test("0042: a post-edit step carries a post id and never a template id", async (
     await engine.close();
   }
 });
+
+test("0043 AUTH-REVOKE: user_sessions.access_token_hash is indexed (every protected request looks a session up by it)", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    // Legacy parity: `idx_sessions_access_hash` on user_sessions(access_token_hash).
+    const idx = (await engine.query(
+      "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'user_sessions' AND indexname = 'user_sessions_access_token_hash_idx'",
+    )).rows as Array<{ indexdef: string }>;
+    assert.equal(idx.length, 1, "the access-token-hash index exists");
+    assert.match(idx[0]!.indexdef, /\(access_token_hash\)/);
+  } finally {
+    await engine.close();
+  }
+});

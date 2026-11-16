@@ -16,6 +16,7 @@ import { AuthService } from "../auth/authService.js";
 import { JwtService } from "../auth/jwt.js";
 import { VeloraHasher } from "../auth/hashing.js";
 import { MemoryUserStore } from "../auth/memoryUserStore.js";
+import { sessionTokenFor } from "../auth/sessionTokenFixture.js";
 import { LogMailProvider } from "../mail/logMailProvider.js";
 import { MemoryWebhookEventStore } from "../webhooks/memoryWebhookStore.js";
 import { MetaApiWebhookService } from "../webhooks/metaApiWebhookService.js";
@@ -40,8 +41,12 @@ import { MemoryDeveloperStore } from "../developer/developerRoutes.js";
 const SECRET = "migrated-routes-test-secret-0123456789";
 const WEBHOOK_SECRET = "webhook-secret-abcdef0123456789";
 
-function tokenFor(sub: string, role = "user"): string {
-  return JwtService.create(SECRET).sign({ sub, role }, 900);
+/** The running harness's user store: tokens are minted against a live session in it (AUTH-REVOKE). */
+let activeUsers: MemoryUserStore | null = null;
+
+async function tokenFor(sub: string, role = "user"): Promise<string> {
+  if (activeUsers === null) throw new Error("tokenFor called outside withServer");
+  return sessionTokenFor(activeUsers, SECRET, sub, role);
 }
 
 interface Envelope<T = Record<string, unknown>> {
@@ -61,11 +66,13 @@ interface Harness {
 async function withServer(fn: (h: Harness) => Promise<void>, extend: Partial<ApiConfig> = {}): Promise<void> {
   const webhookStore = new MemoryWebhookEventStore();
   const attachmentStore = new MemoryAttachmentStore();
+  const users = new MemoryUserStore();
+  activeUsers = users;
   const config: ApiConfig = {
     allowedOrigins: ["https://veloratrade.ir"],
     checks: { database: async () => "ok" as const },
     auth: new AuthService({
-      store: new MemoryUserStore(),
+      store: users,
       hasher: new VeloraHasher(),
       jwt: JwtService.create(SECRET),
       mail: new LogMailProvider(),
@@ -105,7 +112,7 @@ async function json<T = Record<string, unknown>>(res: Response): Promise<Envelop
 
 test("the Phase C surface keeps precedence and unknown routes still 404", async () => {
   await withServer(async ({ base }) => {
-    const missing = await fetch(`${base}/api/v1/definitely-not-a-route`, H(tokenFor("1")));
+    const missing = await fetch(`${base}/api/v1/definitely-not-a-route`, H(await tokenFor("1")));
     assert.equal(missing.status, 404);
     const body = await json(missing);
     assert.equal(body.error?.code, "NOT_FOUND");
@@ -118,7 +125,7 @@ test("a migrated capability that is NOT wired fails closed with 503", async () =
     // same path would prove nothing about the route that exists.
     const sync = await fetch(`${base}/api/v1/accounts/7/sync`, {
       method: "POST",
-      headers: AUTH(tokenFor("1")),
+      headers: AUTH(await tokenFor("1")),
     });
     assert.equal(sync.status, 503);
     assert.equal((await json(sync)).error?.code, "SERVICE_UNAVAILABLE");
@@ -134,7 +141,7 @@ test("a migrated capability that is NOT wired fails closed with 503", async () =
       "/api/v1/copy-trading/relationships",
       "/api/v1/accounts/7/sync-status",
     ]) {
-      const res = await fetch(`${base}${path}`, H(tokenFor("1")));
+      const res = await fetch(`${base}${path}`, H(await tokenFor("1")));
       assert.equal(res.status, 503, `${path} must fail closed when absent`);
       const body = await json(res);
       assert.equal(body.error?.code, "SERVICE_UNAVAILABLE");
@@ -222,7 +229,7 @@ test("GET /accounts/{id}/sync-status is ownership scoped and non-disclosing", as
   store.set("1", view);
   await withServer(
     async ({ base }) => {
-      const mine = await fetch(`${base}/api/v1/accounts/7/sync-status`, H(tokenFor("1")));
+      const mine = await fetch(`${base}/api/v1/accounts/7/sync-status`, H(await tokenFor("1")));
       assert.equal(mine.status, 200);
       const body = await json(mine);
       assert.equal(body.data["state"], "CONNECTED");
@@ -230,9 +237,9 @@ test("GET /accounts/{id}/sync-status is ownership scoped and non-disclosing", as
 
       // Another user asking for the SAME account gets a 404, identical to a
       // nonexistent account — the endpoint is not an existence oracle.
-      const foreign = await fetch(`${base}/api/v1/accounts/7/sync-status`, H(tokenFor("2")));
+      const foreign = await fetch(`${base}/api/v1/accounts/7/sync-status`, H(await tokenFor("2")));
       assert.equal(foreign.status, 404);
-      const missing = await fetch(`${base}/api/v1/accounts/999/sync-status`, H(tokenFor("1")));
+      const missing = await fetch(`${base}/api/v1/accounts/999/sync-status`, H(await tokenFor("1")));
       assert.equal(missing.status, 404);
 
       const anonymous = await fetch(`${base}/api/v1/accounts/7/sync-status`);
@@ -266,7 +273,7 @@ test("POST /accounts/{id}/sync requires the provider link, is ownership scoped a
     async ({ base }) => {
       const mine = await fetch(`${base}/api/v1/accounts/7/sync`, {
         method: "POST",
-        headers: AUTH(tokenFor("1")),
+        headers: AUTH(await tokenFor("1")),
       });
       assert.equal(mine.status, 202, "the request starts work; it does not perform it");
       const body = await json(mine);
@@ -282,11 +289,11 @@ test("POST /accounts/{id}/sync requires the provider link, is ownership scoped a
       // answer the SAME 404, and an anonymous caller never reaches the service.
       const foreign = await fetch(`${base}/api/v1/accounts/7/sync`, {
         method: "POST",
-        headers: AUTH(tokenFor("2")),
+        headers: AUTH(await tokenFor("2")),
       });
       const missing = await fetch(`${base}/api/v1/accounts/999/sync`, {
         method: "POST",
-        headers: AUTH(tokenFor("1")),
+        headers: AUTH(await tokenFor("1")),
       });
       assert.equal(foreign.status, 404);
       assert.equal(missing.status, 404);
@@ -319,7 +326,7 @@ test("POST /accounts/{id}/sync rejects an account that is not MetaAPI-linked, an
     async ({ base }) => {
       const manual = await fetch(`${base}/api/v1/accounts/8/sync`, {
         method: "POST",
-        headers: AUTH(tokenFor("1")),
+        headers: AUTH(await tokenFor("1")),
       });
       assert.equal(manual.status, 422);
       const manualBody = await json(manual);
@@ -328,7 +335,7 @@ test("POST /accounts/{id}/sync rejects an account that is not MetaAPI-linked, an
 
       const current = await fetch(`${base}/api/v1/accounts/9/sync`, {
         method: "POST",
-        headers: AUTH(tokenFor("1")),
+        headers: AUTH(await tokenFor("1")),
       });
       assert.equal(current.status, 200, "nothing to sync is a success, not an error");
       assert.equal((await json(current)).data["status"], "up-to-date");
@@ -351,7 +358,7 @@ const analyticsRows: AnalyticsTradeRow[] = [
 test("GET /analytics/summary returns the metric contract, scoped to the caller", async () => {
   await withServer(
     async ({ base }) => {
-      const res = await fetch(`${base}/api/v1/analytics/summary?period=all`, H(tokenFor("1")));
+      const res = await fetch(`${base}/api/v1/analytics/summary?period=all`, H(await tokenFor("1")));
       assert.equal(res.status, 200);
       const body = await json(res);
       assert.equal(body.data["wins"], 2);
@@ -361,7 +368,7 @@ test("GET /analytics/summary returns the metric contract, scoped to the caller",
       assert.equal(body.data["averageR"], "0.5000");
       assert.equal(body.data["profitFactor"], "2.7500");
 
-      const bad = await fetch(`${base}/api/v1/analytics/summary?period=forever`, H(tokenFor("1")));
+      const bad = await fetch(`${base}/api/v1/analytics/summary?period=forever`, H(await tokenFor("1")));
       assert.equal(bad.status, 400);
       assert.equal((await json(bad)).error?.code, "VALIDATION_FAILED");
     },
@@ -372,7 +379,7 @@ test("GET /analytics/summary returns the metric contract, scoped to the caller",
 test("GET /analytics/equity-curve buckets per day and accumulates", async () => {
   await withServer(
     async ({ base }) => {
-      const res = await fetch(`${base}/api/v1/analytics/equity-curve`, H(tokenFor("1")));
+      const res = await fetch(`${base}/api/v1/analytics/equity-curve`, H(await tokenFor("1")));
       const body = await json<{ points: { day: string; cumulativePnl: string }[] }>(res);
       // Day 2 aggregates its TWO trades (-40.00 and +10.00) onto the running
       // total from day 1: 100.00 + (-30.00) = 70.00.
@@ -388,7 +395,7 @@ test("GET /analytics/equity-curve buckets per day and accumulates", async () => 
 test("GET /analytics/heatmap groups by weekday and hour", async () => {
   await withServer(
     async ({ base }) => {
-      const res = await fetch(`${base}/api/v1/analytics/heatmap`, H(tokenFor("1")));
+      const res = await fetch(`${base}/api/v1/analytics/heatmap`, H(await tokenFor("1")));
       const body = await json<{ cells: { weekday: number; hour: number }[] }>(res);
       assert.equal(body.data.cells.length, 3);
       assert.deepEqual(
@@ -426,18 +433,18 @@ test("analytics windows are instant-bounded: `from` inclusive, `to` exclusive", 
     async ({ base }) => {
       // A window starting EXACTLY at a trade's instant includes it ...
       const fromInclusive = await json(
-        await fetch(`${base}/api/v1/analytics/summary?from=2026-01-02T00:00:00.000Z`, H(tokenFor("1"))),
+        await fetch(`${base}/api/v1/analytics/summary?from=2026-01-02T00:00:00.000Z`, H(await tokenFor("1"))),
       );
       assert.equal(fromInclusive.data.tradeCount, 2);
 
       // ... and a window ending exactly at a trade's instant EXCLUDES it.
       const toExclusive = await json(
-        await fetch(`${base}/api/v1/analytics/summary?to=2026-01-02T12:00:00.000Z`, H(tokenFor("1"))),
+        await fetch(`${base}/api/v1/analytics/summary?to=2026-01-02T12:00:00.000Z`, H(await tokenFor("1"))),
       );
       assert.equal(toExclusive.data.tradeCount, 2);
 
       const full = await json(
-        await fetch(`${base}/api/v1/analytics/summary?from=2026-01-01T00:00:00.000Z&to=2026-01-03T00:00:00.000Z`, H(tokenFor("1"))),
+        await fetch(`${base}/api/v1/analytics/summary?from=2026-01-01T00:00:00.000Z&to=2026-01-03T00:00:00.000Z`, H(await tokenFor("1"))),
       );
       assert.equal(full.data.tradeCount, 3);
       assert.equal(full.data.totalPnl, "60.00", "money stays exact at scale 2");
@@ -453,7 +460,7 @@ test("tags: create, list, duplicate conflict, cross-user isolation", async () =>
     async ({ base }) => {
       const created = await fetch(`${base}/api/v1/tags`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ name: "Breakout", kind: "strategy", color: "#A1B2C3" }),
       });
       assert.equal(created.status, 201);
@@ -462,47 +469,47 @@ test("tags: create, list, duplicate conflict, cross-user isolation", async () =>
 
       const duplicate = await fetch(`${base}/api/v1/tags`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ name: "Breakout" }),
       });
       assert.equal(duplicate.status, 409);
 
       const badColor = await fetch(`${base}/api/v1/tags`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ name: "X", color: "red" }),
       });
       assert.equal(badColor.status, 400);
 
-      const foreign = await fetch(`${base}/api/v1/tags`, H(tokenFor("2")));
+      const foreign = await fetch(`${base}/api/v1/tags`, H(await tokenFor("2")));
       const foreignBody = await json<{ tags: unknown[] }>(foreign);
       assert.deepEqual(foreignBody.data.tags, [], "another user sees no tags");
 
       // Assign to a trade the caller owns; a foreign trade is a 404.
       const assigned = await fetch(`${base}/api/v1/trades/50/tags`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ tag_id: String(tag["id"]) }),
       });
       assert.equal(assigned.status, 201);
 
       const again = await fetch(`${base}/api/v1/trades/50/tags`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ tag_id: String(tag["id"]) }),
       });
       assert.equal(again.status, 409, "a duplicate assignment is a conflict, not a second row");
 
       const foreignTrade = await fetch(`${base}/api/v1/trades/51/tags`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ tag_id: String(tag["id"]) }),
       });
       assert.equal(foreignTrade.status, 404);
 
       const removed = await fetch(`${base}/api/v1/trades/50/tags/${String(tag["id"])}`, {
         method: "DELETE",
-        headers: AUTH(tokenFor("1")),
+        headers: AUTH(await tokenFor("1")),
       });
       assert.equal(removed.status, 204);
     },
@@ -519,7 +526,7 @@ test("attachments: raw upload validates type and size, and content is ownership 
     async ({ base }) => {
       const ok = await fetch(`${base}/api/v1/trades/50/attachments?file_name=chart.jpg`, {
         method: "POST",
-        headers: { "Content-Type": "image/jpeg", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "image/jpeg", ...AUTH(await tokenFor("1")) },
         body: new Uint8Array(bytes),
       });
       assert.equal(ok.status, 201);
@@ -531,7 +538,7 @@ test("attachments: raw upload validates type and size, and content is ownership 
       // Path components in a client-supplied name are stripped, never stored.
       const named = await fetch(`${base}/api/v1/trades/50/attachments?file_name=../../etc/passwd.png`, {
         method: "POST",
-        headers: { "Content-Type": "image/png", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "image/png", ...AUTH(await tokenFor("1")) },
         body: new Uint8Array([1, 2, 3, 4]),
       });
       assert.equal(named.status, 201);
@@ -539,7 +546,7 @@ test("attachments: raw upload validates type and size, and content is ownership 
 
       const wrongType = await fetch(`${base}/api/v1/trades/50/attachments?file_name=x.svg`, {
         method: "POST",
-        headers: { "Content-Type": "image/svg+xml", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "image/svg+xml", ...AUTH(await tokenFor("1")) },
         body: new Uint8Array([1, 2, 3]),
       });
       assert.equal(wrongType.status, 422);
@@ -547,34 +554,34 @@ test("attachments: raw upload validates type and size, and content is ownership 
 
       const empty = await fetch(`${base}/api/v1/trades/50/attachments?file_name=empty.png`, {
         method: "POST",
-        headers: { "Content-Type": "image/png", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "image/png", ...AUTH(await tokenFor("1")) },
         body: new Uint8Array([]),
       });
       assert.equal(empty.status, 400);
 
       const tooBig = await fetch(`${base}/api/v1/trades/50/attachments?file_name=big.png`, {
         method: "POST",
-        headers: { "Content-Type": "image/png", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "image/png", ...AUTH(await tokenFor("1")) },
         body: new Uint8Array(MAX_ATTACHMENT_BYTES + 1),
       });
       assert.equal(tooBig.status, 413);
 
       // Content is served back byte-identical, private and non-sniffable.
-      const content = await fetch(`${base}/api/v1/attachments/${String(record["id"])}/content`, H(tokenFor("1")));
+      const content = await fetch(`${base}/api/v1/attachments/${String(record["id"])}/content`, H(await tokenFor("1")));
       assert.equal(content.status, 200);
       assert.equal(content.headers.get("content-type"), "image/jpeg");
       assert.equal(content.headers.get("cache-control"), "private, no-store");
       assert.deepEqual(Buffer.from(await content.arrayBuffer()), bytes);
 
-      const foreign = await fetch(`${base}/api/v1/attachments/${String(record["id"])}/content`, H(tokenFor("2")));
+      const foreign = await fetch(`${base}/api/v1/attachments/${String(record["id"])}/content`, H(await tokenFor("2")));
       assert.equal(foreign.status, 404);
 
       const deleted = await fetch(`${base}/api/v1/attachments/${String(record["id"])}`, {
         method: "DELETE",
-        headers: AUTH(tokenFor("1")),
+        headers: AUTH(await tokenFor("1")),
       });
       assert.equal(deleted.status, 204);
-      const afterDelete = await fetch(`${base}/api/v1/attachments/${String(record["id"])}/content`, H(tokenFor("1")));
+      const afterDelete = await fetch(`${base}/api/v1/attachments/${String(record["id"])}/content`, H(await tokenFor("1")));
       assert.equal(afterDelete.status, 404, "a soft-deleted attachment is not served");
     },
     { attachments: service },
@@ -626,7 +633,7 @@ test("GET /subscriptions/me reports the EFFECTIVE plan and keeps entitlement sep
       // A user with no subscription and no plan: the entitlement is FREE and the
       // billing record is absent — two different facts, reported separately.
       const free = await json(
-        await fetch(`${base}/api/v1/subscriptions/me`, H(tokenFor("1"))),
+        await fetch(`${base}/api/v1/subscriptions/me`, H(await tokenFor("1"))),
       );
       assert.equal(free.data["plan"], "free", "the effective plan is free by default");
       assert.equal(free.data["entitled"], false);
@@ -647,7 +654,7 @@ test("GET /subscriptions/me reports the EFFECTIVE plan and keeps entitlement sep
         cancelAtPeriodEnd: false,
       });
       const pastDue = await json(
-        await fetch(`${base}/api/v1/subscriptions/me`, H(tokenFor("1"))),
+        await fetch(`${base}/api/v1/subscriptions/me`, H(await tokenFor("1"))),
       );
       assert.equal(pastDue.data["purchasedPlan"], "pro");
       assert.equal(pastDue.data["plan"], "free", "entitlement does not follow a past_due purchase");
@@ -657,7 +664,7 @@ test("GET /subscriptions/me reports the EFFECTIVE plan and keeps entitlement sep
       // An ACTIVE subscription with the entitlement granted by the webhook path.
       await subs.setUserPlan("1", "pro");
       const active = await json(
-        await fetch(`${base}/api/v1/subscriptions/me`, H(tokenFor("1"))),
+        await fetch(`${base}/api/v1/subscriptions/me`, H(await tokenFor("1"))),
       );
       assert.equal(active.data["plan"], "pro");
       assert.equal(active.data["entitled"], true);
@@ -667,7 +674,7 @@ test("GET /subscriptions/me reports the EFFECTIVE plan and keeps entitlement sep
       // record still shows the purchase.
       await subs.setUserPlan("1", "free");
       const downgraded = await json(
-        await fetch(`${base}/api/v1/subscriptions/me`, H(tokenFor("1"))),
+        await fetch(`${base}/api/v1/subscriptions/me`, H(await tokenFor("1"))),
       );
       assert.equal(downgraded.data["plan"], "free");
       assert.equal(downgraded.data["entitled"], false);
@@ -685,7 +692,7 @@ test("checkout is provider-gated: 503 without a provider credential, never a fak
     async ({ base }) => {
       const res = await fetch(`${base}/api/v1/subscriptions/checkout`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ interval: "month" }),
       });
       assert.equal(res.status, 503);
@@ -710,26 +717,26 @@ test("AI coach: insights are withheld until consent is granted", async () => {
   await withServer(
     async ({ base }) => {
       const before = await json<{ consent: { consented: boolean }; insights: unknown[] }>(
-        await fetch(`${base}/api/v1/ai-coach/latest-insights`, H(tokenFor("1"))),
+        await fetch(`${base}/api/v1/ai-coach/latest-insights`, H(await tokenFor("1"))),
       );
       assert.equal(before.data.consent.consented, false);
       assert.deepEqual(before.data.insights, [], "no consent ⇒ no third-party-processed data is served");
 
       const granted = await fetch(`${base}/api/v1/ai-coach/consent`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ granted: true }),
       });
       assert.equal(granted.status, 200);
 
       const after = await json<{ insights: unknown[] }>(
-        await fetch(`${base}/api/v1/ai-coach/latest-insights`, H(tokenFor("1"))),
+        await fetch(`${base}/api/v1/ai-coach/latest-insights`, H(await tokenFor("1"))),
       );
       assert.equal(after.data.insights.length, 1);
 
       const invalid = await fetch(`${base}/api/v1/ai-coach/consent`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ granted: "yes" }),
       });
       assert.equal(invalid.status, 400);
@@ -752,17 +759,17 @@ test("admin routes require the admin.panel.access authority", async () => {
   ];
   await withServer(
     async ({ base }) => {
-      const asUser = await fetch(`${base}/api/v1/admin/audit-logs`, H(tokenFor("5", "user")));
+      const asUser = await fetch(`${base}/api/v1/admin/audit-logs`, H(await tokenFor("5", "user")));
       assert.equal(asUser.status, 403);
 
       const anonymous = await fetch(`${base}/api/v1/admin/audit-logs`);
       assert.equal(anonymous.status, 401);
 
-      const asAdmin = await fetch(`${base}/api/v1/admin/audit-logs`, H(tokenFor("5", "admin")));
+      const asAdmin = await fetch(`${base}/api/v1/admin/audit-logs`, H(await tokenFor("5", "admin")));
       assert.equal(asAdmin.status, 200);
       assert.equal((await json<{ entries: unknown[] }>(asAdmin)).data.entries.length, 1);
 
-      const metrics = await fetch(`${base}/api/v1/admin/metrics`, H(tokenFor("5", "admin")));
+      const metrics = await fetch(`${base}/api/v1/admin/metrics`, H(await tokenFor("5", "admin")));
       assert.equal(metrics.status, 200);
     },
     { admin: new MemoryAdminStore(audit) },
@@ -792,7 +799,7 @@ test("portfolio summary reports each account and never invents an FX rate", asyn
   );
   await withServer(
     async ({ base }) => {
-      const res = await fetch(`${base}/api/v1/portfolio/summary`, H(tokenFor("1")));
+      const res = await fetch(`${base}/api/v1/portfolio/summary`, H(await tokenFor("1")));
       assert.equal(res.status, 200);
       const body = await json<{ accounts: { accountId: string }[]; convertedTotalPnl: string; unconvertibleAccounts: number }>(res);
       assert.equal(body.data.accounts.length, 1);
@@ -823,7 +830,7 @@ test("a currency with no stored rate is counted as unconvertible, never converte
   await withServer(
     async ({ base }) => {
       const body = await json<{ convertedTotalPnl: string; unconvertibleAccounts: number }>(
-        await fetch(`${base}/api/v1/portfolio/summary`, H(tokenFor("1"))),
+        await fetch(`${base}/api/v1/portfolio/summary`, H(await tokenFor("1"))),
       );
       assert.equal(body.data.unconvertibleAccounts, 1);
       assert.equal(body.data.convertedTotalPnl, "0.00", "an unconvertible account contributes nothing, not a guessed rate");
@@ -868,14 +875,14 @@ test("prop-status reports the 80% alert separately from a breach", async () => {
   await withServer(
     async ({ base }) => {
       const body = await json<{ currentDrawdown: string; drawdownPct: string | null; alert: boolean; breached: boolean }>(
-        await fetch(`${base}/api/v1/portfolio/prop-status?account_id=9`, H(tokenFor("1"))),
+        await fetch(`${base}/api/v1/portfolio/prop-status?account_id=9`, H(await tokenFor("1"))),
       );
       assert.equal(body.data.currentDrawdown, "100.00");
       assert.equal(body.data.drawdownPct, "1.00");
       assert.equal(body.data.alert, false);
       assert.equal(body.data.breached, false);
 
-      const missing = await fetch(`${base}/api/v1/portfolio/prop-status?account_id=999`, H(tokenFor("1")));
+      const missing = await fetch(`${base}/api/v1/portfolio/prop-status?account_id=999`, H(await tokenFor("1")));
       assert.equal(missing.status, 404);
     },
     { portfolio: store },
@@ -959,7 +966,7 @@ test("EA keys are issued once, rotate on re-issue, and revocation is ownership s
       // caller owns — an EA itself can never mint credentials.
       const issued = await fetch(`${base}/api/v1/accounts/11/ea-key`, {
         method: "POST",
-        headers: AUTH(tokenFor("1")),
+        headers: AUTH(await tokenFor("1")),
       });
       assert.equal(issued.status, 201);
       const issuedBody = await json(issued);
@@ -979,7 +986,7 @@ test("EA keys are issued once, rotate on re-issue, and revocation is ownership s
       // previous key stops working (a lost key is replaced, not revealed).
       const rotated = await fetch(`${base}/api/v1/accounts/11/ea-key`, {
         method: "POST",
-        headers: AUTH(tokenFor("1")),
+        headers: AUTH(await tokenFor("1")),
       });
       assert.equal(rotated.status, 201);
       const rotatedKey = String((await json(rotated)).data["ea_key"]);
@@ -993,7 +1000,7 @@ test("EA keys are issued once, rotate on re-issue, and revocation is ownership s
       // Another user cannot issue or revoke a key for this account.
       const foreign = await fetch(`${base}/api/v1/accounts/11/ea-key`, {
         method: "POST",
-        headers: AUTH(tokenFor("2")),
+        headers: AUTH(await tokenFor("2")),
       });
       assert.equal(foreign.status, 404, "non-disclosing: not yours == not found");
 
@@ -1002,14 +1009,14 @@ test("EA keys are issued once, rotate on re-issue, and revocation is ownership s
 
       const methodNotAllowed = await fetch(`${base}/api/v1/accounts/11/ea-key`, {
         method: "PUT",
-        headers: AUTH(tokenFor("1")),
+        headers: AUTH(await tokenFor("1")),
       });
       assert.equal(methodNotAllowed.status, 405);
 
       // Revocation deletes the usable hash, so the key stops authenticating ...
       const revoked = await fetch(`${base}/api/v1/accounts/11/ea-key`, {
         method: "DELETE",
-        headers: AUTH(tokenFor("1")),
+        headers: AUTH(await tokenFor("1")),
       });
       assert.equal(revoked.status, 204);
       const afterRevoke = await fetch(`${base}/api/v1/ea/handshake`, {
@@ -1020,7 +1027,7 @@ test("EA keys are issued once, rotate on re-issue, and revocation is ownership s
       // ... and revoking twice is a non-disclosing 404, not a silent success.
       const twice = await fetch(`${base}/api/v1/accounts/11/ea-key`, {
         method: "DELETE",
-        headers: AUTH(tokenFor("1")),
+        headers: AUTH(await tokenFor("1")),
       });
       assert.equal(twice.status, 404);
     },
@@ -1040,7 +1047,7 @@ test("device registration requires bearer auth AND an encryptor; the token is ne
 
       const withoutKey = await fetch(`${base}/api/v1/devices/register-push`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ platform: "android", token: "x".repeat(32) }),
       });
       assert.equal(withoutKey.status, 503, "no master key ⇒ the capability is absent, never plaintext storage");
@@ -1052,7 +1059,7 @@ test("device registration requires bearer auth AND an encryptor; the token is ne
     async ({ base }) => {
       const ok = await fetch(`${base}/api/v1/devices/register-push`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ platform: "android", token: "device-token-value-1234567890" }),
       });
       assert.equal(ok.status, 201);
@@ -1062,7 +1069,7 @@ test("device registration requires bearer auth AND an encryptor; the token is ne
 
       const badPlatform = await fetch(`${base}/api/v1/devices/register-push`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ platform: "symbian", token: "device-token-value-1234567890" }),
       });
       assert.equal(badPlatform.status, 400);
@@ -1135,7 +1142,7 @@ test("copy-trading: the LEADER is derived server-side, and status changes are au
       // A follower account the caller does not own is non-disclosing 404 ...
       const foreign = await fetch(`${base}/api/v1/copy-trading/relationships`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ leader_account_id: "88", follower_account_id: "99" }),
       });
       assert.equal(foreign.status, 404);
@@ -1144,7 +1151,7 @@ test("copy-trading: the LEADER is derived server-side, and status changes are au
       // conflict: the two conditions are distinguishably different failures.
       const unknownLeader = await fetch(`${base}/api/v1/copy-trading/relationships`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ leader_account_id: "1234", follower_account_id: "77" }),
       });
       assert.equal(unknownLeader.status, 404);
@@ -1155,7 +1162,7 @@ test("copy-trading: the LEADER is derived server-side, and status changes are au
       // caller name anyone as their leader.)
       const created = await fetch(`${base}/api/v1/copy-trading/relationships`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({
           leader_user_id: "1",
           leader_account_id: "88",
@@ -1181,7 +1188,7 @@ test("copy-trading: the LEADER is derived server-side, and status changes are au
 
       const duplicate = await fetch(`${base}/api/v1/copy-trading/relationships`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ leader_account_id: "88", follower_account_id: "77" }),
       });
       assert.equal(duplicate.status, 409);
@@ -1190,7 +1197,7 @@ test("copy-trading: the LEADER is derived server-side, and status changes are au
       // leader's signals on the leader's behalf) ...
       const followerActivate = await fetch(`${base}/api/v1/copy-trading/relationships/${relationshipId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ status: "active" }),
       });
       assert.equal(followerActivate.status, 404, "a row the caller may not change is non-disclosing");
@@ -1198,7 +1205,7 @@ test("copy-trading: the LEADER is derived server-side, and status changes are au
       // ... the leader can.
       const leaderActivate = await fetch(`${base}/api/v1/copy-trading/relationships/${relationshipId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("2")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("2")) },
         body: JSON.stringify({ status: "active" }),
       });
       assert.equal(leaderActivate.status, 200);
@@ -1207,7 +1214,7 @@ test("copy-trading: the LEADER is derived server-side, and status changes are au
       // Either side may pause.
       const followerPause = await fetch(`${base}/api/v1/copy-trading/relationships/${relationshipId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ status: "paused" }),
       });
       assert.equal(followerPause.status, 200);
@@ -1216,7 +1223,7 @@ test("copy-trading: the LEADER is derived server-side, and status changes are au
       // A third party can neither see nor touch it.
       const thirdParty = await fetch(`${base}/api/v1/copy-trading/relationships/${relationshipId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("3")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("3")) },
         body: JSON.stringify({ status: "paused" }),
       });
       assert.equal(thirdParty.status, 404);
@@ -1225,7 +1232,7 @@ test("copy-trading: the LEADER is derived server-side, and status changes are au
       // VALIDATION_FAILED is this surface's convention — see routes/responses.ts.)
       const badStatus = await fetch(`${base}/api/v1/copy-trading/relationships/${relationshipId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("2")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("2")) },
         body: JSON.stringify({ status: "cancelled" }),
       });
       assert.equal(badStatus.status, 400);
@@ -1239,7 +1246,7 @@ test("copy-trading: the LEADER is derived server-side, and status changes are au
       assert.equal(unauthenticated.status, 401);
 
       const listed = await json<{ relationships: unknown[] }>(
-        await fetch(`${base}/api/v1/copy-trading/relationships`, H(tokenFor("1"))),
+        await fetch(`${base}/api/v1/copy-trading/relationships`, H(await tokenFor("1"))),
       );
       assert.equal(listed.data.relationships.length, 1);
     },
@@ -1271,7 +1278,7 @@ test("account groups: create, list, update membership, delete — ownership scop
     async ({ base }) => {
       const created = await fetch(`${base}/api/v1/account-groups`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ name: "  Eval accounts  ", description: "prop evaluations", account_ids: ["9", "10"] }),
       });
       assert.equal(created.status, 201);
@@ -1282,7 +1289,7 @@ test("account groups: create, list, update membership, delete — ownership scop
 
       const duplicate = await fetch(`${base}/api/v1/account-groups`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ name: "Eval accounts" }),
       });
       assert.equal(duplicate.status, 409);
@@ -1293,27 +1300,27 @@ test("account groups: create, list, update membership, delete — ownership scop
       // explicitly own").
       const foreign = await fetch(`${base}/api/v1/account-groups`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ name: "Stolen", account_ids: ["77"] }),
       });
       assert.equal(foreign.status, 404);
 
       const badName = await fetch(`${base}/api/v1/account-groups`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ name: "   " }),
       });
       assert.equal(badName.status, 400);
 
       const duplicatedIds = await fetch(`${base}/api/v1/account-groups`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ name: "Dup", account_ids: ["9", "9"] }),
       });
       assert.equal(duplicatedIds.status, 400);
 
       const listed = await json<{ groups: Record<string, unknown>[] }>(
-        await fetch(`${base}/api/v1/account-groups`, H(tokenFor("1"))),
+        await fetch(`${base}/api/v1/account-groups`, H(await tokenFor("1"))),
       );
       assert.equal(listed.data.groups.length, 1);
 
@@ -1321,7 +1328,7 @@ test("account groups: create, list, update membership, delete — ownership scop
       // assigned to it.
       const emptied = await fetch(`${base}/api/v1/account-groups/${groupId}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ name: "Eval accounts", account_ids: [] }),
       });
       assert.equal(emptied.status, 200);
@@ -1329,17 +1336,17 @@ test("account groups: create, list, update membership, delete — ownership scop
 
       // Another user sees nothing of it and cannot touch it.
       const foreignList = await json<{ groups: Record<string, unknown>[] }>(
-        await fetch(`${base}/api/v1/account-groups`, H(tokenFor("2"))),
+        await fetch(`${base}/api/v1/account-groups`, H(await tokenFor("2"))),
       );
       assert.equal(foreignList.data.groups.length, 0);
       const foreignDelete = await fetch(`${base}/api/v1/account-groups/${groupId}`, {
         method: "DELETE",
-        headers: AUTH(tokenFor("2")),
+        headers: AUTH(await tokenFor("2")),
       });
       assert.equal(foreignDelete.status, 404, "non-disclosing: not yours == not found");
       const foreignUpdate = await fetch(`${base}/api/v1/account-groups/${groupId}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("2")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("2")) },
         body: JSON.stringify({ name: "Hijacked" }),
       });
       assert.equal(foreignUpdate.status, 404);
@@ -1349,12 +1356,12 @@ test("account groups: create, list, update membership, delete — ownership scop
 
       const deleted = await fetch(`${base}/api/v1/account-groups/${groupId}`, {
         method: "DELETE",
-        headers: AUTH(tokenFor("1")),
+        headers: AUTH(await tokenFor("1")),
       });
       assert.equal(deleted.status, 204);
       const gone = await fetch(`${base}/api/v1/account-groups/${groupId}`, {
         method: "DELETE",
-        headers: AUTH(tokenFor("1")),
+        headers: AUTH(await tokenFor("1")),
       });
       assert.equal(gone.status, 404);
     },
@@ -1367,12 +1374,12 @@ test("prop rules: PUT upserts, GET reads back, and every constraint is validated
   store.addAccounts("1", [accountRow("9")]);
   await withServer(
     async ({ base }) => {
-      const missing = await fetch(`${base}/api/v1/prop-rules/9`, H(tokenFor("1")));
+      const missing = await fetch(`${base}/api/v1/prop-rules/9`, H(await tokenFor("1")));
       assert.equal(missing.status, 404, "no rule set yet");
 
       const bad = await fetch(`${base}/api/v1/prop-rules/9`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ rule_set_name: "FTMO", max_total_drawdown: "1000.00", drawdown_basis: "weekly" }),
       });
       assert.equal(bad.status, 400);
@@ -1380,28 +1387,28 @@ test("prop rules: PUT upserts, GET reads back, and every constraint is validated
 
       const noLimits = await fetch(`${base}/api/v1/prop-rules/9`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ rule_set_name: "FTMO" }),
       });
       assert.equal(noLimits.status, 400, "a rule set with no limit is not a rule set");
 
       const negative = await fetch(`${base}/api/v1/prop-rules/9`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ rule_set_name: "FTMO", max_total_drawdown: "0.00" }),
       });
       assert.equal(negative.status, 400, "0018 requires > 0 when present");
 
       const badThreshold = await fetch(`${base}/api/v1/prop-rules/9`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ rule_set_name: "FTMO", max_total_drawdown: "1000.00", alert_threshold_pct: "150.00" }),
       });
       assert.equal(badThreshold.status, 400);
 
       const good = await fetch(`${base}/api/v1/prop-rules/9`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({
           rule_set_name: "FTMO 100k",
           max_daily_drawdown: "500.00",
@@ -1424,27 +1431,27 @@ test("prop rules: PUT upserts, GET reads back, and every constraint is validated
       // Idempotent: the same PUT twice does not create a second rule set.
       const again = await fetch(`${base}/api/v1/prop-rules/9`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ rule_set_name: "FTMO 100k", max_total_drawdown: "1200.00" }),
       });
       assert.equal(again.status, 200);
-      const readBack = await json(await fetch(`${base}/api/v1/prop-rules/9`, H(tokenFor("1"))));
+      const readBack = await json(await fetch(`${base}/api/v1/prop-rules/9`, H(await tokenFor("1"))));
       assert.equal(readBack.data["maxTotalDrawdown"], "1200.00");
       assert.equal(readBack.data["maxDailyDrawdown"], null, "an omitted limit is reset, not silently kept");
 
       // Ownership: another user's account is a non-disclosing 404, for both verbs.
-      const foreignGet = await fetch(`${base}/api/v1/prop-rules/9`, H(tokenFor("2")));
+      const foreignGet = await fetch(`${base}/api/v1/prop-rules/9`, H(await tokenFor("2")));
       assert.equal(foreignGet.status, 404);
       const foreignPut = await fetch(`${base}/api/v1/prop-rules/9`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("2")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("2")) },
         body: JSON.stringify({ rule_set_name: "Hijack", max_total_drawdown: "1.00" }),
       });
       assert.equal(foreignPut.status, 404);
 
       const unauthenticated = await fetch(`${base}/api/v1/prop-rules/9`);
       assert.equal(unauthenticated.status, 401);
-      const nonNumeric = await fetch(`${base}/api/v1/prop-rules/abc`, H(tokenFor("1")));
+      const nonNumeric = await fetch(`${base}/api/v1/prop-rules/abc`, H(await tokenFor("1")));
       assert.equal(nonNumeric.status, 400);
     },
     { portfolio: store },
@@ -1456,7 +1463,7 @@ test("a developer key is returned exactly once and its scopes are validated", as
     async ({ base }) => {
       const created = await fetch(`${base}/api/v1/developer/keys`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ name: "my bot", scopes: ["trades:read", "analytics:read"] }),
       });
       assert.equal(created.status, 201);
@@ -1466,24 +1473,24 @@ test("a developer key is returned exactly once and its scopes are validated", as
       assert.equal("key_hash" in body.data, false, "the hash never leaves the server");
 
       const listed = await json<{ keys: Record<string, unknown>[] }>(
-        await fetch(`${base}/api/v1/developer/keys`, H(tokenFor("1"))),
+        await fetch(`${base}/api/v1/developer/keys`, H(await tokenFor("1"))),
       );
       assert.equal(listed.data.keys.length, 1);
       assert.equal("secret" in (listed.data.keys[0] ?? {}), false, "a read path never re-discloses the secret");
 
       const badScope = await fetch(`${base}/api/v1/developer/keys`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH(tokenFor("1")) },
+        headers: { "Content-Type": "application/json", ...AUTH(await tokenFor("1")) },
         body: JSON.stringify({ name: "bad", scopes: ["admin:everything"] }),
       });
       assert.equal(badScope.status, 400);
 
       const revoked = await fetch(`${base}/api/v1/developer/keys/${String(body.data["id"])}`, {
         method: "DELETE",
-        headers: AUTH(tokenFor("1")),
+        headers: AUTH(await tokenFor("1")),
       });
       assert.equal(revoked.status, 204);
-      const after = await json<{ keys: unknown[] }>(await fetch(`${base}/api/v1/developer/keys`, H(tokenFor("1"))));
+      const after = await json<{ keys: unknown[] }>(await fetch(`${base}/api/v1/developer/keys`, H(await tokenFor("1"))));
       assert.deepEqual(after.data.keys, [], "a revoked key disappears from the list");
     },
     { developer: new MemoryDeveloperStore() },
