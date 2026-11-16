@@ -152,6 +152,29 @@ const REVOKE_MIGRATOR_CREATE_SQL = `
 REVOKE CREATE ON SCHEMA public FROM velora_migrator;
 `;
 
+/**
+ * The pgcrypto extension — the Cloudflare hasher's database prerequisite (D2).
+ *
+ * `apps/api-cf/src/pgCryptoHasher.ts` sends `crypt($1, gen_salt('bf', 12))` and
+ * `crypt($1, $2) = $2` to PostgreSQL; without the extension a fresh environment
+ * passes connectivity checks and then fails password hashing at runtime.
+ *
+ * WHY HERE AND NOT IN A MIGRATION (same rationale as the pg-boss bootstrap):
+ * `CREATE EXTENSION` needs CREATE on the DATABASE — a privilege the provisioned
+ * roles deliberately do not hold (roles.sql revokes migrator CREATE; the
+ * migrator reaches DDL only via SET ROLE for schema objects) — and the
+ * disposable PGlite dev batteries cannot carry contrib extensions. This is the
+ * privileged, idempotent, out-of-band home, and it runs PRE-migration so the
+ * extension exists before any schema that stores password hashes.
+ *
+ * pgcrypto is a TRUSTED extension (PostgreSQL ≥ 13): a role holding CREATE on
+ * the database can install it without superuser. This runner holds more than
+ * that (bootstrap/superuser), so the statement is unconditional and idempotent.
+ */
+const PGCRYPTO_SQL = `
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+`;
+
 /** Re-asserts ownership of objects an earlier deploy may have created. */
 const REASSIGN_SQL = `
 DO $$
@@ -301,6 +324,8 @@ export async function provision(opts: ProvisionOptions): Promise<string[]> {
       steps.push("roles-bootstrap.sql");
       await client.query(ownershipSql(opts.bootstrapRole));
       steps.push("ownership-model");
+      await client.query(PGCRYPTO_SQL);
+      steps.push("pgcrypto-extension");
     } else {
       await client.query(REASSIGN_SQL);
       steps.push("reassign-ownership");
