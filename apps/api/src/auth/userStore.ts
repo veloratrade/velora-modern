@@ -169,6 +169,8 @@ export interface UserStore {
     createdAt: Date;
   }): Promise<SessionRecord>;
   findSessionByRefreshTokenHash(refreshTokenHash: string): Promise<SessionRecord | null>;
+  /** Session bound to an access token (Legacy SessionRepository::findByAccessHash). */
+  findSessionByAccessTokenHash(accessTokenHash: string): Promise<SessionRecord | null>;
   /**
    * SEC-04 — rotate a session, ATOMICALLY.
    *

@@ -207,6 +207,11 @@ export class MemoryUserStore implements UserStore {
     return id === undefined ? null : (this.sessions.get(id) ?? null);
   }
 
+  async findSessionByAccessTokenHash(accessTokenHash: string): Promise<SessionRecord | null> {
+    for (const s of this.sessions.values()) if (s.accessTokenHash === accessTokenHash) return s;
+    return null;
+  }
+
   async rotateSession(
     id: string,
     input: {
