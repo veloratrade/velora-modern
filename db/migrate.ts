@@ -3,6 +3,7 @@
 // or a real PostgreSQL via DATABASE_URL (staging/production, provisioned later).
 // The runner never interprets legacy data: the MySQL→PG transform is a separate,
 // evidence-gated pipeline (ADR-004 legacy-TZ blocker; db/MIGRATION_MAP.md).
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -152,27 +153,79 @@ export function expectedHead(migrationsDir: string): string | null {
   return files.length === 0 ? null : (files[files.length - 1] as string);
 }
 
+/**
+ * Advisory-lock key serializing migration runs (any two migrators, any hosts).
+ * Arbitrary fixed constant, secret-free; only mutual exclusion matters.
+ */
+export const MIGRATION_LOCK_KEY = 745_337_182_442;
+
+/** sha256 of a migration file's exact bytes — tamper detection for ADR-010. */
+export function migrationChecksum(sql: string): string {
+  return createHash("sha256").update(sql, "utf8").digest("hex");
+}
+
 export async function migrate(engine: MigrationEngine, migrationsDir: string): Promise<string[]> {
-  await engine.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
-    name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
-  const applied = new Set((await engine.query("SELECT name FROM schema_migrations")).rows.map((r) => String(r.name)));
-  const files = readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort();
-  const ran: string[] = [];
-  for (const file of files) {
-    if (applied.has(file)) continue;
-    const sql = readFileSync(join(migrationsDir, file), "utf8");
-    await engine.exec("BEGIN");
-    try {
-      await engine.exec(sql);
-      await engine.query("INSERT INTO schema_migrations(name) VALUES ($1)", [file]);
-      await engine.exec("COMMIT");
-      ran.push(file);
-    } catch (err) {
-      await engine.exec("ROLLBACK");
-      throw new Error(`migration ${file} failed: ${(err as Error).message}`);
+  // ONE migrator at a time. The runner sits at the front of the deploy start
+  // command, so two deploy instances booting together previously raced on the
+  // same unapplied files (each in its own BEGIN/COMMIT). Advisory locks are
+  // session-scoped; both engines route every query through one session (PGlite
+  // single-session, pg single client), so lock/unlock here span exactly the run.
+  await engine.query("SELECT pg_advisory_lock($1)", [MIGRATION_LOCK_KEY]);
+  try {
+    await engine.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+      name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
+    // Applied-file checksums (D1): an edited already-applied file used to be
+    // silently skipped forever while the CLI still reported its head. The
+    // column is added AFTER the table so databases migrated before this change
+    // upgrade in place; their rows are backfilled below, never re-run.
+    await engine.exec("ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS checksum TEXT");
+    const appliedRows = (await engine.query("SELECT name, checksum FROM schema_migrations")).rows;
+    const applied = new Map<string, string | null>(
+      appliedRows.map((r) => [
+        String(r.name),
+        r.checksum === null || r.checksum === undefined ? null : String(r.checksum),
+      ]),
+    );
+    const files = readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort();
+    const ran: string[] = [];
+    // Verify/backfill pass over files ALREADY applied — nothing re-runs, but a
+    // changed file is a forward-only violation (ADR-010) and must fail loudly.
+    for (const file of files) {
+      if (!applied.has(file)) continue;
+      const checksum = migrationChecksum(readFileSync(join(migrationsDir, file), "utf8"));
+      const stored = applied.get(file) ?? null;
+      if (stored === null) {
+        await engine.query("UPDATE schema_migrations SET checksum = $1 WHERE name = $2", [checksum, file]);
+        continue;
+      }
+      if (stored !== checksum) {
+        throw new Error(
+          `migration ${file} checksum mismatch: the applied file changed since it ran ` +
+            "(forward-only, ADR-010). Restore the exact applied file, or deliberately rebuild the database.",
+        );
+      }
     }
+    for (const file of files) {
+      if (applied.has(file)) continue;
+      const sql = readFileSync(join(migrationsDir, file), "utf8");
+      await engine.exec("BEGIN");
+      try {
+        await engine.exec(sql);
+        await engine.query("INSERT INTO schema_migrations(name, checksum) VALUES ($1, $2)", [
+          file,
+          migrationChecksum(sql),
+        ]);
+        await engine.exec("COMMIT");
+        ran.push(file);
+      } catch (err) {
+        await engine.exec("ROLLBACK");
+        throw new Error(`migration ${file} failed: ${(err as Error).message}`);
+      }
+    }
+    return ran;
+  } finally {
+    await engine.query("SELECT pg_advisory_unlock($1)", [MIGRATION_LOCK_KEY]);
   }
-  return ran;
 }
 
 // CLI entry: npm run migrate:dev [-- --url postgres://...]
