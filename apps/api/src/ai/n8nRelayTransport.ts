@@ -28,8 +28,9 @@
 //     a URL, a query string, a log line, an error message or a response body.
 //   * an upstream message body never becomes our message. Only the normalized
 //     `error.code` is used, through `classifyRelayErrorCode`.
-//   * redirects are not followed (a 3xx would take the token somewhere else), and
-//     the timeout is bounded on both connect and total.
+//   * redirects are not followed — enforced with fetch `redirect: "error"` (a
+//     3xx would otherwise take the token somewhere else), and the timeout is
+//     bounded on both connect and total.
 //
 // NOT VERIFIED LIVE: no relay URL or token is in scope in this repository, so
 // this transport is exercised with an injected fetch. The live round trip stays
@@ -40,7 +41,14 @@ import { AiFailure, classifyRelayErrorCode, classifyTransportFailure } from "./a
 
 export type RelayFetch = (
   url: string,
-  init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal },
+  init?: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+    signal?: AbortSignal;
+    /** Pinned to "error" by generateContent: a 3xx must fail, never be followed. */
+    redirect?: "error";
+  },
 ) => Promise<{ ok: boolean; status: number; json(): Promise<unknown>; text(): Promise<string> }>;
 
 export const RELAY_REQUEST_TIMEOUT_MS = 30_000;
@@ -148,6 +156,12 @@ export class N8nRelayTransport {
         },
         body,
         signal,
+        // ENFORCED, not documented: fetch's default is `follow`, and a redirect
+        // hop re-sends the request headers — the relay token — to whatever
+        // origin the 3xx names (307/308 replay the body too). With "error" the
+        // runtime refuses and the catch below classifies it as a network
+        // failure instead of ever making the second request.
+        redirect: "error",
       });
     } catch (err) {
       const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
