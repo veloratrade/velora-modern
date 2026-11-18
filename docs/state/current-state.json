@@ -2,7 +2,7 @@
   "$comment": "VELORA-MODERN machine-readable current project state — twin of docs/state/CURRENT_STATE.md (update both in the same change). Read and verified by tools/agent-context.mjs at every session start (ADR-017).",
   "schema_version": 1,
   "system": "velora-agent-context",
-  "last_updated": "2026-10-11",
+  "last_updated": "2026-11-18",
   "verification_states": [
     "STATIC",
     "RECORDED_RUNTIME",
