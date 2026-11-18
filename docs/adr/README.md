@@ -30,7 +30,13 @@ ADR-019 takes the next free number. **ADR-020 is the next free number.**
 
 | ADR-018 | `ADR-018-telegram-journal-client.md` | Telegram journal client (external identity + shared journal domain) | Accepted 2026-10-03 (**added to this index 2026-10-08** — the ADR existed but was never listed) |
 | ADR-019 | `ADR-019-telegram-update-job-architecture.md` | Telegram update processing over the job architecture (`telegram.update` → pg-boss → worker) | Architecture accepted; repository path/test record at `e041856`; **worker deployment and live round trip deployment-gated**; exact second-process secret allowlist remains an owner decision (D-2) |
+| ADR-020 | `ADR-020-dashboard-strategies-widget.md` | Dashboard strategies widget — port as-is, no invented strategy semantics (W0 decision R9 = A) | Accepted 2026-11-18 (owner); blocks W2 A5 + B10 |
+| ADR-021 | `ADR-021-public-vs-protected-routes.md` | Public vs protected public surfaces — `/markets`/`/news` public, `/support` behind login (W0 decision R8 = C) | Accepted 2026-11-18 (owner); blocks W7 public surfaces + edge gate |
+| ADR-022 | `ADR-022-subscription-status-vocabulary.md` | Subscription status vocabulary mapping — provider-agnostic model, keep history (W0 decision OD-AC-SUBMAP = A) | Accepted 2026-11-18 (owner); blocks W1 A3 subscription POST |
+| ADR-023 | `ADR-023-admin-user-create-invitations.md` | Admin user creation + invitations — both, 7-day TTL, admin & super_admin invite (W0 decision user create/invite = A) | Accepted 2026-11-18 (owner); blocks W1 A1 + A2 + 4 RBAC |
+
+**ADR-004 amendment:** `ADR-004-time-model.md` carries Amendment A-3 (2026-11-18) — owner confirms sampling-first for naive datetimes, Asia/Tehran standby (W0 decision ADR-004 = C); blocks W6 data migration (MG-G10, MG-DATA-MIGRATION).
 
 Note: the **legacy** repository has its own, unrelated `ADR-014` (census-probe
 transport); modern ADR numbering is independent of legacy numbering
-(`docs/provenance/REMOTE_LINEAGE.md`).
+(`docs/provenance/REMOTE_LINEAGE.md`). ADR-024 is the next free number.
