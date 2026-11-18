@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "postgres": "^3.4.9",
-    "tsx": "^4.19.0"
+    "tsx": "^4.23.15"
   },
   "description": "Velora modern architecture foundation (Phase 1 \u2014 dev/staging only)",
   "devDependencies": {
