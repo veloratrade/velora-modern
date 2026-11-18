@@ -129,12 +129,40 @@ test("3B-4: users.change_role is the super_admin-exclusive permission", () => {
   }
 });
 
-test("3B-4: the new permissions still fail closed for unknown roles", () => {
-  for (const p of ["users.view", "users.manage_status", "users.change_role"] as const) {
+test("3B-4: the user-management permissions still fail closed for unknown roles", () => {
+  for (const p of [
+    "users.view",
+    "users.manage_status",
+    "users.change_role",
+    "users.create",
+    "users.invite",
+    "users.manage_subscription",
+  ] as const) {
     assert.equal(can("root", p), false);
     assert.equal(can(undefined, p), false);
     assert.equal(can(null, p), false);
     assert.equal(can("", p), false);
+  }
+});
+
+// --- W1 (ADR-023 = A): admin user creation + invitations ---------------------
+
+test("W1: users.create, users.invite, users.manage_subscription granted to admin and super_admin", () => {
+  for (const p of ["users.create", "users.invite", "users.manage_subscription"] as const) {
+    assert.ok(ROLE_PERMISSIONS.admin.includes(p), `admin missing ${p}`);
+    assert.ok(ROLE_PERMISSIONS.super_admin.includes(p), `super_admin missing ${p}`);
+    assert.equal(can("admin", p), true);
+    assert.equal(can("super_admin", p), true);
+    assert.equal(can("user", p), false);
+  }
+});
+
+test("W1: super_admin retains every admin grant (incl. users.create/invite)", () => {
+  for (const p of ROLE_PERMISSIONS.admin) {
+    assert.ok(
+      ROLE_PERMISSIONS.super_admin.includes(p),
+      `super_admin must retain ${p}`,
+    );
   }
 });
 
@@ -247,16 +275,14 @@ test("AC-34: exactly the four landed SA-exclusive (phase 8: integrations.manage)
   }
 });
 
-test("AC-34: dead-in-legacy permissions stay unported (settings.* had zero enforcement points)", () => {
-  // Role.php declared P_SETTINGS_VIEW + P_SETTINGS_MANAGE as "reserved (Module
-  // K)" — phase 9 now implements the strict-allowlist store, so they are no
-  // longer dead. Same for logs/billing/flags (landed in phase 9).
-  const unported = [
-    "users.create",             // OD-gated (admin create-user policy)
-    "users.manage_subscription",// OD-AC-SUBMAP
-  ] as const;
-  for (const p of unported) {
-    assert.ok(!(PERMISSIONS as readonly string[]).includes(p), `${p} must not be declared yet`);
+test("AC-34: W1/OD-resolved permissions are now declared (create/invite/subscription)", () => {
+  // OD-AC-SUBMAP and the W1 user-create/invite decisions are now recorded
+  // (ADR-022 = A, ADR-023 = A), so these permissions ARE declared and granted
+  // to admin + super_admin. They were previously OD-gated and unported.
+  for (const p of ["users.create", "users.invite", "users.manage_subscription"] as const) {
+    assert.ok((PERMISSIONS as readonly string[]).includes(p), `${p} must be declared after W1`);
+    assert.ok(ROLE_PERMISSIONS.admin.includes(p), `${p} must be granted to admin`);
+    assert.ok(ROLE_PERMISSIONS.super_admin.includes(p), `${p} must be granted to super_admin`);
   }
   // the platform permissions landed in phase 9 must now exist
   for (const p of ["settings.view", "system.settings.manage", "feature_flags.view", "feature_flags.edit", "system.logs.view", "billing.view"] as const) {
@@ -274,6 +300,10 @@ test("AC-34: legacy grant parity for every landed permission (no widening)", () 
     "users.verify_email", "audit.view", "system.health.view", "analytics.view",
     "support.tickets.view", "support.tickets.manage", "aiManage", "integrations.view",
     "settings.view", "feature_flags.view", "system.logs.view", "billing.view",
+    // W1 (ADR-023 = A): admin user creation + invitations; W1 A3 (ADR-022 = A):
+    // admin subscription management. Owner-decided Modern additions beyond
+    // Legacy's vocabulary, granted to admin + super_admin.
+    "users.create", "users.invite", "users.manage_subscription",
   ]);
   const modernAdminOnly = ROLE_PERMISSIONS.admin.filter(
     (p) => !(legacyAdmin.has(p) || p === "rbac.self.view" || p === "admin.panel.access"),
