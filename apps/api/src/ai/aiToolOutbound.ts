@@ -138,6 +138,92 @@ export function assertSafeUrl(raw: string, opts: SafeUrlOptions = {}): URL {
   return url;
 }
 
+/**
+ * Resolves a hostname to every address it currently answers with. Injectable so tests never touch
+ * DNS; the default is the platform resolver (`node:dns` `lookup` with `all: true`).
+ */
+export type HostLookup = (hostname: string) => Promise<readonly string[]>;
+
+/**
+ * DNS-over-HTTPS resolver (A + AAAA, JSON API). Used where the runtime has no working `node:dns`
+ * (a Worker isolate). Answers that are not address records (CNAME hops) are skipped; the final
+ * addresses are what is judged.
+ */
+export function dohLookup(fetchImpl: typeof fetch, endpoint = "https://cloudflare-dns.com/dns-query"): HostLookup {
+  return async (hostname) => {
+    const out: string[] = [];
+    for (const type of ["A", "AAAA"] as const) {
+      const res = await fetchImpl(`${endpoint}?name=${encodeURIComponent(hostname)}&type=${type}`, {
+        headers: { accept: "application/dns-json" },
+        redirect: "manual",
+      });
+      if (!res.ok) throw new Error(`doh:${res.status}`);
+      const body = (await res.json()) as { Status?: number; Answer?: Array<{ type?: number; data?: string }> };
+      if (body.Status !== 0 && body.Status !== 3) throw new Error(`doh-rcode:${String(body.Status)}`);
+      for (const a of body.Answer ?? []) {
+        if ((a.type === 1 || a.type === 28) && typeof a.data === "string") out.push(a.data);
+      }
+    }
+    return out;
+  };
+}
+
+/**
+ * The platform resolver: `node:dns` where it works; DoH where the runtime cannot resolve (module
+ * missing or not implemented). A genuine "no such name" from `node:dns` is final, never retried
+ * elsewhere, so the two resolvers cannot be played against each other.
+ */
+export const defaultHostLookup: HostLookup = async (hostname) => {
+  let dns: typeof import("node:dns") | null = null;
+  try {
+    dns = await import("node:dns");
+  } catch {
+    dns = null;
+  }
+  if (dns !== null && typeof dns.promises?.lookup === "function") {
+    try {
+      const answers = await dns.promises.lookup(hostname, { all: true, verbatim: true });
+      return answers.map((a) => a.address);
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === "ENOTFOUND" || code === "ENODATA" || code === "EAI_AGAIN" || code === "ESERVFAIL") throw err;
+      // Anything else (e.g. "not implemented" in a Worker) falls through to DoH.
+    }
+  }
+  return dohLookup(globalThis.fetch)(hostname);
+};
+
+/**
+ * SSRF-DNS: the literal-hostname check in `assertSafeUrl` cannot see that `evil.example` resolves to
+ * `127.0.0.1` or `169.254.169.254`. For a request DESTINATION, resolve the name and refuse when ANY
+ * answer is non-public (`UNSAFE_TARGET:private-dns`) or when it cannot be resolved at all
+ * (`UNSAFE_TARGET:dns-unresolvable`, fail-closed). An IP-literal host was already vetted by
+ * `assertSafeUrl` and is not resolved again.
+ *
+ * RESIDUAL RISK (documented, not solved here): this is a check-then-use. The page is fetched by the
+ * browser service, which resolves the name again on its own; a DNS-rebinding answer (public now,
+ * private a moment later) or a different resolver view can still differ. Closing that needs egress
+ * policy at the browser service itself (network-level deny of private ranges).
+ */
+export async function assertResolvesPublic(url: URL, lookup: HostLookup = defaultHostLookup): Promise<void> {
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  if (IP_LITERAL.test(host) || host.includes(":")) return;
+  let addresses: readonly string[];
+  try {
+    addresses = await lookup(host);
+  } catch {
+    throw new ToolOutboundError("UNSAFE_TARGET", "dns-unresolvable");
+  }
+  if (addresses.length === 0) throw new ToolOutboundError("UNSAFE_TARGET", "dns-unresolvable");
+  for (const address of addresses) {
+    // Resolved answers are always IP literals; anything else is a resolver we do not understand.
+    const a = address.toLowerCase();
+    if (!(IP_LITERAL.test(a) || a.includes(":")) || isPrivateHost(a)) {
+      throw new ToolOutboundError("UNSAFE_TARGET", "private-dns");
+    }
+  }
+}
+
 /** Map an HTTP status onto the fixed buckets admin needs, without pretending to know the provider. */
 export function classifyStatus(status: number): ToolOutboundCode | "OK" {
   if (status >= 200 && status < 300) return "OK";

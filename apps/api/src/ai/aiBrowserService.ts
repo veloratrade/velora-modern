@@ -18,7 +18,16 @@
  * browser service's own token, and the target URL carries nothing.
  */
 import { defaultToolProvider, TOOL_BUDGETS, type ToolCapabilityEvidence, type ToolProviderDefinition } from "./aiToolCatalog.js";
-import { assertSafeUrl, classifyStatus, toolFetch, ToolOutboundError, type ToolOutboundCode } from "./aiToolOutbound.js";
+import {
+  assertResolvesPublic,
+  assertSafeUrl,
+  classifyStatus,
+  defaultHostLookup,
+  toolFetch,
+  ToolOutboundError,
+  type HostLookup,
+  type ToolOutboundCode,
+} from "./aiToolOutbound.js";
 
 export interface BrowserCaptureRequest {
   /** The page to open. Vetted by `assertSafeUrl` — a URL from a user message is untrusted input. */
@@ -62,6 +71,11 @@ export interface BrowserServiceDeps {
   readonly secrets: { resolve(key: string): Promise<{ value: string | null; source: "admin" | "env" | null }> };
   readonly now?: () => Date;
   readonly fetchImpl?: typeof fetch;
+  /**
+   * Resolver for request DESTINATIONS (SSRF-DNS). Injectable so tests never touch DNS; defaults to the
+   * platform resolver. Never applied to the operator-configured endpoint, which may be private.
+   */
+  readonly lookupHost?: HostLookup;
   readonly nodeCrypto?: { createHash(algorithm: string): { update(data: Buffer): { digest(enc: "hex"): string } } };
 }
 
@@ -254,6 +268,8 @@ export class AiBrowserService {
     if (request.chartHostsOnly === true && !(await this.isTrustedChartHost(target.hostname))) {
       return { ok: false, code: "UNSAFE_TARGET", reason: "host-not-a-trusted-chart-source" };
     }
+    const unsafe = await this.refuseIfResolvesPrivate(target);
+    if (unsafe !== null) return unsafe;
     const viewport = {
       width: clampNumber(request.viewport?.width, 1_440, MIN_VIEWPORT, MAX_VIEWPORT),
       height: clampNumber(request.viewport?.height, 900, MIN_VIEWPORT, MAX_VIEWPORT),
@@ -307,12 +323,30 @@ export class AiBrowserService {
     if (request.chartHostsOnly === true && !(await this.isTrustedChartHost(target.hostname))) {
       return { ok: false, code: "UNSAFE_TARGET", reason: "host-not-a-trusted-chart-source" };
     }
+    const unsafe = await this.refuseIfResolvesPrivate(target);
+    if (unsafe !== null) return unsafe;
     const out = await this.post(endpoint, "/content", { url: target.toString(), gotoOptions: { waitUntil: "domcontentloaded" } });
     if ("ok" in out && out.ok === false) return out;
     const got = out as { bytes: Buffer; contentType: string };
     const max = clampNumber(request.maxChars, 6_000, 200, TOOL_BUDGETS.browser_capture.maxQueryChars * 8);
     const rendered = htmlToText(got.bytes.toString("utf8"), max);
     return { url: target.toString(), text: rendered.text, truncated: rendered.truncated, retrievedAt: this.now().toISOString(), provider: endpoint.def.provider };
+  }
+
+  /**
+   * SSRF-DNS: the literal-host check cannot see what a NAME resolves to, so a destination is resolved
+   * and refused if any answer is non-public (or nothing answers). Runs after the cheap allow-list check
+   * so a name we would refuse anyway is never looked up. Residual DNS-rebinding risk: see
+   * `assertResolvesPublic`.
+   */
+  private async refuseIfResolvesPrivate(target: URL): Promise<BrowserFailure | null> {
+    try {
+      await assertResolvesPublic(target, this.deps.lookupHost ?? defaultHostLookup);
+      return null;
+    } catch (err) {
+      if (err instanceof ToolOutboundError) return { ok: false, code: err.code, reason: `target:${err.detail ?? "rejected"}` };
+      throw err;
+    }
   }
 
   private async isTrustedChartHost(host: string): Promise<boolean> {
