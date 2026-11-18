@@ -118,6 +118,32 @@ naive yields NULL UTC + `unresolved` + preserved `broker_time_text`; no trade
 created) and `db/tests/syncSubstrate.pg.test.ts` (both columns exist and hold
 different values on one row), executed against real PostgreSQL 17.10.
 
+### Amendment A-3 — Owner confirms sampling-first, Asia/Tehran standby (2026-11-18)
+
+**Status: accepted — owner decision (W0 decision on ADR-004, Option C).**
+
+**Decision.** The owner confirms the §Decision item 4 sampling procedure as the
+binding interpretation path for Legacy's naive datetimes:
+
+1. **Sample legacy dates first** — execute the read-only sampling procedure
+   (§Decision item 4, steps 1–4) against a staging copy of the Legacy export and
+   document the observed offset (email-notification UTC delta, trade open_time
+   vs market session opens, host PHP TZ, MetaApi sync TZ handling).
+2. **Then decide** — the owner confirms a single interpretation constant for the
+   migration transform based on the sampled evidence.
+3. **Asia/Tehran standby** — if sampling is not possible (no usable export, no
+   usable host evidence), the transform adopts `Asia/Tehran` as the site-local
+   interpretation constant for existing naive rows, documented as a documented
+   approximation that cannot be better than the evidence.
+
+Until the owner confirms the sampling result (or expressly adopts the
+Asia/Tehran standby), migration transform code remains blocked — exactly as
+§Decision item 3 requires ("No transformation code may be written before that").
+This amendment records the decision; it does not execute the sampling or write
+transform code (those are wave W6 data-migration work, gated on this decision).
+
+**Blocks:** MG-G10, MG-DATA-MIGRATION (wave W6).
+
 ## Migration Impact
 
 Direct: every naive column interprets via the sampling result; documented in
