@@ -81,6 +81,18 @@
 
 *(IDs prefixed `OD-AC-` to avoid colliding with existing D-*/OD-*/R-* namespaces; each row references its original identifier.)*
 
+## §C.1 — Recorded owner-decision resolutions (2026-11-18)
+
+The five W0 owner decisions were accepted by the owner on 2026-11-18 and are recorded as ADRs/amendments. The gaps they block (MG-G02, MG-G06, MG-G10, MG-G03, MG-SCHEMA-MAPPING, MG-ADMIN, MG-RBAC-VOCAB) remain OPEN / PARTIAL until the implementing waves land; only the *decisions* are resolved here. Gap counts are unchanged (13 OPEN / 30 PARTIAL / 13 CLOSED).
+
+| ID | Decision | Resolution (2026-11-18) | Record |
+|---|---|---|---|
+| OD-AC-R8 | `/markets`, `/news`, `/support` public (contract) vs protected (legacy) | **Option C — `/markets` and `/news` public, `/support` behind login** | `docs/adr/ADR-021-public-vs-protected-routes.md` (Accepted 2026-11-18) |
+| OD-AC-R9 | Strategy winRate/order/untagged semantics | **Option A — port the strategies widget as-is; no invented strategy semantics** | `docs/adr/ADR-020-dashboard-strategies-widget.md` (Accepted 2026-11-18) |
+| OD-AC-SUBMAP | Subscription status vocabulary mapping (`grace`/`expired`) | **Option A — provider-agnostic subscription model over the Stripe `subscriptions` object; keep history** | `docs/adr/ADR-022-subscription-status-vocabulary.md` (Accepted 2026-11-18) |
+| (user create/invite) | Admin user creation + invitations — build both / one / defer | **Option A — port both; 7-day invite validity; admin and super_admin may invite** | `docs/adr/ADR-023-admin-user-create-invitations.md` (Accepted 2026-11-18) |
+| OD-AC-ADR004 | Naive `datetime` sampling procedure (legacy TZ) | **Option C — sample legacy dates first, then decide; Asia/Tehran standby if sampling is not possible** | `docs/adr/ADR-004-time-model.md` Amendment A-3 (Accepted 2026-11-18) |
+
 ## §D — Verified complete (do not re-litigate without new evidence)
 
 From audit §18 (`COMPLETE` ×31) and §19.2. Verification states reflect the audit baseline `ffcb0e9`/`edede31`; the tool governs whether they remain current.
