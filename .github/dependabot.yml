@@ -1,0 +1,44 @@
+# Dependabot — cost-controlled, weekly, grouped.
+# Rationale (Phase 1 governance hardening, 2026-10-11, main 354edaa):
+# - No unconditional expensive audit gate added (see below).
+# - Weekly schedule (Monday 06:00 UTC) avoids daily noise; grouped patch/minor reduces PR count.
+# - `open-pull-requests-limit: 5` caps cost.
+# - npm ecosystem only (single packageManager, lockfileVersion 3, no pnpm/yarn).
+# - Security updates are separate from version updates (security PRs still immediate via GitHub).
+# - `npm audit` is NOT added as required check (cost + baseline missing); see docs/DEPENDENCY_SECURITY_2026-10-11.md
+#   for provisional `audit-level: high` as manual `workflow_dispatch`, not PR-gate, until baseline and exception policy exist.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        patterns:
+          - "@types/*"
+          - "typescript"
+          - "@electric-sql/*"
+        update-types:
+          - "minor"
+          - "patch"
+      runtime-patch:
+        patterns:
+          - "tsx"
+          - "pg"
+          - "pg-boss"
+          - "bcryptjs"
+          - "hash-wasm"
+        update-types:
+          - "patch"
+    labels:
+      - "dependencies"
+      - "cost-controlled"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    # Do not auto-rebase on every push (cost); rely on weekly cadence.
+    rebase-strategy: "disabled"
