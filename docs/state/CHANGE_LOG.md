@@ -1971,3 +1971,33 @@ remains the no-egress path.
 - **Impact on migration state:** none to gap rows/statuses/counts; decisions recorded only. No owner decision was guessed — all five match the owner's explicit approvals of 2026-11-18.
 - **Evidence:** `docs/adr/ADR-020..023.md` + amended `ADR-004-time-model.md` + `docs/adr/README.md` + `docs/state/MIGRATION_GAP_REGISTER.md` §C.1 + `docs/state/CURRENT_STATE.md` + `docs/state/current-state.json`; both JSON twins parse; `tools/agent-context.mjs` classifies this commit as governance-only delta (DRIFTED does not advance on docs/**); `bash tools/secret-scan.sh` PASS (0 findings) before push (D-06 standing gate).
 - **Authorization:** owner instruction 2026-11-18 (approves all five W0 decisions as recommended). No direct push to main; PR to `main`; normal merge only after green verify/tests.
+
+## AC-61 — 2026-11-18 · W1 admin user create + invitations + subscription POST (ADR-023 / ADR-022)
+
+- **Branch:** `phase2/w1-admin` (from `main` @ `5208643`, post-W0 merge). Commits:
+  - `contracts(rbac): declare users.create, users.invite, users.manage_subscription + grant to admin+super_admin (W1)`
+  - `audit: add USER_CREATED and USER_INVITED actions; 0044 invitation_tokens table`
+  - `auth(adminUserService): add user create + 7-day single-use invite with RBAC pair rules (W1)`
+  - `api(admin): POST /admin/users create, invite, and subscription POST routes (W1)`
+  - `state: record W1 admin create/invite/subscription resolved — ADR-023 / ADR-022 (AC-61)`
+
+- **What changed (W1 A1 + A2 + A3):**
+  - `packages/contracts/src/rbac.ts` — `users.create`, `users.invite`, `users.manage_subscription` added to `PERMISSIONS` and granted to `admin` and `super_admin` (denied to `user`; fail-closed for unknown roles). Resolves the AC-34 dead-in-legacy conflict: ADR-023 = A and ADR-022 = A authorize these, so they are no longer "unported".
+  - `apps/api/src/auth/adminUserService.ts` — new `create` (admin sets password; account active + e-mail verified; admin vouches) and `invite` (single-use 7-day token, plaintext returned once; delivery deploy-gated per MG-WORKER-DEPLOY). Both enforce super_admin authority for admin-level roles (`PRIVILEGE_ESCALATION_DENIED`), mirroring `setRole`.
+  - `apps/api/src/auth/userStore.ts` + `pgUserStore.ts` + `memoryUserStore.ts` — `createInvitation` / `findInvitationByToken` / `consumeInvitation` port; `invitation_tokens` table via migration `0044_admin_invitations.sql` (pending-e-mail unique index, 7-day expiry).
+  - `apps/api/src/auth/auditStore.ts` — `USER_CREATED` and `USER_INVITED` added to `AUDIT_ACTIONS` (kept in lockstep with the migration `audit_log_action_check`, enforced by `auditVocabulary.test.ts`).
+  - `apps/api/src/admin/adminConsoleRoutes.ts` — `POST /api/v1/admin/users` (`users.create`), `POST /api/v1/admin/users/invite` (`users.invite`), `POST /api/v1/admin/users/{id}/subscription` (`users.manage_subscription` over the subscription store). Fail-closed: 401 anonymous / 403 plain user / 503 missing capability; 409 duplicate e-mail / 403 escalation / 404 unknown user / 422 bad plan.
+  - `apps/api/src/server-main.ts` — wires `VeloraHasher` into `AdminUserService`.
+
+- **Tests:** `packages/contracts/src/rbac.test.ts` (W1 grants, fail-closed, parity), `apps/api/src/auth/adminUserService.test.ts` (E1–E7: create/invite behavior, escalation, single-use, audit), `apps/api/src/admin/adminConsoleRoutes.test.ts` (HTTP authz + behavior over the real kernel), `db/tests/migrations.test.ts` (0044: USER_CREATED writable, pending-e-mail uniqueness). Full battery green (see evidence).
+
+- **Impact on migration state:** migration 0044 adds `invitation_tokens` and widens `audit_log_action_check` (replace, never stack — exactly one live constraint). No gap rows/statuses/counts changed: still **13 OPEN / 30 PARTIAL / 13 CLOSED** (56 total), hardcoded by `tools/registryConsistency.test.ts`. `MG-EMAIL-TYPES` stays PARTIAL (runtime Resend delivery remains deploy-gated; admin-invite e-mail is unwired). `current_verified` fields (`7d91ff1`, legacy `edede31…`, `verified_at` `2026-10-11`) untouched by design.
+
+- **Evidence (executed 2026-11-18 on this branch, after `npm ci`):**
+  - Typecheck: `npx tsc -b packages/contracts packages/domain apps/api apps/worker apps/web` → **0 errors**.
+  - `node tools/run-tests.mjs` → **ALL TEST FILES PASSED** (general + PGlite, 0 fail).
+  - `npm run test:migrations` → **pass** (disposable PGlite, incl. new 0044 test).
+  - `bash tools/secret-scan.sh` → **PASS (0 findings)**.
+  - `npm audit --audit-level=high` → pre-existing advisories only; CI runs `|| true`.
+
+- **Authorization:** owner-approved W1 scope (create + invite + subscription POST, both admin and super_admin, 7-day invite TTL). No direct push to main; PR to `main`; normal merge only after green verify/tests; no force-push; no branch deletion.
