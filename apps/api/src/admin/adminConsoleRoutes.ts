@@ -71,6 +71,12 @@ const USER_TRADES = /^\/api\/v1\/admin\/users\/([^/]+)\/trades$/;
 const USER_ACTIVITY = /^\/api\/v1\/admin\/users\/([^/]+)\/activity$/;
 const USER_SESSION_REVOCATIONS = /^\/api\/v1\/admin\/users\/([^/]+)\/session-revocations$/;
 const USER_EMAIL_VERIFICATION = /^\/api\/v1\/admin\/users\/([^/]+)\/email-verification$/;
+const ADMIN_USERS_CREATE = "/api/v1/admin/users";
+const ADMIN_USERS_INVITE = "/api/v1/admin/users/invite";
+const USER_SUBSCRIPTION = /^\/api\/v1\/admin\/users\/([^/]+)\/subscription$/;
+
+/** Plans the admin surface may assign. Fail-closed: anything else is 422. */
+const SUBSCRIPTION_PLANS = ["free", "pro", "enterprise"] as const;
 
 const READ_ROUTES: ReadonlyArray<{ readonly path: string; readonly permission: Permission }> = [
   { path: OVERVIEW, permission: "overview.view" },
@@ -125,6 +131,9 @@ export async function handleAdminConsoleRoutes(ctx: ExtendedRouteContext): Promi
   const revokeMatch = USER_SESSION_REVOCATIONS.exec(ctx.path);
   const verifyMatch = USER_EMAIL_VERIFICATION.exec(ctx.path);
   const isRefresh = ctx.path === SYSTEM_DIAGNOSTICS_REFRESH;
+  const usersCreate = ctx.path === ADMIN_USERS_CREATE;
+  const usersInvite = ctx.path === ADMIN_USERS_INVITE;
+  const subscriptionMatch = USER_SUBSCRIPTION.exec(ctx.path);
 
   // Not ours → hand the request back to the dispatcher (which falls through to
   // the kernel's 404). This check runs BEFORE the capability check so an absent
@@ -138,7 +147,10 @@ export async function handleAdminConsoleRoutes(ctx: ExtendedRouteContext): Promi
     activityMatch !== null ||
     revokeMatch !== null ||
     verifyMatch !== null ||
-    isRefresh;
+    isRefresh ||
+    usersCreate ||
+    usersInvite ||
+    subscriptionMatch !== null;
   if (!owns) return null;
 
   if (capability === null) return capabilityAbsent(ctx, "adminConsole");
@@ -158,9 +170,15 @@ export async function handleAdminConsoleRoutes(ctx: ExtendedRouteContext): Promi
         ? "users.manage_status"
         : verifyMatch !== null
           ? "users.verify_email"
-          : isRefresh
-            ? "system.health.view"
-            : null;
+          : usersCreate
+            ? "users.create"
+            : usersInvite
+              ? "users.invite"
+              : subscriptionMatch !== null
+                ? "users.manage_subscription"
+                : isRefresh
+                  ? "system.health.view"
+                  : null;
   if (permission === null) return null;
   if (!canAct(authority, permission)) return forbidden(ctx);
 
@@ -278,6 +296,70 @@ export async function handleAdminConsoleRoutes(ctx: ExtendedRouteContext): Promi
       const id = decodeURIComponent(verifyMatch[1] ?? "");
       const result = await users.verifyEmail(id, actor);
       return { status: 200, body: ok({ user: result.user, changed: result.changed }) };
+    }
+
+    if (ctx.method === "POST" && usersCreate) {
+      const body = await ctx.readBody(ctx.req);
+      const email = typeof body.email === "string" ? body.email : undefined;
+      const password = typeof body.password === "string" ? body.password : undefined;
+      const fullName = typeof body.fullName === "string" ? body.fullName : undefined;
+      const role = typeof body.role === "string" ? body.role : undefined;
+      const timezone = typeof body.timezone === "string" ? body.timezone : undefined;
+      const locale =
+        body.locale === "en" ? "en" : body.locale === "fa" ? "fa" : undefined;
+      if (email === undefined || email.trim() === "") {
+        return validation(ctx, { email: "required" });
+      }
+      if (password === undefined || password === "") {
+        return validation(ctx, { password: "required" });
+      }
+      const createInput: {
+        email: string;
+        password: string;
+        fullName?: string;
+        role?: string;
+        timezone?: string;
+        locale?: "fa" | "en";
+      } = { email, password };
+      if (fullName !== undefined) createInput.fullName = fullName;
+      if (role !== undefined) createInput.role = role;
+      if (timezone !== undefined) createInput.timezone = timezone;
+      if (locale !== undefined) createInput.locale = locale;
+      const result = await users.create(createInput, actor);
+      return { status: 201, body: ok({ user: result.user }) };
+    }
+
+    if (ctx.method === "POST" && usersInvite) {
+      const body = await ctx.readBody(ctx.req);
+      const email = typeof body.email === "string" ? body.email : undefined;
+      const role = typeof body.role === "string" ? body.role : undefined;
+      if (email === undefined || email.trim() === "") {
+        return validation(ctx, { email: "required" });
+      }
+      const inviteInput: { email: string; role?: string } = { email };
+      if (role !== undefined) inviteInput.role = role;
+      const result = await users.invite(inviteInput, actor);
+      return {
+        status: 200,
+        body: ok({ email: result.email, role: result.role, token: result.token, expiresAt: result.expiresAt }),
+      };
+    }
+
+    if (ctx.method === "POST" && subscriptionMatch !== null) {
+      const id = decodeURIComponent(subscriptionMatch[1] ?? "");
+      const body = await ctx.readBody(ctx.req);
+      const plan = typeof body.plan === "string" ? body.plan : undefined;
+      if (plan === undefined || !SUBSCRIPTION_PLANS.includes(plan as (typeof SUBSCRIPTION_PLANS)[number])) {
+        return validation(ctx, { plan: `must be one of ${SUBSCRIPTION_PLANS.join(", ")}` });
+      }
+      const subscriptions = ctx.config.subscriptions;
+      if (subscriptions === undefined) {
+        return capabilityAbsent(ctx, "subscriptions");
+      }
+      // Existence first: a missing user is a 404, not a silent no-op.
+      await users.getUser(id);
+      await subscriptions.setUserPlan(id, plan as (typeof SUBSCRIPTION_PLANS)[number]);
+      return { status: 200, body: ok({ userId: id, plan }) };
     }
 
     if (ctx.method === "POST" && isRefresh) {
