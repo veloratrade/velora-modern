@@ -1,0 +1,17 @@
+/* Ported from legacy dashboard/index.html :root (design tokens) */
+:root {
+    --bg: #060A14;
+    --bg2: #0A1122;
+    --card: #0E1A33;
+    --card2: #12203F;
+    --border: rgba(255,255,255,0.07);
+    --gold: #d4af37;
+    --gold-l: #fce38a;
+    --txt: #EAF0FA;
+    --muted: #8FA0C0;
+    --faint: #5E6F92;
+    --green: #4CD39A;
+    --red: #FF6B6B;
+    --blue: #3B82F6;
+    --violet: #8B5CF6;
+  }

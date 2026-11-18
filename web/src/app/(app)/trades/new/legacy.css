@@ -1,0 +1,273 @@
+/* Ported from legacy trades/new/index.html — page-scoped under .pg-trades-new. Do not hand-edit selectors; regenerate with tools/port-legacy-css.py */
+
+/* ---- legacy <style> block 0 (ca211623) ---- */
+
+  .pg-trades-new{--bg:#060A14;--card:#0E1A33;--card2:#12203F;--border:rgba(255,255,255,0.07);--gold:#d4af37;--gold-l:#fce38a;--gold-d:#b88d1d;--txt:#EAF0FA;--muted:#8FA0C0;--faint:#5E6F92;--green:#4CD39A;--red:#FF6B6B;--blue:#3B82F6;--violet:#8B5CF6;}
+  .pg-trades-new *{margin:0;padding:0;box-sizing:border-box;}
+  .pg-trades-new, .pg-trades-new{height:auto;overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+  .pg-trades-new{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:var(--txt);-webkit-font-smoothing:antialiased;min-height:100vh;}
+  .pg-trades-new .bgfx{position:fixed;inset:0;z-index:0;pointer-events:none;background:radial-gradient(900px 500px at 85% -10%,rgba(212,175,55,.07),transparent 60%),radial-gradient(800px 600px at -5% 110%,rgba(59,130,246,.07),transparent 55%);}
+  .pg-trades-new .shell{position:relative;z-index:1;display:flex;min-height:100vh;}
+
+  .pg-trades-new .sidebar{width:240px;flex-shrink:0;background:linear-gradient(180deg,rgba(10,17,34,.9),rgba(6,10,20,.95));border-left:1px solid var(--border);display:flex;flex-direction:column;padding:20px 14px;position:sticky;top:0;height:100vh;}
+  .pg-trades-new .sb-logo{display:flex;align-items:center;gap:10px;padding:4px 8px 18px;}
+  .pg-trades-new .sb-logo img{width:34px;height:34px;}
+  .pg-trades-new .sb-logo span{font-size:19px;font-weight:800;letter-spacing:5px;background:linear-gradient(120deg,var(--gold-l),var(--gold));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
+  .pg-trades-new .sb-nav{display:flex;flex-direction:column;gap:3px;flex:1;}
+  .pg-trades-new .sb-item{display:flex;align-items:center;gap:11px;padding:11px 13px;border-radius:11px;color:var(--muted);font-size:13.5px;font-weight:600;text-decoration:none;transition:all .18s;border:1px solid transparent;}
+  .pg-trades-new .sb-item svg{width:18px;height:18px;flex-shrink:0;}
+  .pg-trades-new .sb-item:hover{color:var(--txt);background:rgba(255,255,255,.04);}
+  .pg-trades-new .sb-item.active{color:#fff;background:linear-gradient(135deg,rgba(212,175,55,.16),rgba(212,175,55,.05));border-color:rgba(212,175,55,.35);}
+  .pg-trades-new .sb-user{margin-top:14px;padding:12px 10px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:14px;display:flex;align-items:center;gap:10px;}
+  .pg-trades-new .sb-user .av{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,var(--gold-d),var(--gold));display:flex;align-items:center;justify-content:center;font-weight:800;color:#0b121e;font-size:15px;flex-shrink:0;}
+  .pg-trades-new .sb-user .nm{flex:1;min-width:0;}
+  .pg-trades-new .sb-user .nm b{display:block;font-size:12.5px;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .pg-trades-new .sb-user .nm small{font-size:10.5px;color:var(--faint);}
+  .pg-trades-new .sb-user .logout{background:none;border:none;color:var(--faint);cursor:pointer;padding:4px;}
+
+  .pg-trades-new .main{flex:1;min-width:0;padding:24px 28px 80px;max-width:860px;}
+  .pg-trades-new .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:22px;flex-wrap:wrap;}
+  .pg-trades-new .topbar .h1{font-size:23px;font-weight:800;color:#fff;}
+  .pg-trades-new .topbar .h1 .grad{background:linear-gradient(120deg,#fce38a,#d4af37 55%,#b88d1d);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
+  .pg-trades-new .topbar .sub{font-size:12.5px;color:var(--muted);margin-top:3px;}
+  .pg-trades-new .back{display:inline-flex;align-items:center;gap:6px;color:var(--muted);text-decoration:none;font-size:13px;font-weight:700;}
+  .pg-trades-new .back:hover{color:var(--txt);}
+
+  .pg-trades-new .panel{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--border);border-radius:18px;padding:22px 24px;margin-bottom:20px;}
+  .pg-trades-new .panel-head{display:flex;align-items:center;gap:9px;margin-bottom:18px;font-size:14.5px;font-weight:800;color:#fff;}
+  .pg-trades-new .panel-head svg{width:17px;height:17px;color:var(--gold);}
+
+  .pg-trades-new .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  .pg-trades-new .field label{display:block;font-size:12px;font-weight:700;color:#c7d2ea;margin-bottom:7px;}
+  .pg-trades-new .input{width:100%;background:rgba(6,10,20,.6);border:1px solid var(--border);border-radius:12px;padding:12px 14px;color:var(--txt);font-size:13.5px;font-family:inherit;transition:border-color .2s;}
+  .pg-trades-new .input:focus{outline:none;border-color:rgba(212,175,55,.5);box-shadow:0 0 0 3px rgba(212,175,55,.1);}
+  .pg-trades-new .input::placeholder{color:var(--faint);}
+  .pg-trades-new select.input{appearance:none;cursor:pointer;}
+  .pg-trades-new .hint{font-size:11px;color:var(--faint);margin-top:5px;line-height:1.7;}
+
+  /* جهت */
+  .pg-trades-new .dir-toggle{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .pg-trades-new .dir-opt{border:1.5px solid var(--border);border-radius:14px;padding:14px;text-align:center;cursor:pointer;transition:all .2s;background:rgba(255,255,255,.02);}
+  .pg-trades-new .dir-opt .d-lbl{font-size:14px;font-weight:800;color:var(--muted);}
+  .pg-trades-new .dir-opt .d-sub{font-size:10.5px;color:var(--faint);margin-top:3px;}
+  .pg-trades-new .dir-opt.buy.sel{border-color:rgba(76,211,154,.6);background:rgba(76,211,154,.08);}
+  .pg-trades-new .dir-opt.buy.sel .d-lbl{color:var(--green);}
+  .pg-trades-new .dir-opt.sell.sel{border-color:rgba(255,107,107,.6);background:rgba(255,107,107,.08);}
+  .pg-trades-new .dir-opt.sell.sel .d-lbl{color:var(--red);}
+
+  /* امتیاز احساسی */
+  .pg-trades-new .emot-row{display:flex;gap:8px;justify-content:space-between;}
+  .pg-trades-new .emot{border:1.5px solid var(--border);border-radius:14px;padding:10px 6px;text-align:center;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:7px;flex:1;transition:all .2s;background:rgba(255,255,255,.02);}
+  .pg-trades-new .emot .emot-ico{filter:saturate(.9) drop-shadow(0 2px 5px rgba(0,0,0,.25));transition:transform .15s;}
+  .pg-trades-new .emot:hover .emot-ico{transform:translateY(-2px) scale(1.06);}
+  .pg-trades-new .emot:hover{transform:translateY(-2px);}
+  .pg-trades-new .emot.sel{border-color:rgba(212,175,55,.6);background:rgba(212,175,55,.1);box-shadow:0 4px 12px rgba(212,175,55,.15);}
+  .pg-trades-new .emot small{display:block;font-size:9.5px;color:var(--faint);margin-top:3px;font-weight:700;}
+
+  /* محاسبه‌گر PnL */
+  .pg-trades-new .pnl-box{margin-top:18px;border-radius:14px;padding:16px;background:rgba(6,10,20,.5);border:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;}
+  .pg-trades-new .pnl-box .lbl{font-size:12px;color:var(--muted);}
+  .pg-trades-new .pnl-box .big{font-size:28px;font-weight:800;direction:ltr;font-variant-numeric:tabular-nums;}
+  .pg-trades-new .pnl-box .big.pos{color:var(--green);}.pg-trades-new .pnl-box .big.neg{color:var(--red);}
+  .pg-trades-new .pnl-meta{display:flex;gap:18px;font-size:11.5px;color:var(--faint);}
+  .pg-trades-new .pnl-meta b{color:var(--muted);}
+
+  .pg-trades-new .btn-gold{width:100%;display:inline-flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(135deg,#fce38a 0%,#d4af37 50%,#b88d1d 100%);color:#0b121e;border:none;border-radius:14px;padding:15px;font-size:14.5px;font-weight:800;font-family:inherit;cursor:pointer;box-shadow:0 10px 26px rgba(212,175,55,.3);transition:transform .15s;margin-top:4px;}
+  .pg-trades-new .btn-gold:hover{transform:translateY(-1px);}
+  .pg-trades-new .btn-gold:disabled{opacity:.6;cursor:wait;}
+  .pg-trades-new .btn-spinner{display:inline-block;width:16px;height:16px;border-radius:50%;border:2px solid rgba(11,18,30,.25);border-top-color:#0b121e;animation:spin .7s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  .pg-trades-new .error-box{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.4);color:#FCA5A5;font-size:13px;line-height:1.9;border-radius:12px;padding:11px 14px;display:none;margin-bottom:16px;}
+  .pg-trades-new .error-box.show{display:block;}
+
+  .pg-trades-new .mobile-top{display:none;}
+  @media(max-width:980px){
+    .pg-trades-new .sidebar{display:none;}
+    .pg-trades-new .mobile-top{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;position:sticky;top:0;z-index:50;background:rgba(6,10,20,.85);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);}
+    .pg-trades-new .mobile-top .l{display:flex;align-items:center;gap:9px;}
+    .pg-trades-new .mobile-top img{width:30px;height:30px;}
+    .pg-trades-new .mobile-top span{font-size:17px;font-weight:800;letter-spacing:4px;color:var(--gold);}
+    .pg-trades-new .mobile-top .av{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,var(--gold-d),var(--gold));display:flex;align-items:center;justify-content:center;font-weight:800;color:#0b121e;font-size:14px;}
+    .pg-trades-new .main{padding:16px 14px 90px;}
+    .pg-trades-new .form-grid{grid-template-columns:1fr;}
+    .pg-trades-new .panel{padding:18px 16px;}
+    .pg-trades-new .topbar .h1{font-size:19px;}
+  }
+  .pg-trades-new .bottom-nav{display:none;}
+  @media(max-width:980px){
+    .pg-trades-new .bottom-nav{display:flex;position:fixed;bottom:0;left:0;right:0;z-index:60;background:rgba(8,13,28,.94);backdrop-filter:blur(14px);border-top:1px solid var(--border);padding:8px 6px calc(8px + env(safe-area-inset-bottom));justify-content:space-around;}
+    .pg-trades-new .bn-item{display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--faint);font-size:10px;font-weight:700;text-decoration:none;padding:6px 10px;border-radius:12px;flex:1;}
+    .pg-trades-new .bn-item svg{width:20px;height:20px;}
+    .pg-trades-new .bn-item.active{color:var(--gold-l);background:rgba(212,175,55,.1);}
+  }
+  .pg-trades-new .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);z-index:300;background:rgba(10,16,32,.95);border:1px solid rgba(76,211,154,.5);color:#4CD39A;padding:12px 22px;border-radius:12px;font-size:13px;font-weight:700;display:none;box-shadow:0 10px 30px rgba(0,0,0,.5);}
+  .pg-trades-new .toast.err{border-color:rgba(239,68,68,.5);color:#FCA5A5;}
+  .pg-trades-new .toast.show{display:block;}
+
+/* ---- legacy <style> block 1 (2a687aef) ---- */
+
+  /* Anti-flash boot: the head boot script adds .velora-hero-boot before first
+     paint when the default screenshot-AI mode will be shown, so the manual
+     form never flashes. Deliberately NOT !important: the vsi-manual /
+     vsi-journal rules in velora-smart-import.css must always win over it. */
+  html.velora-hero-boot .pg-trades-new main .panel > .form-grid, html.velora-hero-boot .pg-trades-new main .panel > .pnl-box, html.velora-hero-boot .pg-trades-new main .panel > #submitBtn{ display: none; }
+
+/* [block 2 55466e76] shared shell CSS — see src/styles/shell.css */
+
+/* [block 3 ee3c44d9] shared shell CSS — see src/styles/shell.css */
+
+/* [block 4 7e436912] shared shell CSS — see src/styles/shell.css */
+
+/* ---- legacy <style> block 5 (73bdfd5e) ---- */
+
+/* ============================================================
+   VELORA SYMBOL SELECTOR & DROPDOWN (TRADES/NEW)
+   ============================================================ */
+.pg-trades-new .sym-select{
+  position: relative !important;
+}
+
+.pg-trades-new .sym-select-btn{
+  width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  background: rgba(14, 26, 51, 0.7) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: 12px !important;
+  padding: 12px 14px !important;
+  color: #eaf0fa !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+}
+
+.pg-trades-new .sym-select-btn:hover{
+  border-color: rgba(212, 175, 55, 0.5) !important;
+  background: rgba(212, 175, 55, 0.08) !important;
+}
+
+.pg-trades-new .sym-caret{
+  margin-right: auto !important;
+  color: #8fa0c0 !important;
+  transition: transform 0.2s ease !important;
+}
+
+.pg-trades-new .sym-select-btn.open .sym-caret{
+  transform: rotate(180deg) !important;
+}
+
+.pg-trades-new .sym-select{
+  position: relative !important;
+  z-index: 80 !important;
+  overflow: visible !important;
+}
+.pg-trades-new .field{
+  overflow: visible !important;
+}
+.pg-trades-new .form-grid{
+  overflow: visible !important;
+}
+.pg-trades-new .panel{
+  overflow: visible !important;
+}
+.pg-trades-new .sym-dropdown{
+  position: fixed !important;
+  background: #0f172a !important;
+  border: 1px solid rgba(212, 175, 55, 0.45) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9) !important;
+  z-index: 8000 !important;
+  /* No !important here on purpose: velora-sym-picker.js place() sets an inline
+     viewport-aware max-height (visualViewport-based, keyboard-safe). A stylesheet
+     !important would beat that inline value and break short/keyboard viewports. */
+  max-height: min(58vh, 420px);
+  display: none !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+.pg-trades-new .sym-dropdown.show{
+  display: flex !important;
+}
+
+.pg-trades-new .sym-search-wrap{
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 10px 12px !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: rgba(0, 0, 0, 0.35) !important;
+}
+
+.pg-trades-new .sym-search-wrap svg{
+  color: #8fa0c0 !important;
+  flex-shrink: 0 !important;
+}
+
+.pg-trades-new .sym-search-wrap input{
+  width: 100% !important;
+  background: transparent !important;
+  border: none !important;
+  color: #ffffff !important;
+  font-size: 13px !important;
+  outline: none !important;
+}
+
+.pg-trades-new .sym-list{
+  display: block !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  max-height: min(52vh, 340px) !important;
+  overflow-y: scroll !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch !important;
+  overscroll-behavior: contain !important;
+  scrollbar-width: thin !important;
+  scrollbar-color: #d4af37 #0b1220 !important;
+}
+.pg-trades-new .sym-list::-webkit-scrollbar{ width: 8px !important; }
+.pg-trades-new .sym-list::-webkit-scrollbar-thumb{
+  background: #d4af37 !important;
+  border-radius: 99px !important;
+}
+
+.pg-trades-new .sym-item{
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 10px 14px !important;
+  cursor: pointer !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  transition: background 0.15s !important;
+}
+
+.pg-trades-new .sym-item:hover{
+  background: rgba(212, 175, 55, 0.15) !important;
+}
+
+.pg-trades-new .sym-item.sel{
+  background: rgba(212, 175, 55, 0.22) !important;
+  border-left: 3px solid #ffb703 !important;
+}
+
+.pg-trades-new .sym-item .sym-symbol{
+  font-weight: 800 !important;
+  font-size: 13.5px !important;
+  color: #fce38a !important;
+}
+
+.pg-trades-new .sym-item .sym-name{
+  margin-right: auto !important;
+  font-size: 11px !important;
+  color: #8fa0c0 !important;
+}
+
+.pg-trades-new .sym-empty{
+  padding: 18px !important;
+  text-align: center !important;
+  color: #8fa0c0 !important;
+  font-size: 13px !important;
+}
