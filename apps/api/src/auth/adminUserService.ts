@@ -21,10 +21,19 @@
 // from this service goes through toAdminUser(), which builds a fresh object
 // from an explicit field list, so a future column added to UserRecord cannot
 // silently reach an API response.
+import { createHash, randomBytes } from "node:crypto";
 import { normalizeRole, type AppRole } from "@velora/contracts";
+import type { PasswordHasher } from "@velora/domain";
 import { AuthError } from "./authService.js";
 import type { DeviceRecord, SessionRecord, UserRecord, UserStore, AppRoleName } from "./userStore.js";
 import type { AuditStore, AuditEntry, AuditTx } from "./auditStore.js";
+
+function sha256(data: string): string {
+  return createHash("sha256").update(data).digest("hex");
+}
+
+/** A single-use invite token lives seven days (ADR-023 = A). */
+const INVITE_TTL_MS = 7 * 86_400 * 1000;
 
 /** Account states (0007_user_status.sql; Legacy parity: enum('active','suspended')). */
 export const USER_STATUSES = ["active", "suspended"] as const;
@@ -127,6 +136,10 @@ export function toAdminDevice(d: DeviceRecord): AdminDeviceView {
 
 export interface AdminUserServiceDeps {
   readonly store: UserStore;
+  /** Password hasher for admin-created accounts (W1 create). Optional so
+   *  construction sites that never call `create` are not forced to supply one;
+   *  `create` throws 503 when it is absent. */
+  readonly hasher?: PasswordHasher;
   /** Injectable clock (service convention). */
   readonly now?: () => Date;
   /**
@@ -540,6 +553,125 @@ export class AdminUserService {
       return { user: toAdminUser(current), changed: false };
     }
     return { user: toAdminUser(updated), changed: true };
+  }
+
+  // --- Phase 2 W1: account creation + invitations (ADR-023 = A) -------------
+  // Route-level `users.create` / `users.invite` decides whether the caller may
+  // reach these operations; the pair-rules below (privileged-role escalation)
+  // are enforced here. Neither layer replaces the other.
+
+  /** Admin-initiated account creation. The admin sets the password, so the
+   *  account is active and its e-mail is treated as verified the moment it
+   *  exists — the administrator vouches for it. Requires `users.create`. */
+  async create(
+    input: {
+      email: string;
+      password: string;
+      fullName?: string;
+      role?: string;
+      timezone?: string;
+      locale?: "fa" | "en";
+    },
+    actor: ActorContext,
+  ): Promise<{ user: AdminUserView }> {
+    const email = input.email.trim().toLowerCase();
+    const role = input.role ?? "user";
+    if (!isAppRoleName(role)) {
+      throw new AuthError(400, "INVALID_ROLE", "Unknown role.", { role });
+    }
+    if (isPrivilegedRole(role) && !hasSuperAuthority(actor)) {
+      throw new AuthError(
+        403,
+        "PRIVILEGE_ESCALATION_DENIED",
+        "Only a super admin may grant admin-level roles.",
+      );
+    }
+    const existing = await this.deps.store.findUserByEmail(email);
+    if (existing !== null) {
+      throw new AuthError(409, "EMAIL_ALREADY_REGISTERED", "Email already registered.", {
+        email: "Email already registered.",
+      });
+    }
+    if (this.deps.hasher === undefined) {
+      throw new AuthError(
+        503,
+        "PASSWORD_HASHING_UNAVAILABLE",
+        "Account creation is not configured on this deployment.",
+      );
+    }
+    const now = this.now();
+    const passwordHash = await this.deps.hasher.hash(input.password);
+    const user = await this.deps.store.createUser({
+      email,
+      passwordHash,
+      fullName: (input.fullName ?? "").trim(),
+      timezone: input.timezone ?? "UTC",
+      locale: input.locale ?? "fa",
+      now,
+    });
+    // createUser always mints role=user; elevate to the requested role now.
+    // The USER_CREATED audit row below records the final role, so no second
+    // audit row is written here.
+    if (role !== "user") {
+      await this.deps.store.updateUserRole(user.id, role, now);
+    }
+    // The admin vouches for the e-mail: the account is usable on login.
+    await this.deps.store.markEmailVerified(user.id, now);
+    const updated = await this.deps.store.findUserById(user.id);
+    if (updated === null) throw notFound();
+    await this.recordAudit(undefined, {
+      action: "USER_CREATED",
+      actorUserId: actor.id,
+      targetUserId: user.id,
+      beforeState: null,
+      afterState: `role:${role}`,
+      requestId: actor.requestId ?? null,
+      occurredAt: now,
+    });
+    return { user: toAdminUser(updated) };
+  }
+
+  /** Mint a single-use, 7-day invite token. The plaintext token is returned
+   *  once (to the inviting administrator); delivery is deploy-gated
+   *  (MG-WORKER-DEPLOY evidence class). Requires `users.invite`. */
+  async invite(
+    input: { email: string; role?: string },
+    actor: ActorContext,
+  ): Promise<{ email: string; role: AppRoleName; token: string; expiresAt: string }> {
+    const email = input.email.trim().toLowerCase();
+    const role = input.role ?? "user";
+    if (!isAppRoleName(role)) {
+      throw new AuthError(400, "INVALID_ROLE", "Unknown role.", { role });
+    }
+    if (isPrivilegedRole(role) && !hasSuperAuthority(actor)) {
+      throw new AuthError(
+        403,
+        "PRIVILEGE_ESCALATION_DENIED",
+        "Only a super admin may invite an admin-level role.",
+      );
+    }
+    const now = this.now();
+    const token = randomBytes(32).toString("hex");
+    const tokenHash = sha256(token);
+    const expiresAt = new Date(now.getTime() + INVITE_TTL_MS);
+    await this.deps.store.createInvitation({
+      email,
+      role,
+      tokenHash,
+      expiresAt,
+      now,
+      invitedByUserId: actor.id,
+    });
+    await this.recordAudit(undefined, {
+      action: "USER_INVITED",
+      actorUserId: actor.id,
+      targetUserId: null,
+      beforeState: null,
+      afterState: `role:${role}`,
+      requestId: actor.requestId ?? null,
+      occurredAt: now,
+    });
+    return { email, role, token, expiresAt: expiresAt.toISOString() };
   }
 
   /**

@@ -3,10 +3,16 @@
 // These tests pin the ACTOR/TARGET pair-rules that a permission bit cannot
 // express. Route-level permission checks are covered separately in
 // adminUserRoutes.test.ts; both layers must hold independently.
+import { createHash } from "node:crypto";
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { MemoryUserStore } from "./memoryUserStore.js";
 import { AuthError } from "./authService.js";
+import { VeloraHasher } from "./hashing.js";
+
+function testSha256(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
 import {
   AdminUserService,
   toAdminUser,
@@ -46,6 +52,7 @@ async function seed(
 function makeService(store: MemoryUserStore): AdminUserService {
   return new AdminUserService({
     store,
+    hasher: new VeloraHasher(),
     now: () => NOW,
     // No ownership is claimed in this suite: the resolver is stated EXPLICITLY
     // rather than omitted, so owner protection is deliberately inert here and
@@ -415,5 +422,132 @@ describe("3B-4 admin user service — listing", () => {
     assert.equal(isPrivilegedRole("super_admin"), true);
     assert.equal(isPrivilegedRole("user"), false);
     assert.equal(isPrivilegedRole("root"), false);
+  });
+
+  describe("W1: account creation + invitations (ADR-023 = A)", () => {
+    test("E1: create mints an active, e-mail-verified account and audits USER_CREATED", async () => {
+      const store = new MemoryUserStore();
+      const audit = new MemoryAuditStore();
+      const svc = new AdminUserService({
+        store,
+        hasher: new VeloraHasher(),
+        now: () => NOW,
+        getSystemOwnerUserId: async () => null,
+        audit,
+      });
+      const actor = { id: "admin-1", role: "admin" as const, isSystemOwner: false };
+
+      const out = await svc.create({ email: "newbie@velora.example", password: "a-strong-password-123", fullName: "Newbie User" }, actor);
+      assert.equal(out.user.email, "newbie@velora.example");
+      assert.equal(out.user.role, "user");
+      assert.equal(out.user.status, "active");
+      assert.ok(out.user.emailVerifiedAt !== null);
+
+      const stored = await store.findUserByEmail("newbie@velora.example");
+      assert.ok(stored !== null);
+
+      const rows = await audit.list();
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0]!.action, "USER_CREATED");
+      assert.equal(rows[0]!.targetUserId, out.user.id);
+      assert.equal(rows[0]!.afterState, "role:user");
+    });
+
+    test("E2: create rejects a duplicate email with 409", async () => {
+      const store = new MemoryUserStore();
+      await store.createUser({
+        email: "taken@velora.example", passwordHash: "x", fullName: "Taken", timezone: "UTC", locale: "en", now: NOW,
+      });
+      const svc = makeService(store);
+      const actor = { id: "admin-1", role: "admin" as const, isSystemOwner: false };
+      const err = await expectError(() =>
+        svc.create({ email: "taken@velora.example", password: "a-strong-password-123" }, actor));
+      assert.equal(err.status, 409);
+      assert.equal(err.code, "EMAIL_ALREADY_REGISTERED");
+    });
+
+    test("E3: create refuses to grant an admin-level role to a plain admin (escalation)", async () => {
+      const store = new MemoryUserStore();
+      const svc = makeService(store);
+      const adminActor = { id: "admin-1", role: "admin" as const, isSystemOwner: false };
+      const err = await expectError(() =>
+        svc.create({ email: "boss@velora.example", password: "a-strong-password-123", role: "admin" }, adminActor));
+      assert.equal(err.status, 403);
+      assert.equal(err.code, "PRIVILEGE_ESCALATION_DENIED");
+
+      // A super_admin may grant an admin-level role.
+      const superActor = { id: "sa-1", role: "super_admin" as const, isSystemOwner: false };
+      const out = await svc.create({ email: "boss@velora.example", password: "a-strong-password-123", role: "admin" }, superActor);
+      assert.equal(out.user.role, "admin");
+    });
+
+    test("E4: create rejects an unknown role with 400", async () => {
+      const store = new MemoryUserStore();
+      const svc = makeService(store);
+      const actor = { id: "admin-1", role: "admin" as const, isSystemOwner: false };
+      const err = await expectError(() =>
+        svc.create({ email: "x@velora.example", password: "p", role: "root" as unknown as string }, actor));
+      assert.equal(err.status, 400);
+      assert.equal(err.code, "INVALID_ROLE");
+    });
+
+    test("E5: invite mints a single-use 7-day token and audits USER_INVITED", async () => {
+      const store = new MemoryUserStore();
+      const audit = new MemoryAuditStore();
+      const svc = new AdminUserService({
+        store,
+        hasher: new VeloraHasher(),
+        now: () => new Date(),
+        getSystemOwnerUserId: async () => null,
+        audit,
+      });
+      const actor = { id: "admin-1", role: "admin" as const, isSystemOwner: false };
+      const now = new Date();
+
+      const out = await svc.invite({ email: "guest@velora.example", role: "user" }, actor);
+      assert.equal(out.email, "guest@velora.example");
+      assert.equal(out.role, "user");
+      assert.ok(typeof out.token === "string" && out.token.length > 0);
+      const exp = new Date(out.expiresAt);
+      assert.ok(exp.getTime() >= now.getTime() + 6 * 86_400 * 1000, "expires about a week out");
+      assert.ok(exp.getTime() <= now.getTime() + 8 * 86_400 * 1000, "expires about a week out");
+
+      // Token accepted once.
+      const inv = await store.findInvitationByToken(testSha256(out.token));
+      assert.ok(inv !== null);
+      assert.equal(await store.consumeInvitation(inv!.id, "user-2", now), true);
+      // Single-use: a second consume returns false.
+      assert.equal(await store.consumeInvitation(inv!.id, "user-2", now), false);
+
+      const rows = await audit.list();
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0]!.action, "USER_INVITED");
+      assert.equal(rows[0]!.targetUserId, null);
+      assert.equal(rows[0]!.afterState, "role:user");
+    });
+
+    test("E6: invite refuses to grant an admin-level role to a plain admin", async () => {
+      const store = new MemoryUserStore();
+      const svc = makeService(store);
+      const adminActor = { id: "admin-1", role: "admin" as const, isSystemOwner: false };
+      const err = await expectError(() =>
+        svc.invite({ email: "guest@velora.example", role: "admin" }, adminActor));
+      assert.equal(err.status, 403);
+      assert.equal(err.code, "PRIVILEGE_ESCALATION_DENIED");
+
+      const superActor = { id: "sa-1", role: "super_admin" as const, isSystemOwner: false };
+      const out = await svc.invite({ email: "guest@velora.example", role: "admin" }, superActor);
+      assert.equal(out.role, "admin");
+    });
+
+    test("E7: invite rejects an unknown role with 400", async () => {
+      const store = new MemoryUserStore();
+      const svc = makeService(store);
+      const actor = { id: "admin-1", role: "admin" as const, isSystemOwner: false };
+      const err = await expectError(() =>
+        svc.invite({ email: "x@velora.example", role: "root" as unknown as string }, actor));
+      assert.equal(err.status, 400);
+      assert.equal(err.code, "INVALID_ROLE");
+    });
   });
 });
