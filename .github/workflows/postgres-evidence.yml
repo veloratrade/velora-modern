@@ -132,6 +132,7 @@ jobs:
           run_battery pgTradeStore
           run_battery pgRateLimitStore
           run_battery pgQuota
+          run_battery migrateIntegrity
           run_battery extendedCapabilities
           run_battery fxRatesIngestion
         env:
