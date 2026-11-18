@@ -18,7 +18,7 @@
  * class of bug this file exists to prevent, so the lookup is a function.
  */
 
-/** Local development only: the API's own default port (`apps/api/src/server-main.ts`). */
+/** Local development only — and only honored when `NODE_ENV === "development"`. */
 export const DEFAULT_DEV_API_ORIGIN = "http://127.0.0.1:8080";
 
 /**
@@ -30,7 +30,13 @@ export const DEFAULT_DEV_API_ORIGIN = "http://127.0.0.1:8080";
  */
 export function resolveApiOrigin(env: Record<string, string | undefined> = process.env): string | null {
   const raw = (env.VELORA_API_ORIGIN ?? "").trim();
-  const value = raw === "" ? DEFAULT_DEV_API_ORIGIN : raw;
+  // The loopback default is a DEVELOPMENT convenience only. Outside development
+  // an unset origin is a misconfiguration: answer null so the callers fail
+  // closed (503 API_ORIGIN_UNCONFIGURED / gate refusal) instead of silently
+  // forwarding real logins into a loopback socket that does not exist — the
+  // exact "guessing an origin" failure this file's header comment warns about.
+  if (raw === "") return env.NODE_ENV === "development" ? DEFAULT_DEV_API_ORIGIN : null;
+  const value = raw;
   let url: URL;
   try {
     url = new URL(value);

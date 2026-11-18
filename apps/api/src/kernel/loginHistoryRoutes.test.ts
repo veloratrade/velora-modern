@@ -19,6 +19,7 @@ import { createApp, listen } from "./server.js";
 import { AuthService } from "../auth/authService.js";
 import { LogMailProvider } from "../mail/logMailProvider.js";
 import { MemoryUserStore } from "../auth/memoryUserStore.js";
+import { sessionTokenFor } from "../auth/sessionTokenFixture.js";
 import { MemoryAuthEventStore } from "../auth/memoryAuthEventStore.js";
 import { VeloraHasher } from "../auth/hashing.js";
 import { JwtService } from "../auth/jwt.js";
@@ -48,8 +49,12 @@ interface HistoryBody {
   pagination: { total: number; page: number; perPage: number; hasMore: boolean };
 }
 
-function tokenFor(sub: string, role: string): string {
-  return JwtService.create(SECRET).sign({ sub, role }, 900);
+/** The running harness's user store: tokens are minted against a live session in it (AUTH-REVOKE). */
+let activeUsers: MemoryUserStore | null = null;
+
+async function tokenFor(sub: string, role: string): Promise<string> {
+  if (activeUsers === null) throw new Error("tokenFor called outside a harness");
+  return sessionTokenFor(activeUsers, SECRET, sub, role);
 }
 
 async function withServer(
@@ -57,6 +62,7 @@ async function withServer(
   opts: { events?: AuthEventStore } = {},
 ): Promise<void> {
   const userStore = new MemoryUserStore();
+  activeUsers = userStore;
   const events = new MemoryAuthEventStore();
   const auth = new AuthService({
     store: userStore,
@@ -115,14 +121,14 @@ test("SEC-03: reading a user's history requires authentication and users.view", 
 
     // A normal user — even asking for their OWN history — is refused: this is an
     // administrative surface, and the token alone never authorizes.
-    const userTok = tokenFor(target.id, "user");
+    const userTok = await tokenFor(target.id, "user");
     const asUser = await get(base, `/api/v1/admin/users/${target.id}/login-history`, userTok);
     assert.equal(asUser.status, 403);
     assert.equal(asUser.body.error?.code, "FORBIDDEN");
 
     // The holder of users.view (an admin) is allowed.
     const admin = await seed(store, "admin@velora.test");
-    const adminTok = tokenFor(admin.id, "admin");
+    const adminTok = await tokenFor(admin.id, "admin");
     assert.equal((await get(base, `/api/v1/admin/users/${target.id}/login-history`, adminTok)).status, 200);
   });
 });
@@ -149,7 +155,7 @@ test("SEC-03: the raw address fields are absent for an admin and present for sup
       occurredAt: new Date("2026-10-01T08:00:00.000Z"),
     });
 
-    const asAdmin = await get(base, `/api/v1/admin/users/${target.id}/login-history`, tokenFor(admin.id, "admin"));
+    const asAdmin = await get(base, `/api/v1/admin/users/${target.id}/login-history`, await tokenFor(admin.id, "admin"));
     assert.equal(asAdmin.status, 200);
     const adminBody = asAdmin.body.data as HistoryBody;
     assert.equal(adminBody.pagination.total, 2);
@@ -166,7 +172,7 @@ test("SEC-03: the raw address fields are absent for an admin and present for sup
     const asSuper = await get(
       base,
       `/api/v1/admin/users/${target.id}/login-history`,
-      tokenFor(owner.id, "super_admin"),
+      await tokenFor(owner.id, "super_admin"),
     );
     const superBody = asSuper.body.data as HistoryBody;
     assert.equal(superBody.events[0]!.ipAddress, "203.0.113.9");
@@ -177,7 +183,7 @@ test("SEC-03: the raw address fields are absent for an admin and present for sup
 test("SEC-03: a missing user is a 404, an invalid filter is a validation error, pagination is bounded", async () => {
   await withServer(async (base, store) => {
     const admin = await seed(store, "admin@velora.test");
-    const tok = tokenFor(admin.id, "admin");
+    const tok = await tokenFor(admin.id, "admin");
     const target = await seed(store, "target@velora.test");
 
     const missing = await get(base, "/api/v1/admin/users/999999/login-history", tok);
@@ -201,7 +207,7 @@ test("SEC-03: the result filter narrows the history without changing the total c
   await withServer(async (base, store, events) => {
     const target = await seed(store, "target@velora.test");
     const admin = await seed(store, "admin@velora.test");
-    const tok = tokenFor(admin.id, "admin");
+    const tok = await tokenFor(admin.id, "admin");
 
     await events.record({ userId: target.id, eventType: "login", result: "success" });
     await events.record({ userId: target.id, eventType: "login", result: "failure", reason: "INVALID_CREDENTIALS" });
@@ -221,6 +227,7 @@ test("SEC-03: the result filter narrows the history without changing the total c
 
 test("SEC-03: with no history store configured the route fails closed, not empty", async () => {
   const store = new MemoryUserStore();
+  activeUsers = store;
   const auth = new AuthService({
     store,
     hasher: new VeloraHasher(),
@@ -245,7 +252,7 @@ test("SEC-03: with no history store configured the route fails closed, not empty
     const res = await get(
       `http://127.0.0.1:${port}`,
       `/api/v1/admin/users/${admin.id}/login-history`,
-      tokenFor(admin.id, "admin"),
+      await tokenFor(admin.id, "admin"),
     );
     assert.equal(res.status, 503);
     assert.equal(res.body.error?.code, "SERVICE_UNAVAILABLE");

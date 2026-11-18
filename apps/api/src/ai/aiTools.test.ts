@@ -10,7 +10,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assertSafeUrl, classifyStatus, toolFetch, ToolOutboundError } from "./aiToolOutbound.js";
+import { assertResolvesPublic, dohLookup, assertSafeUrl, classifyStatus, toolFetch, ToolOutboundError, type HostLookup } from "./aiToolOutbound.js";
 import { AiSearchService } from "./aiSearchService.js";
 import { AiBrowserService, htmlToText } from "./aiBrowserService.js";
 import { AI_TOOLS, defaultToolProvider, isTrustedChartHost, TOOL_BUDGETS, TOOL_PROVIDERS } from "./aiToolCatalog.js";
@@ -36,6 +36,22 @@ function fakeFetch(reply: FakeReply | ((url: URL, init: RequestInit) => FakeRepl
   }) as unknown as typeof fetch;
   return { fetchImpl, calls };
 }
+
+/**
+ * A fake resolver: names map to canned answers, anything unlisted resolves to a public documentation
+ * address. Tests NEVER reach real DNS (the service's default resolver is never used in this file).
+ */
+function fakeLookup(answers: Record<string, readonly string[] | Error> = {}): { lookup: HostLookup; asked: string[] } {
+  const asked: string[] = [];
+  const lookup: HostLookup = async (host) => {
+    asked.push(host);
+    const a = answers[host];
+    if (a instanceof Error) throw a;
+    return a ?? ["93.184.215.14"];
+  };
+  return { lookup, asked };
+}
+const publicDns = fakeLookup().lookup;
 
 interface ResolvedSecret { readonly value: string | null; readonly source: "admin" | "env" | null }
 
@@ -261,7 +277,7 @@ test("an unknown provider name matches nothing, so nothing inherits a working ke
 
 test("the browser service is unavailable by name and reason, not by silence", async () => {
   const net = fakeFetch({});
-  const svc = new AiBrowserService({ secrets: secretStore({}), fetchImpl: net.fetchImpl });
+  const svc = new AiBrowserService({ lookupHost: publicDns, secrets: secretStore({}), fetchImpl: net.fetchImpl });
   const out = await svc.capture({ url: "https://example.com/chart" });
   assert.deepEqual(out, { ok: false, code: "NOT_CONFIGURED", reason: "NO_BROWSERLESS_URL" });
   assert.equal(net.calls.length, 0);
@@ -276,7 +292,7 @@ test("the browser service is unavailable by name and reason, not by silence", as
 
 test("a screenshot request is built with the token in a header, and its page is not ours to redirect", async () => {
   const net = fakeFetchBytes(pngLike(1_440, 900));
-  const svc = new AiBrowserService({
+  const svc = new AiBrowserService({ lookupHost: publicDns,
     secrets: secretStore({ BROWSERLESS_URL: "http://browser.internal:3000", BROWSERLESS_TOKEN: "tok-1" }),
     fetchImpl: net.fetchImpl,
     now: () => new Date(0),
@@ -309,7 +325,7 @@ test("a screenshot request is built with the token in a header, and its page is 
 
 test("the target URL is a user-supplied string, so it is guarded like one", async () => {
   const net = fakeFetch({ body: "{}" });
-  const svc = new AiBrowserService({ secrets: secretStore({ BROWSERLESS_URL: "http://browser:3000", BROWSERLESS_TOKEN: "t" }), fetchImpl: net.fetchImpl });
+  const svc = new AiBrowserService({ lookupHost: publicDns, secrets: secretStore({ BROWSERLESS_URL: "http://browser:3000", BROWSERLESS_TOKEN: "t" }), fetchImpl: net.fetchImpl });
   for (const bad of ["http://127.0.0.1:7070/", "https://169.254.169.254/latest/meta-data/", "file:///etc/passwd", "https://localhost/x"]) {
     const out = await svc.capture({ url: bad });
     assert.equal("ok" in out && out.ok === false ? (out as { code: string }).code : "ALLOWED", "UNSAFE_TARGET", `must refuse ${bad}`);
@@ -322,7 +338,7 @@ test("the target URL is a user-supplied string, so it is guarded like one", asyn
 
 test("chart capture only opens a host this product vouches for", async () => {
   const net = fakeFetch({ body: "{}" });
-  const svc = new AiBrowserService({ secrets: secretStore({ BROWSERLESS_URL: "http://browser:3000" }), fetchImpl: net.fetchImpl });
+  const svc = new AiBrowserService({ lookupHost: publicDns, secrets: secretStore({ BROWSERLESS_URL: "http://browser:3000" }), fetchImpl: net.fetchImpl });
   const out = await svc.capture({ url: "https://some-blog.example/post", chartHostsOnly: true });
   assert.equal("code" in out ? out.code : "ALLOWED", "UNSAFE_TARGET");
   assert.equal("reason" in out ? out.reason : "", "host-not-a-trusted-chart-source");
@@ -333,13 +349,13 @@ test("chart capture only opens a host this product vouches for", async () => {
 
 test("an answer that is not a PNG is a failure, not an image", async () => {
   const net = fakeFetch({ body: "<html><body>chromium crashed</body></html>" });
-  const svc = new AiBrowserService({ secrets: secretStore({ BROWSERLESS_URL: "http://browser:3000", BROWSERLESS_TOKEN: "t" }), fetchImpl: net.fetchImpl });
+  const svc = new AiBrowserService({ lookupHost: publicDns, secrets: secretStore({ BROWSERLESS_URL: "http://browser:3000", BROWSERLESS_TOKEN: "t" }), fetchImpl: net.fetchImpl });
   const out = await svc.capture({ url: "https://example.com/x" });
   assert.deepEqual(out, { ok: false, code: "MALFORMED", reason: "not-a-png" });
 });
 
 test("connection validation proves reachability and auth, and nothing about any page", async () => {
-  const healthy = new AiBrowserService({
+  const healthy = new AiBrowserService({ lookupHost: publicDns,
     secrets: secretStore({ BROWSERLESS_URL: "http://browser:3000", BROWSERLESS_TOKEN: "t" }),
     fetchImpl: fakeFetch({ body: "{\"code\":200,\"running\":0}" }).fetchImpl,
     now: () => new Date(0),
@@ -348,14 +364,14 @@ test("connection validation proves reachability and auth, and nothing about any 
   assert.equal(okCheck.ok, true);
   assert.equal(okCheck.status, "VALID");
 
-  const refusing = new AiBrowserService({
+  const refusing = new AiBrowserService({ lookupHost: publicDns,
     secrets: secretStore({ BROWSERLESS_URL: "http://browser:3000", BROWSERLESS_TOKEN: "wrong" }),
     fetchImpl: fakeFetch({ status: 401, body: "{}" }).fetchImpl,
     now: () => new Date(0),
   });
   assert.equal((await refusing.validateConnection()).status, "INVALID_CREDENTIAL");
 
-  const down = new AiBrowserService({
+  const down = new AiBrowserService({ lookupHost: publicDns,
     secrets: secretStore({ BROWSERLESS_URL: "http://browser:3000", BROWSERLESS_TOKEN: "t" }),
     fetchImpl: (async () => {
       throw new TypeError("fetch failed");
@@ -366,7 +382,7 @@ test("connection validation proves reachability and auth, and nothing about any 
 
   // /pressure is the only thing probed: no page of anyone else's is opened to test our own service.
   const spy = fakeFetch({ body: "{}" });
-  await new AiBrowserService({ secrets: secretStore({ BROWSERLESS_URL: "http://b:1", BROWSERLESS_TOKEN: "t" }), fetchImpl: spy.fetchImpl, now: () => new Date(0) }).validateConnection();
+  await new AiBrowserService({ lookupHost: publicDns, secrets: secretStore({ BROWSERLESS_URL: "http://b:1", BROWSERLESS_TOKEN: "t" }), fetchImpl: spy.fetchImpl, now: () => new Date(0) }).validateConnection();
   assert.equal(spy.calls[0]?.url.pathname, "/pressure");
 });
 
@@ -384,7 +400,7 @@ test("page text is reduced to prose, with scripts removed and truncation admitte
 
 test("extract() keeps the retrieval timestamp and the host it came from", async () => {
   const net = fakeFetch({ body: "<html><p>held above 2650</p></html>", headers: { "content-type": "text/html" } });
-  const svc = new AiBrowserService({
+  const svc = new AiBrowserService({ lookupHost: publicDns,
     secrets: secretStore({ BROWSERLESS_URL: "http://b:1", BROWSERLESS_TOKEN: "t" }),
     fetchImpl: net.fetchImpl,
     now: () => new Date(0),
@@ -423,4 +439,63 @@ test("the banner rasterizer states the runtime fact instead of the intent", asyn
   // inside a webhook response path, and rather than returning a blank image.
   assert.equal(await raster!.toPng("<svg xmlns=\"http://www.w3.org/2000/svg\"><rect/></svg>"), null);
   assert.equal(await raster!.toPng("not xml at all"), null);
+});
+
+// ────────────────────────────────────── SSRF-DNS ──────────────────────────────────────
+
+test("SSRF-DNS: a public-looking name that RESOLVES to a private address is refused", async () => {
+  for (const addr of ["127.0.0.1", "10.1.2.3", "169.254.169.254", "192.168.0.10", "::1", "fd00::1", "::ffff:127.0.0.1", "0.0.0.0"]) {
+    const { lookup } = fakeLookup({ "rebind.example": [addr] });
+    await assert.rejects(
+      assertResolvesPublic(new URL("https://rebind.example/x"), lookup),
+      (err) => err instanceof ToolOutboundError && err.code === "UNSAFE_TARGET" && err.detail === "private-dns",
+      `must refuse a name resolving to ${addr}`,
+    );
+  }
+  // ANY private answer poisons the set: a mixed answer is how round-robin rebinding is attempted.
+  await assert.rejects(assertResolvesPublic(new URL("https://mixed.example/"), fakeLookup({ "mixed.example": ["93.184.215.14", "10.0.0.1"] }).lookup), /private-dns/u);
+});
+
+test("SSRF-DNS: an unresolvable name fails CLOSED, and a public answer passes", async () => {
+  await assert.rejects(assertResolvesPublic(new URL("https://nx.example/"), fakeLookup({ "nx.example": new Error("ENOTFOUND") }).lookup), /dns-unresolvable/u);
+  await assert.rejects(assertResolvesPublic(new URL("https://empty.example/"), fakeLookup({ "empty.example": [] }).lookup), /dns-unresolvable/u);
+  await assertResolvesPublic(new URL("https://www.tradingview.com/chart/"), fakeLookup().lookup);
+  // An IP literal was already judged by assertSafeUrl; it is not resolved again.
+  const spy = fakeLookup();
+  await assertResolvesPublic(new URL("https://93.184.215.14/"), spy.lookup);
+  assert.deepEqual(spy.asked, []);
+});
+
+test("SSRF-DNS: the browser refuses a DESTINATION that resolves privately, before calling the browser service", async () => {
+  const net = fakeFetchBytes(pngLike(1_440, 900));
+  const dns = fakeLookup({ "metadata.evil.example": ["169.254.169.254"] });
+  const svc = new AiBrowserService({
+    secrets: secretStore({ BROWSERLESS_URL: "http://browser.internal:3000", BROWSERLESS_TOKEN: "t" }),
+    fetchImpl: net.fetchImpl,
+    lookupHost: dns.lookup,
+  });
+  assert.deepEqual(await svc.capture({ url: "https://metadata.evil.example/latest/" }), { ok: false, code: "UNSAFE_TARGET", reason: "target:private-dns" });
+  assert.deepEqual(await svc.extract({ url: "https://metadata.evil.example/latest/" }), { ok: false, code: "UNSAFE_TARGET", reason: "target:private-dns" });
+  assert.equal(net.calls.length, 0, "a refused destination never reaches the browser service");
+  // The operator ENDPOINT (browser.internal) is never subjected to the destination DNS rule.
+  assert.ok(!dns.asked.includes("browser.internal"));
+  const ok = await svc.capture({ url: "https://www.tradingview.com/chart/X/" });
+  assert.ok("contentType" in ok, "a publicly-resolving destination still works");
+});
+
+test("SSRF-DNS: the DoH resolver returns A and AAAA addresses only, and fails on a resolver error", async () => {
+  const seen: string[] = [];
+  const doh = (async (input: unknown): Promise<Response> => {
+    const u = new URL(String(input));
+    seen.push(`${u.searchParams.get("name")}/${u.searchParams.get("type")}`);
+    const answer = u.searchParams.get("type") === "A"
+      ? [{ type: 5, data: "alias.example." }, { type: 1, data: "10.0.0.7" }]
+      : [{ type: 28, data: "2606:4700::1" }];
+    return new Response(JSON.stringify({ Status: 0, Answer: answer }), { headers: { "content-type": "application/dns-json" } });
+  }) as unknown as typeof fetch;
+  assert.deepEqual(await dohLookup(doh)("x.example"), ["10.0.0.7", "2606:4700::1"]);
+  assert.deepEqual(seen, ["x.example/A", "x.example/AAAA"]);
+  await assert.rejects(assertResolvesPublic(new URL("https://x.example/"), dohLookup(doh)), /private-dns/u);
+  const servfail = (async () => new Response(JSON.stringify({ Status: 2 }))) as unknown as typeof fetch;
+  await assert.rejects(assertResolvesPublic(new URL("https://y.example/"), dohLookup(servfail)), /dns-unresolvable/u);
 });

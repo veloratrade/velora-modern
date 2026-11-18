@@ -1,0 +1,22 @@
+/* Ported from legacy support/index.html — page-scoped under .pg-support. Do not hand-edit selectors; regenerate with tools/port-legacy-css.py */
+
+/* ---- legacy <style> block 0 (a8506249) ---- */
+.pg-support{--g:#ffd36c;--m:#adb6c5;--green:#67e1aa}.pg-support *{box-sizing:border-box}.pg-support{margin:0;background:radial-gradient(circle at 15% 88%,#a8792145,transparent 35%),#070707;color:#f8f7f3;font-family:Tahoma,Arial}.pg-support .shell{display:flex;min-height:100vh}.pg-support .side{width:270px;padding:25px 17px;background:linear-gradient(180deg,#0e1a33,#060a14);border-left:1px solid rgba(212,175,55,.35);display:flex;flex-direction:column}.pg-support .logo{font:bold 23px Arial;letter-spacing:5px;color:#fff0bd;padding:3px 8px 34px}.pg-support .logo b{color:var(--g);font-size:30px}.pg-support .nav{display:grid;gap:5px}.pg-support .nav a{display:flex;gap:12px;align-items:center;padding:13px;color:#f4df9f;text-decoration:none;border-radius:10px;font-size:13px;font-weight:bold}.pg-support .nav a.active{color:#fff;border:1px solid #e9c75e88;background:#d3aa5025}.pg-support .ico{width:19px;color:var(--g);font:19px Arial}.pg-support .user{margin-top:auto;border:1px solid #fff2;border-radius:12px;padding:12px;background:#08101d77;font-size:12px}.pg-support .user small{display:block;color:var(--m);margin-top:5px;font-size:10px}.pg-support .main{flex:1;padding:24px}.pg-support .top, .pg-support .card{border:1px solid #ffffff35;border-radius:14px;background:linear-gradient(135deg,#fff2,#0a0a0b90)}.pg-support .top{padding:15px 18px}.pg-support .top i{display:block;color:#e7c15a;font:8px Arial;letter-spacing:2px}.pg-support .top b{display:block;margin-top:5px;font-size:17px}.pg-support .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:13px}.pg-support .card{padding:16px;min-height:125px}.pg-support .card small{color:var(--m)}.pg-support .card b{display:block;margin-top:14px;font:700 21px Arial;color:#fff0bd}.pg-support .panel{margin-top:13px;min-height:270px}.pg-support .green{color:var(--green)!important}@media(max-width:980px){.pg-support .side{display:none}.pg-support .main{padding:12px}.pg-support .grid{grid-template-columns:1fr 1fr}}
+  .pg-support .sidebar{width:240px;flex-shrink:0;background:linear-gradient(180deg,rgba(10,17,34,.9),rgba(6,10,20,.95));border-left:1px solid var(--border, rgba(255,255,255,.07));display:flex;flex-direction:column;padding:20px 14px;position:sticky;top:0;height:100vh}
+  .pg-support .sb-logo{display:flex;align-items:center;gap:10px;padding:4px 8px 18px}
+  .pg-support .sb-logo img{width:34px;height:34px;filter:drop-shadow(0 0 10px rgba(233,196,92,.35))}
+  .pg-support .sb-logo span{font-size:19px;font-weight:800;letter-spacing:5px;background:linear-gradient(120deg,#fce38a,#d4af37);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .pg-support .sb-nav{display:flex;flex-direction:column;gap:3px;flex:1}
+  .pg-support .sb-item{display:flex;align-items:center;gap:11px;padding:11px 13px;border-radius:11px;color:#8FA0C0;font-size:13px;font-weight:600;text-decoration:none;transition:.18s;border:1px solid transparent}
+  .pg-support .sb-item svg{width:18px;height:18px;flex-shrink:0}
+  .pg-support .sb-item:hover{color:#EAF0FA;background:rgba(255,255,255,.04)}
+  .pg-support .sb-item.active{color:#fff;background:linear-gradient(135deg,rgba(212,175,55,.16),rgba(212,175,55,.05));border-color:rgba(212,175,55,.35)}
+  .pg-support .sb-user{margin-top:14px;padding:12px 10px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:14px;display:flex;align-items:center;gap:10px}
+  .pg-support .sb-user .av{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#b88d1d,#d4af37);display:grid;place-items:center;color:#0b121e;font-weight:800}
+
+
+/* [block 1 55466e76] shared shell CSS — see src/styles/shell.css */
+
+/* [block 2 ee3c44d9] shared shell CSS — see src/styles/shell.css */
+
+/* [block 3 7e436912] shared shell CSS — see src/styles/shell.css */

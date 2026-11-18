@@ -130,17 +130,27 @@ export interface ClientIpInput {
 
 /** PHP `RateLimiter::clientIp` port: the socket peer address (validated,
  * `0.0.0.0` fallback) unless the peer is a configured trusted proxy — only
- * then is the FIRST `X-Forwarded-For` entry honored (validated, 64-char cap). */
+ * then is `X-Forwarded-For` walked right-to-left to the first untrusted hop
+ * (validated, 64-char cap). Deliberate divergence from PHP's left-most read. */
 export function resolveClientIp(input: ClientIpInput, trustedProxyCidrs: readonly string[]): string {
   const remoteRaw = input.remoteAddress === undefined ? "" : input.remoteAddress.trim();
   const remote = ipToBytes(remoteRaw) !== null ? remoteRaw : "0.0.0.0";
 
-  if (matchesAnyCidr(remote, trustedProxyCidrs)) {
+  // RL-IP-TRUST: a trusted proxy APPENDS the peer it saw, so everything left
+  // of it is client-supplied. Walk right-to-left from the socket peer and stop
+  // at the first hop that is not a trusted proxy; an unparseable hop ends the
+  // walk at the last address a trusted proxy vouched for. (Legacy took the
+  // LEFT-most entry, which lets a client choose its own rate-limit key.)
+  let candidate = remote;
+  if (matchesAnyCidr(candidate, trustedProxyCidrs)) {
     const forwarded = input.xForwardedFor === undefined ? "" : input.xForwardedFor;
-    if (forwarded !== "") {
-      const first = (forwarded.split(",")[0] ?? "").trim();
-      if (ipToBytes(first) !== null) return first.slice(0, 64);
+    const hops = forwarded === "" ? [] : forwarded.split(",").map((h) => h.trim());
+    for (let i = hops.length - 1; i >= 0; i--) {
+      const hop = hops[i] ?? "";
+      if (ipToBytes(hop) === null) break;
+      candidate = hop;
+      if (!matchesAnyCidr(hop, trustedProxyCidrs)) break;
     }
   }
-  return remote.slice(0, 64);
+  return candidate.slice(0, 64);
 }

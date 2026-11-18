@@ -9,6 +9,7 @@ import { createApp, listen } from "./server.js";
 import { AuthService } from "../auth/authService.js";
 import { LogMailProvider } from "../mail/logMailProvider.js";
 import { MemoryUserStore } from "../auth/memoryUserStore.js";
+import { sessionTokenFor } from "../auth/sessionTokenFixture.js";
 import { MemoryOwnershipStore } from "../auth/memoryOwnershipStore.js";
 import { VeloraHasher } from "../auth/hashing.js";
 import { JwtService } from "../auth/jwt.js";
@@ -27,8 +28,12 @@ interface Envelope<T = unknown> {
   error: { code: string; message: string } | null;
 }
 
-function tokenFor(sub: string, role: string): string {
-  return JwtService.create(SECRET).sign({ sub, role }, 900);
+/** The running harness's user store: tokens are minted against a live session in it (AUTH-REVOKE). */
+let activeUsers: MemoryUserStore | null = null;
+
+async function tokenFor(sub: string, role: string): Promise<string> {
+  if (activeUsers === null) throw new Error("tokenFor called outside a harness");
+  return sessionTokenFor(activeUsers, SECRET, sub, role);
 }
 
 async function withServer(
@@ -38,6 +43,7 @@ async function withServer(
   ) => Promise<void>,
 ): Promise<void> {
   const users = new MemoryUserStore();
+  activeUsers = users;
   const ownershipStore = new MemoryOwnershipStore();
   const hasher = new VeloraHasher();
   const auth = new AuthService({ store: users, hasher, jwt: JwtService.create(SECRET),
@@ -102,7 +108,7 @@ test("W1: an authorized Admin can claim ownership over HTTP (201)", async () => 
     const adminId = await seed(users, "admin@example.com", "admin");
     const res = await fetch(`${base}/api/v1/admin/ownership/claim`, {
       method: "POST",
-      headers: headers(tokenFor(adminId, "admin")),
+      headers: headers(await tokenFor(adminId, "admin")),
       body: JSON.stringify({ password: PASSWORD, confirm: OWNERSHIP_CLAIM_CONFIRMATION }),
     });
     assert.equal(res.status, 201);
@@ -130,7 +136,7 @@ test("W3: a STALE/FORGED token role cannot grant ownership — role is read from
     const userId = await seed(users, "user@example.com", "user");
     const res = await fetch(`${base}/api/v1/admin/ownership/claim`, {
       method: "POST",
-      headers: headers(tokenFor(userId, "super_admin")),
+      headers: headers(await tokenFor(userId, "super_admin")),
       body: JSON.stringify({ password: PASSWORD, confirm: OWNERSHIP_CLAIM_CONFIRMATION }),
     });
     assert.equal(res.status, 403);
@@ -145,7 +151,7 @@ test("W4: client-supplied role / ownership body fields are ignored", async () =>
     const userId = await seed(users, "user@example.com", "user");
     const res = await fetch(`${base}/api/v1/admin/ownership/claim`, {
       method: "POST",
-      headers: { ...headers(tokenFor(userId, "user")), "x-role": "system_owner" },
+      headers: { ...headers(await tokenFor(userId, "user")), "x-role": "system_owner" },
       body: JSON.stringify({
         password: PASSWORD,
         confirm: OWNERSHIP_CLAIM_CONFIRMATION,
@@ -168,7 +174,7 @@ test("W5: after bootstrap, a second claim fails even for a Super Admin (409)", a
     const superId = await seed(users, "super@example.com", "super_admin");
     const first = await fetch(`${base}/api/v1/admin/ownership/claim`, {
       method: "POST",
-      headers: headers(tokenFor(adminId, "admin")),
+      headers: headers(await tokenFor(adminId, "admin")),
       body: JSON.stringify({ password: PASSWORD, confirm: OWNERSHIP_CLAIM_CONFIRMATION }),
     });
     assert.equal(first.status, 201);
@@ -179,7 +185,7 @@ test("W5: after bootstrap, a second claim fails even for a Super Admin (409)", a
     ] as const) {
       const res = await fetch(`${base}/api/v1/admin/ownership/claim`, {
         method: "POST",
-        headers: headers(tokenFor(id, role)),
+        headers: headers(await tokenFor(id, role)),
         body: JSON.stringify({ password: PASSWORD, confirm: OWNERSHIP_CLAIM_CONFIRMATION }),
       });
       assert.equal(res.status, 409);
@@ -194,7 +200,7 @@ test("W6: a wrong password is rejected (401) and ownership stays unclaimed", asy
     const adminId = await seed(users, "admin@example.com", "admin");
     const res = await fetch(`${base}/api/v1/admin/ownership/claim`, {
       method: "POST",
-      headers: headers(tokenFor(adminId, "admin")),
+      headers: headers(await tokenFor(adminId, "admin")),
       body: JSON.stringify({ password: "nope", confirm: OWNERSHIP_CLAIM_CONFIRMATION }),
     });
     assert.equal(res.status, 401);
@@ -206,7 +212,7 @@ test("W6: a wrong password is rejected (401) and ownership stays unclaimed", asy
 test("W7: ownership status reports claimed/unclaimed and leaks nothing", async () => {
   await withServer(async (base, { users }) => {
     const adminId = await seed(users, "admin@example.com", "admin");
-    const t = tokenFor(adminId, "admin");
+    const t = await tokenFor(adminId, "admin");
 
     const before = await fetch(`${base}/api/v1/admin/ownership/status`, { headers: headers(t) });
     assert.equal(before.status, 200);
@@ -234,7 +240,7 @@ test("W8: ownership cannot be obtained through the role endpoint", async () => {
     const targetId = await seed(users, "target@example.com", "user");
     const res = await fetch(`${base}/api/v1/admin/users/${targetId}/role`, {
       method: "PATCH",
-      headers: headers(tokenFor(superId, "super_admin")),
+      headers: headers(await tokenFor(superId, "super_admin")),
       body: JSON.stringify({ role: "system_owner" }),
     });
     assert.equal(res.status, 400);
@@ -254,7 +260,7 @@ test("W9: Super Admin peer protection is enforced over HTTP", async () => {
     ] as const) {
       const res = await fetch(`${base}${path}`, {
         method: "PATCH",
-        headers: headers(tokenFor(a, "super_admin")),
+        headers: headers(await tokenFor(a, "super_admin")),
         body: JSON.stringify(payload),
       });
       assert.equal(res.status, 403);

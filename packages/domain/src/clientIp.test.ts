@@ -73,23 +73,49 @@ test("resolveClientIp: peer address unless the peer is a trusted proxy", () => {
   );
 });
 
-test("resolveClientIp: trusted peer → first XFF entry (validated)", () => {
+test("resolveClientIp: trusted peer → right-most untrusted XFF hop (validated)", () => {
+  // A trusted proxy APPENDS the address it saw; everything to its left is
+  // client-supplied. The client is the right-most hop that is not a trusted proxy.
   assert.equal(
     resolveClientIp({ remoteAddress: "198.51.100.7", xForwardedFor: "9.9.9.9, 10.0.0.1" }, ["198.51.100.0/24"]),
-    "9.9.9.9",
+    "10.0.0.1",
   );
   assert.equal(
-    resolveClientIp({ remoteAddress: "198.51.100.7", xForwardedFor: "9.9.9.9, 10.0.0.1" }, ["198.51.100.7"]),
+    resolveClientIp({ remoteAddress: "198.51.100.7", xForwardedFor: "9.9.9.9" }, ["198.51.100.7"]),
     "9.9.9.9",
   );
-  // invalid first entry → fall back to the peer address (PHP parity)
+  // chained trusted proxies are skipped
+  assert.equal(
+    resolveClientIp({ remoteAddress: "198.51.100.7", xForwardedFor: "9.9.9.9, 198.51.100.8" }, ["198.51.100.0/24"]),
+    "9.9.9.9",
+  );
+  // every hop trusted → the left-most hop
+  assert.equal(
+    resolveClientIp({ remoteAddress: "198.51.100.7", xForwardedFor: "198.51.100.9, 198.51.100.8" }, ["198.51.100.0/24"]),
+    "198.51.100.9",
+  );
+  // invalid hop → stop at the nearest address a trusted proxy vouched for
   assert.equal(
     resolveClientIp({ remoteAddress: "198.51.100.7", xForwardedFor: "spoofed" }, ["198.51.100.0/24"]),
     "198.51.100.7",
   );
+  assert.equal(
+    resolveClientIp({ remoteAddress: "198.51.100.7", xForwardedFor: "spoofed, 198.51.100.8" }, ["198.51.100.0/24"]),
+    "198.51.100.8",
+  );
   // empty header → peer address
   assert.equal(resolveClientIp({ remoteAddress: "198.51.100.7", xForwardedFor: "" }, ["198.51.100.0/24"]), "198.51.100.7");
   assert.equal(resolveClientIp({ remoteAddress: "198.51.100.7", xForwardedFor: undefined }, ["0.0.0.0/0"]), "198.51.100.7");
+});
+
+test("resolveClientIp: RL-IP-TRUST — a client cannot rotate its rate-limit key by prepending XFF", () => {
+  const trusted = ["198.51.100.0/24"];
+  const keys = new Set(
+    ["1.1.1.1", "2.2.2.2", "3.3.3.3"].map((spoof) =>
+      resolveClientIp({ remoteAddress: "198.51.100.7", xForwardedFor: `${spoof}, 203.0.113.50` }, trusted),
+    ),
+  );
+  assert.deepEqual([...keys], ["203.0.113.50"]);
 });
 
 test("resolveClientIp: invalid peer → 0.0.0.0 fallback (PHP parity)", () => {

@@ -127,10 +127,12 @@ jobs:
             grep -q "^# fail 0$" "/tmp/${name}.log" || { echo "::error::${name}: failing tests"; return 1; }
           }
           run_battery pgUserStore
+          run_battery pgcryptoProvisioning
           run_battery pgAccountStore
           run_battery pgTradeStore
           run_battery pgRateLimitStore
           run_battery pgQuota
+          run_battery migrateIntegrity
           run_battery extendedCapabilities
           run_battery fxRatesIngestion
         env:

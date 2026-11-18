@@ -18,6 +18,7 @@ import assert from "node:assert/strict";
 import { createApp, listen, type ApiConfig } from "../kernel/server.js";
 import { AuthService } from "../auth/authService.js";
 import { JwtService } from "../auth/jwt.js";
+import { sessionTokenFor } from "../auth/sessionTokenFixture.js";
 import { VeloraHasher } from "../auth/hashing.js";
 import { MemoryUserStore } from "../auth/memoryUserStore.js";
 import { LogMailProvider } from "../mail/logMailProvider.js";
@@ -47,8 +48,18 @@ interface Harness {
   accountStore: MemoryAccountStore;
 }
 
+/** The running harness's user store: sessions are minted live in it (AUTH-REVOKE). */
+let activeUsers: MemoryUserStore | null = null;
+
+/** A signed-in session for `sub`, backed by a live session row. */
+function liveSession(sub: string): Promise<string> {
+  if (activeUsers === null) throw new Error("liveSession called outside a harness");
+  return sessionTokenFor(activeUsers, SECRET, sub, "user");
+}
+
 async function withServer(fn: (h: Harness) => Promise<void>): Promise<void> {
   const userStore = new MemoryUserStore();
+  activeUsers = userStore;
   const accountStore = new MemoryAccountStore();
   const tradeStore = new MemoryTradeStore();
   const lookup = new MemoryDeveloperKeyLookup();
@@ -135,7 +146,7 @@ async function mintKey(
 
 test("a developer key authenticates as its owner and is scoped to its surfaces", async () => {
   await withServer(async ({ base, keys }) => {
-    const session = JwtService.create(SECRET).sign({ sub: "1", role: "user" }, 900);
+    const session = await liveSession("1");
     const secret = await mintKey(
       base,
       session,
@@ -164,7 +175,7 @@ test("a developer key authenticates as its owner and is scoped to its surfaces",
 
 test("everything outside the frozen scope vocabulary is refused", async () => {
   await withServer(async ({ base, keys }) => {
-    const session = JwtService.create(SECRET).sign({ sub: "1", role: "user" }, 900);
+    const session = await liveSession("1");
     const secret = await mintKey(
       base,
       session,
@@ -193,7 +204,7 @@ test("everything outside the frozen scope vocabulary is refused", async () => {
 
 test("a revoked key is 401 immediately and is never re-read as a session", async () => {
   await withServer(async ({ base, keys }) => {
-    const session = JwtService.create(SECRET).sign({ sub: "1", role: "user" }, 900);
+    const session = await liveSession("1");
     const secret = await mintKey(base, session, { name: "revocable", scopes: ["trades:read"], rateLimitPerMin: 100 }, keys, "1");
     assert.equal((await fetch(`${base}/api/v1/trades`, H(secret))).status, 200);
 
@@ -207,7 +218,7 @@ test("a revoked key is 401 immediately and is never re-read as a session", async
 
 test("the per-key requests/minute limit is enforced with a Retry-After", async () => {
   await withServer(async ({ base, keys }) => {
-    const session = JwtService.create(SECRET).sign({ sub: "1", role: "user" }, 900);
+    const session = await liveSession("1");
     const secret = await mintKey(base, session, { name: "tiny", scopes: ["trades:read"], rateLimitPerMin: 2 }, keys, "1");
 
     assert.equal((await fetch(`${base}/api/v1/trades`, H(secret))).status, 200);
@@ -231,7 +242,7 @@ test("a key is not a session: a malformed or unknown key-shaped bearer is 401, a
     assert.equal(res.status, 401);
 
     // A session token is unaffected by the guard (it is not key-shaped).
-    const session = JwtService.create(SECRET).sign({ sub: "1", role: "user" }, 900);
+    const session = await liveSession("1");
     assert.equal((await fetch(`${base}/api/v1/trades`, H(session))).status, 200);
 
     // No bearer at all: unchanged 401 from the kernel.
@@ -241,7 +252,7 @@ test("a key is not a session: a malformed or unknown key-shaped bearer is 401, a
 
 test("the minted prefix is a non-secret display value and the secret is shown once", async () => {
   await withServer(async ({ base }) => {
-    const session = JwtService.create(SECRET).sign({ sub: "1", role: "user" }, 900);
+    const session = await liveSession("1");
     const created = await fetch(`${base}/api/v1/developer/keys`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...AUTH(session) },
@@ -296,7 +307,7 @@ async function seedUser(
     },
     new Date(),
   );
-  return { userId: user.id, session: JwtService.create(SECRET).sign({ sub: user.id, role: "user" }, 900), accountId: account.id };
+  return { userId: user.id, session: await sessionTokenFor(store.userStore, SECRET, user.id, "user"), accountId: account.id };
 }
 
 const TRADE_BODY = {

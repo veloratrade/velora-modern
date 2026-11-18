@@ -37,6 +37,9 @@ import type { RateLimitDecision } from "@velora/domain";
 import type { RateLimiter } from "../ratelimits/rateLimiter.js";
 import { TELEGRAM_CAPTION_LIMIT, TELEGRAM_MAX_DOWNLOAD_BYTES, TELEGRAM_MAX_UPLOAD_BYTES, isSendablePhotoRef, type PhotoUpload } from "./telegramApi.js";
 
+/** SSRF-DNS seam: destinations resolve to a public documentation address; tests never touch real DNS. */
+const TEST_PUBLIC_DNS = async (): Promise<readonly string[]> => ["93.184.215.14"];
+
 // ── The two fakes ───────────────────────────────────────────────────────────
 
 interface SentMessage {
@@ -1954,7 +1957,7 @@ test("an agent search answers with the provider's sources, escaped, and says it 
     posts: true,
     tools: {
       search,
-      browser: new AiBrowserService({ secrets: secretValues({}), fetchImpl: browserNet.fetchImpl }),
+      browser: new AiBrowserService({ lookupHost: TEST_PUBLIC_DNS, secrets: secretValues({}), fetchImpl: browserNet.fetchImpl }),
     },
   });
   await linkAccount(links);
@@ -1982,7 +1985,7 @@ test("a search tool with no key is refused before it could ask anything, and say
     posts: true,
     tools: {
       search: new AiSearchService({ secrets: secretValues({}), fetchImpl: net.fetchImpl }),
-      browser: new AiBrowserService({ secrets: secretValues({}), fetchImpl: net.fetchImpl }),
+      browser: new AiBrowserService({ lookupHost: TEST_PUBLIC_DNS, secrets: secretValues({}), fetchImpl: net.fetchImpl }),
     },
   });
   await linkAccount(links);
@@ -2004,7 +2007,7 @@ test("a search tool with no key is refused before it could ask anything, and say
 
 test("chart capture opens only a host this product vouches for, and writes nothing to the journal", async () => {
   const net = recordingFetch({ body: PNG_BYTES, headers: { "content-type": "image/png" } });
-  const browser = new AiBrowserService({
+  const browser = new AiBrowserService({ lookupHost: TEST_PUBLIC_DNS,
     secrets: secretValues({ BROWSERLESS_URL: "http://browser.internal:3000", BROWSERLESS_TOKEN: "tok" }),
     fetchImpl: net.fetchImpl,
     now: () => new Date(0),
@@ -2031,7 +2034,7 @@ test("chart capture opens only a host this product vouches for, and writes nothi
 
 test("a capture request for a host off the allowlist is refused without the browser being told to go", async () => {
   const net = recordingFetch({ body: PNG_BYTES });
-  const browser = new AiBrowserService({
+  const browser = new AiBrowserService({ lookupHost: TEST_PUBLIC_DNS,
     secrets: secretValues({ BROWSERLESS_URL: "http://browser.internal:3000", BROWSERLESS_TOKEN: "tok" }),
     fetchImpl: net.fetchImpl,
   });
@@ -2138,7 +2141,7 @@ test("the planner may only propose an offered, approval-free tool — and it nev
     posts: true,
     tools: {
       search: new AiSearchService({ secrets: secretValues({ TAVILY_API_KEY: "k" }), fetchImpl: net.fetchImpl }),
-      browser: new AiBrowserService({ secrets: secretValues({}), fetchImpl: net.fetchImpl }),
+      browser: new AiBrowserService({ lookupHost: TEST_PUBLIC_DNS, secrets: secretValues({}), fetchImpl: net.fetchImpl }),
       planner,
     },
   });
@@ -2174,7 +2177,7 @@ test("a sentence the table already understands costs no model call at all", asyn
     posts: true,
     tools: {
       search: new AiSearchService({ secrets: secretValues({ TAVILY_API_KEY: "k" }), fetchImpl: net.fetchImpl }),
-      browser: new AiBrowserService({ secrets: secretValues({}), fetchImpl: net.fetchImpl }),
+      browser: new AiBrowserService({ lookupHost: TEST_PUBLIC_DNS, secrets: secretValues({}), fetchImpl: net.fetchImpl }),
       planner,
     },
   });
@@ -2184,7 +2187,7 @@ test("a sentence the table already understands costs no model call at all", asyn
   assert.ok((api.sent.at(-1)?.text ?? "").includes("news.example/gold"));
   // And when the planner is broken, the user's message still lands where it always did.
   const broken = new AiAgentPlanner({ manager: { call: async () => { throw new Error("provider down"); } } as unknown as AiManager });
-  const alt = makeBot({ posts: true, tools: { search: new AiSearchService({ secrets: secretValues({}), fetchImpl: net.fetchImpl }), browser: new AiBrowserService({ secrets: secretValues({}), fetchImpl: net.fetchImpl }), planner: broken } });
+  const alt = makeBot({ posts: true, tools: { search: new AiSearchService({ secrets: secretValues({}), fetchImpl: net.fetchImpl }), browser: new AiBrowserService({ lookupHost: TEST_PUBLIC_DNS, secrets: secretValues({}), fetchImpl: net.fetchImpl }), planner: broken } });
   await linkAccount(alt.links);
   await alt.bot.handleUpdate(messageUpdate(950, "how is my week going overall"));
   assert.ok(alt.api.sent.length >= 1, "an unavailable planner degrades to the existing behaviour, never to silence");
@@ -2196,7 +2199,7 @@ test("/help names a tool only when its credential resolves, and names the missin
     posts: true,
     tools: {
       search: new AiSearchService({ secrets: secretValues({ TAVILY_API_KEY: "k" }), fetchImpl: live.fetchImpl }),
-      browser: new AiBrowserService({ secrets: secretValues({}), fetchImpl: live.fetchImpl }),
+      browser: new AiBrowserService({ lookupHost: TEST_PUBLIC_DNS, secrets: secretValues({}), fetchImpl: live.fetchImpl }),
     },
   });
   await linkAccount(withSearch.links);
@@ -2309,7 +2312,7 @@ function toolServices(searchNet: ReturnType<typeof recordingFetch>, browserNet: 
       fetchImpl: searchNet.fetchImpl,
       now: () => new Date(0),
     }),
-    browser: new AiBrowserService({
+    browser: new AiBrowserService({ lookupHost: TEST_PUBLIC_DNS,
       secrets: secretValues({ BROWSERLESS_URL: "http://browser.internal:3000", BROWSERLESS_TOKEN: "tok" }),
       fetchImpl: browserNet.fetchImpl,
       now: () => new Date(0),
@@ -2438,7 +2441,7 @@ test("/help advertises bounded multi-step planning only where a planner is wired
     posts: true,
     tools: {
       search: new AiSearchService({ secrets: secretValues({ TAVILY_API_KEY: "k" }), fetchImpl: searchNet.fetchImpl }),
-      browser: new AiBrowserService({ secrets: secretValues({}), fetchImpl: browserNet.fetchImpl }),
+      browser: new AiBrowserService({ lookupHost: TEST_PUBLIC_DNS, secrets: secretValues({}), fetchImpl: browserNet.fetchImpl }),
     },
   });
   await linkAccount(noPlanner.links);

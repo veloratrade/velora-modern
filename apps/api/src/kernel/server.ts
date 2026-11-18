@@ -310,15 +310,15 @@ async function parseJsonBody(req: IncomingMessage, maxBytes = DEFAULT_JSON_BODY_
  * future-dated claim can never escalate. Request body, query string and
  * arbitrary headers are NEVER consulted for authorization.
  */
-function authenticateRequest(
+async function authenticateRequest(
   req: IncomingMessage,
   auth: AuthService,
-): { sub: string; role: AppRole } | null {
+): Promise<{ sub: string; role: AppRole } | null> {
   const bearer = req.headers.authorization;
   if (bearer === undefined || !bearer.startsWith("Bearer ")) return null;
-  const payload = auth.verifyAccessToken(bearer.slice("Bearer ".length));
-  if (payload === null) return null;
-  return { sub: payload.sub, role: normalizeRole(payload.role) };
+  const claims = await auth.authenticateAccessToken(bearer.slice("Bearer ".length));
+  if (claims === null) return null;
+  return { sub: claims.sub, role: normalizeRole(claims.role) };
 }
 
 async function resolveAuthority(
@@ -575,8 +575,12 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
    * a second check — the guard is the authorization point, this function is only
    * how the result reaches the route.
    */
-  const principalFor = (): { sub: string; role: AppRole } | null =>
-    developerPrincipal ?? (config.auth === undefined ? null : authenticateRequest(req, config.auth));
+  // AUTH-REVOKE: the bearer is re-validated against the user row and the
+  // session store ONCE per request (only when no developer key answered), so
+  // every protected branch below sees the same, current answer.
+  const sessionPrincipal =
+    developerPrincipal === null && config.auth !== undefined ? await authenticateRequest(req, config.auth) : null;
+  const principalFor = (): { sub: string; role: AppRole } | null => developerPrincipal ?? sessionPrincipal;
 
   // ---- Phase C identity routes (Remote/PHP-verified contracts) ----
   if (method === "POST" && path === "/api/v1/auth/register") {
@@ -703,15 +707,11 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
 
   if (method === "GET" && path === "/api/v1/auth/me") {
     return authRouteResult(async (auth) => {
-      const bearer = req.headers.authorization;
-      if (bearer === undefined || !bearer.startsWith("Bearer ")) {
+      const claims = principalFor();
+      if (claims === null) {
         return { status: 401, body: fail("UNAUTHENTICATED", "Unauthenticated.", sec.requestId) };
       }
-      const payload = auth.verifyAccessToken(bearer.slice("Bearer ".length));
-      if (payload === null) {
-        return { status: 401, body: fail("UNAUTHENTICATED", "Unauthenticated.", sec.requestId) };
-      }
-      const user = await auth.me(payload.sub);
+      const user = await auth.me(claims.sub);
       return { status: 200, body: ok({ user }) };
     });
   }
@@ -719,7 +719,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
   // ---- Phase C increment 2: identity completion (Remote/PHP-verified) ----
   if (method === "POST" && path === "/api/v1/auth/change-password") {
     return authRouteResult(async (auth) => {
-      const claims = authenticateRequest(req, auth);
+      const claims = principalFor();
       if (claims === null) {
         return { status: 401, body: fail("UNAUTHENTICATED", "Unauthenticated.", sec.requestId) };
       }
@@ -743,7 +743,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
 
   if (method === "PATCH" && path === "/api/v1/auth/me/preferences") {
     return authRouteResult(async (auth) => {
-      const claims = authenticateRequest(req, auth);
+      const claims = principalFor();
       if (claims === null) {
         return { status: 401, body: fail("UNAUTHENTICATED", "Unauthenticated.", sec.requestId) };
       }
@@ -778,7 +778,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
 
   if (method === "GET" && path === "/api/v1/auth/email-preferences") {
     return authRouteResult(async (auth) => {
-      const claims = authenticateRequest(req, auth);
+      const claims = principalFor();
       if (claims === null) {
         return { status: 401, body: fail("UNAUTHENTICATED", "Unauthenticated.", sec.requestId) };
       }
@@ -788,7 +788,7 @@ async function route(req: IncomingMessage, config: EffectiveApiConfig, sec: { re
 
   if (method === "PUT" && path === "/api/v1/auth/email-preferences") {
     return authRouteResult(async (auth) => {
-      const claims = authenticateRequest(req, auth);
+      const claims = principalFor();
       if (claims === null) {
         return { status: 401, body: fail("UNAUTHENTICATED", "Unauthenticated.", sec.requestId) };
       }

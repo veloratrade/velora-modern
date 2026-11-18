@@ -12,6 +12,7 @@ import { MemoryUserStore } from "../auth/memoryUserStore.js";
 import { MemoryOwnershipStore } from "../auth/memoryOwnershipStore.js";
 import { VeloraHasher } from "../auth/hashing.js";
 import { JwtService } from "../auth/jwt.js";
+import { liveSessionToken } from "../auth/sessionTokenFixture.js";
 import { AdminUserService } from "../auth/adminUserService.js";
 import { TradeService } from "../trades/tradeService.js";
 import { MemoryTradeStore } from "../trades/memoryTradeStore.js";
@@ -29,8 +30,14 @@ interface Envelope<T = unknown> {
   error: { code: string; message: string } | null;
 }
 
-const sign = (claims: Record<string, string | number | boolean>): string =>
-  JwtService.create(SECRET).sign(claims as { sub: string }, 900);
+/** The running harness's user store: tokens are backed by a live session in it (AUTH-REVOKE). */
+let activeUsers: MemoryUserStore | null = null;
+
+/** Signs the claims verbatim (lies included) behind a live session; the user row is untouched. */
+const sign = (claims: { sub: string } & Record<string, string | number | boolean>): Promise<string> => {
+  if (activeUsers === null) throw new Error("sign called outside a harness");
+  return liveSessionToken(activeUsers, SECRET, claims);
+};
 
 async function withServer(
   fn: (
@@ -39,6 +46,7 @@ async function withServer(
   ) => Promise<void>,
 ): Promise<void> {
   const users = new MemoryUserStore();
+  activeUsers = users;
   const ownershipStore = new MemoryOwnershipStore();
   const hasher = new VeloraHasher();
   const auth = new AuthService({ store: users, hasher, jwt: JwtService.create(SECRET),
@@ -127,14 +135,14 @@ test("H1: the owner reaches a super_admin-only route while stored role is admin"
     const plainAdmin = await seed(users, "adm@example.com", "admin");
     const refused = await fetch(`${base}/api/v1/admin/users/${target}/role`, {
       method: "PATCH",
-      headers: hdrs(sign({ sub: plainAdmin, role: "admin" })),
+      headers: hdrs(await sign({ sub: plainAdmin, role: "admin" })),
       body: JSON.stringify({ role: "admin" }),
     });
     assert.equal(refused.status, 403);
 
     const allowed = await fetch(`${base}/api/v1/admin/users/${target}/role`, {
       method: "PATCH",
-      headers: hdrs(sign({ sub: ownerId, role: "admin" })),
+      headers: hdrs(await sign({ sub: ownerId, role: "admin" })),
       body: JSON.stringify({ role: "admin" }),
     });
     assert.equal(allowed.status, 200);
@@ -147,7 +155,7 @@ test("H2: the owner may read the RBAC matrix (super_admin-only) as an admin", as
     const ownerId = await seed(users, "owner@example.com", "admin");
     await claimFor(ownership, ownerId);
     const res = await fetch(`${base}/api/v1/admin/rbac/matrix`, {
-      headers: hdrs(sign({ sub: ownerId, role: "admin" })),
+      headers: hdrs(await sign({ sub: ownerId, role: "admin" })),
     });
     assert.equal(res.status, 200);
   });
@@ -158,7 +166,7 @@ test("H3: /rbac/self reports owner authority and the FULL permission set", async
     const ownerId = await seed(users, "owner@example.com", "admin");
     await claimFor(ownership, ownerId);
     const res = await fetch(`${base}/api/v1/admin/rbac/self`, {
-      headers: hdrs(sign({ sub: ownerId, role: "admin" })),
+      headers: hdrs(await sign({ sub: ownerId, role: "admin" })),
     });
     assert.equal(res.status, 200);
     const body = (await res.json()) as Envelope<{
@@ -179,7 +187,7 @@ test("H4: a FORGED systemOwner claim in a VALID token grants nothing", async () 
     const attacker = await seed(users, "attacker@example.com", "admin");
 
     // Correctly signed token, but the ownership claim is a lie.
-    const token = sign({ sub: attacker, role: "admin", systemOwner: true, isSystemOwner: true });
+    const token = await sign({ sub: attacker, role: "admin", systemOwner: true, isSystemOwner: true });
     const res = await fetch(`${base}/api/v1/admin/rbac/matrix`, { headers: hdrs(token) });
     assert.equal(res.status, 403);
     const body = (await res.json()) as Envelope;
@@ -200,7 +208,7 @@ test("H5: a stale token claiming super_admin cannot suspend the owner", async ()
 
     const res = await fetch(`${base}/api/v1/admin/users/${ownerId}/status`, {
       method: "PATCH",
-      headers: hdrs(sign({ sub: sup, role: "super_admin" })),
+      headers: hdrs(await sign({ sub: sup, role: "super_admin" })),
       body: JSON.stringify({ status: "suspended" }),
     });
     assert.equal(res.status, 403);
@@ -216,7 +224,7 @@ test("H6: a Super Admin cannot demote the owner over HTTP", async () => {
     const sup = await seed(users, "sup@example.com", "super_admin");
     const res = await fetch(`${base}/api/v1/admin/users/${ownerId}/role`, {
       method: "PATCH",
-      headers: hdrs(sign({ sub: sup, role: "super_admin" })),
+      headers: hdrs(await sign({ sub: sup, role: "super_admin" })),
       body: JSON.stringify({ role: "user" }),
     });
     assert.equal(res.status, 403);
@@ -232,7 +240,7 @@ test("H7: a plain User cannot modify the owner (403 FORBIDDEN at the guard)", as
     const plain = await seed(users, "plain@example.com", "user");
     const res = await fetch(`${base}/api/v1/admin/users/${ownerId}/status`, {
       method: "PATCH",
-      headers: hdrs(sign({ sub: plain, role: "user" })),
+      headers: hdrs(await sign({ sub: plain, role: "user" })),
       body: JSON.stringify({ status: "suspended" }),
     });
     assert.equal(res.status, 403);
@@ -250,7 +258,7 @@ test("H8: ownership is installation-scoped — one record, bound to the owner", 
     // A second claim is impossible, so no second owner can appear.
     const res = await fetch(`${base}/api/v1/admin/ownership/claim`, {
       method: "POST",
-      headers: hdrs(sign({ sub: other, role: "admin" })),
+      headers: hdrs(await sign({ sub: other, role: "admin" })),
       body: JSON.stringify({ password: "x", confirm: "CLAIM SYSTEM OWNERSHIP" }),
     });
     assert.equal(res.status, 409);
@@ -289,13 +297,13 @@ test("H9: owner authority does NOT bypass per-user data ownership boundaries", a
     // Sanity: the victim CAN read their own trade, so the route is live and the
     // 404 below is an authorization outcome, not a misconfigured fixture.
     const ownRead = await fetch(`${base}/api/v1/trades/${tradeId}`, {
-      headers: hdrs(sign({ sub: victimId, role: "user" })),
+      headers: hdrs(await sign({ sub: victimId, role: "user" })),
     });
     assert.equal(ownRead.status, 200, "owner-of-record must be able to read it");
 
     // The System Owner requests another user's trade.
     const res = await fetch(`${base}/api/v1/trades/${tradeId}`, {
-      headers: hdrs(sign({ sub: ownerId, role: "admin" })),
+      headers: hdrs(await sign({ sub: ownerId, role: "admin" })),
     });
     assert.equal(res.status, 404, "owner authority must NOT widen data scope");
     const body = (await res.json()) as Envelope;
@@ -307,12 +315,12 @@ test("H9: owner authority does NOT bypass per-user data ownership boundaries", a
     // The same holds for a mutating route: no write access either.
     const del = await fetch(`${base}/api/v1/trades/${tradeId}`, {
       method: "DELETE",
-      headers: hdrs(sign({ sub: ownerId, role: "admin" })),
+      headers: hdrs(await sign({ sub: ownerId, role: "admin" })),
     });
     assert.equal(del.status, 404, "owner must not be able to delete another user's trade");
     // And the victim's trade is still intact and readable by its real owner.
     const after = await fetch(`${base}/api/v1/trades/${tradeId}`, {
-      headers: hdrs(sign({ sub: victimId, role: "user" })),
+      headers: hdrs(await sign({ sub: victimId, role: "user" })),
     });
     assert.equal(after.status, 200, "the victim's trade must be untouched");
   });
@@ -323,11 +331,11 @@ test("H10: with ownership unclaimed, ordinary RBAC is entirely unchanged", async
     const adm = await seed(users, "adm@example.com", "admin");
     // No ownership claimed: an ordinary admin is still refused the matrix.
     const res = await fetch(`${base}/api/v1/admin/rbac/matrix`, {
-      headers: hdrs(sign({ sub: adm, role: "admin" })),
+      headers: hdrs(await sign({ sub: adm, role: "admin" })),
     });
     assert.equal(res.status, 403);
     const self = await fetch(`${base}/api/v1/admin/rbac/self`, {
-      headers: hdrs(sign({ sub: adm, role: "admin" })),
+      headers: hdrs(await sign({ sub: adm, role: "admin" })),
     });
     const body = (await self.json()) as Envelope<{ isSystemOwner: boolean }>;
     assert.equal(body.data.isSystemOwner, false);

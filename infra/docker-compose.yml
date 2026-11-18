@@ -26,6 +26,21 @@ services:
     ports:
       - "127.0.0.1:5432:5432"
 
+  # One-shot migration runner — the same command `railway.json` uses at deploy
+  # start, kept out of the api process so the api service only ever starts on a
+  # migrated schema (service_completed_successfully gate below).
+  migrate:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    command: ["npx", "tsx", "db/migrate.ts"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   api:
     build:
       context: ..
@@ -33,9 +48,28 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       API_ALLOWED_ORIGINS: ${API_ALLOWED_ORIGINS}
+      # ADR-013 environment identity + origin binding — passed through from
+      # .env, never defaulted here (EO-001/EO-002 BLOCK on absence). Staging and
+      # production additionally require their canonical origin sets (EO-008/009)
+      # or the boot gate refuses to start — fail-closed by design.
+      APP_ENV: ${APP_ENV}
+      APP_ORIGIN: ${APP_ORIGIN}
+      CANONICAL_STAGING_ORIGINS: ${CANONICAL_STAGING_ORIGINS:-}
+      CANONICAL_PRODUCTION_ORIGINS: ${CANONICAL_PRODUCTION_ORIGINS:-}
+      # SC-001/SC-002: required outside development; empty in development is the
+      # documented SC-009 WARN. The value lives in .env, never in this template.
+      JWT_SECRET: ${JWT_SECRET:-}
+      # SC-005/SC-004: this stack is postgres-backed by construction, so memory
+      # persistence is not reachable through a typo'd .env value.
+      PERSISTENCE: postgres
+      # The server defaults HOST to 127.0.0.1, which the web service cannot
+      # reach; a container must listen on its service interface.
+      HOST: 0.0.0.0
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     ports:
       - "127.0.0.1:8080:8080"
 
