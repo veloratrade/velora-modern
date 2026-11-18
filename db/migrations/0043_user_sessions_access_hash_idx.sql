@@ -1,0 +1,12 @@
+-- 0043_user_sessions_access_hash_idx.sql — index the column every protected request now reads.
+--
+-- WHY
+--   AUTH-REVOKE (Legacy AuthService::authenticate parity) re-validates each bearer access token
+--   against its session row: `SELECT … FROM user_sessions WHERE access_token_hash = $1`. Without an
+--   index that is a sequential scan of every session ever issued, on every authenticated request.
+--   Legacy carries the same index (`idx_sessions_access_hash`).
+--
+--   Non-unique on purpose: rows created before 0002 may hold NULL, and uniqueness is already a
+--   property of a SHA-256 over a fresh signed JWT, not something this lookup needs to enforce.
+--   No row is rewritten.
+CREATE INDEX IF NOT EXISTS user_sessions_access_token_hash_idx ON user_sessions(access_token_hash);

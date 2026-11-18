@@ -269,6 +269,11 @@ export class PgUserStore implements UserStore {
     return rows.length === 0 ? null : mapSession(rows[0]!);
   }
 
+  async findSessionByAccessTokenHash(accessTokenHash: string): Promise<SessionRecord | null> {
+    const rows = await this.q("SELECT * FROM user_sessions WHERE access_token_hash = $1", [accessTokenHash]);
+    return rows.length === 0 ? null : mapSession(rows[0]!);
+  }
+
   async rotateSession(
     id: string,
     input: {

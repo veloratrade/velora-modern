@@ -67,6 +67,37 @@ export class MemoryUserStore implements UserStore {
     return user;
   }
 
+  /**
+   * Test seam: put a user row with a CHOSEN id (route suites address users as
+   * "1", "2", …). Keeps the id counter ahead of any numeric id so later
+   * `createUser`/`createSession` calls never collide with it. Not on the
+   * `UserStore` port — production adapters have no equivalent.
+   */
+  seedUser(input: { id: string; role?: AppRoleName; status?: string; email?: string; now?: Date }): UserRecord {
+    const now = iso(input.now ?? new Date());
+    const user: UserRecord = {
+      id: input.id,
+      email: input.email ?? `user-${input.id}@velora.test`,
+      passwordHash: "",
+      fullName: `User ${input.id}`,
+      timezone: "UTC",
+      locale: "en",
+      localeSource: "default",
+      localeUpdatedAt: null,
+      role: input.role ?? "user",
+      plan: "free",
+      status: input.status ?? "active",
+      emailVerifiedAt: null,
+      aiConsentAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.users.set(user.id, user);
+    const n = Number(input.id);
+    if (Number.isInteger(n) && n > this.idCounter) this.idCounter = n;
+    return user;
+  }
+
   async findUserByEmail(email: string): Promise<UserRecord | null> {
     for (const u of this.users.values()) if (u.email === email) return u;
     return null;
@@ -205,6 +236,11 @@ export class MemoryUserStore implements UserStore {
   async findSessionByRefreshTokenHash(refreshTokenHash: string): Promise<SessionRecord | null> {
     const id = this.sessionsByRefreshHash.get(refreshTokenHash);
     return id === undefined ? null : (this.sessions.get(id) ?? null);
+  }
+
+  async findSessionByAccessTokenHash(accessTokenHash: string): Promise<SessionRecord | null> {
+    for (const s of this.sessions.values()) if (s.accessTokenHash === accessTokenHash) return s;
+    return null;
   }
 
   async rotateSession(

@@ -580,6 +580,25 @@ export class AuthService {
     return this.deps.jwt.verify(token);
   }
 
+  /**
+   * Authenticate a bearer access token for a protected route (Legacy
+   * AuthService::authenticate parity): signature + expiry, then the user must
+   * exist and be active, and the session bound to THIS access token must exist,
+   * belong to that user, be unrevoked and unexpired. The role returned is the
+   * CURRENT role from the users row, never the one frozen in the token, so a
+   * demotion takes effect on the next request. Any failure is null (fail-closed).
+   */
+  async authenticateAccessToken(token: string): Promise<{ sub: string; role: string } | null> {
+    const payload = this.deps.jwt.verify(token);
+    if (payload === null) return null;
+    const user = await this.deps.store.findUserById(payload.sub);
+    if (user === null || user.status !== "active") return null;
+    const session = await this.deps.store.findSessionByAccessTokenHash(sha256(token));
+    if (session === null || session.revokedAt !== null || String(session.userId) !== String(user.id)) return null;
+    if (new Date(session.expiresAt).getTime() <= this.now().getTime()) return null;
+    return { sub: String(user.id), role: user.role };
+  }
+
   private async issueTokenPair(
     user: UserRecord,
     ipAddress: string | undefined,

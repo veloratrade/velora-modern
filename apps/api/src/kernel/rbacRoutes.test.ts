@@ -9,6 +9,7 @@ import { createApp, listen } from "./server.js";
 import { AuthService } from "../auth/authService.js";
 import { LogMailProvider } from "../mail/logMailProvider.js";
 import { MemoryUserStore } from "../auth/memoryUserStore.js";
+import { sessionTokenFor } from "../auth/sessionTokenFixture.js";
 import { VeloraHasher } from "../auth/hashing.js";
 import { JwtService } from "../auth/jwt.js";
 import { TradeService } from "../trades/tradeService.js";
@@ -28,14 +29,19 @@ interface Envelope<T = unknown> {
  * This is how a legitimate token for an elevated role is produced without a
  * role-management endpoint (which is Phase 3B-4, deliberately not built here).
  */
-function tokenFor(sub: string, role: string): string {
-  return JwtService.create(SECRET).sign({ sub, role }, 900);
+/** The running harness's user store: tokens are minted against a live session in it (AUTH-REVOKE). */
+let activeUsers: MemoryUserStore | null = null;
+
+async function tokenFor(sub: string, role: string): Promise<string> {
+  if (activeUsers === null) throw new Error("tokenFor called outside a harness");
+  return sessionTokenFor(activeUsers, SECRET, sub, role);
 }
 
 async function withServer(
   fn: (base: string, ctx: { userStore: MemoryUserStore; tradeStore: MemoryTradeStore }) => Promise<void>,
 ): Promise<void> {
   const userStore = new MemoryUserStore();
+  activeUsers = userStore;
   const tradeStore = new MemoryTradeStore();
   const auth = new AuthService({
     store: userStore,
@@ -95,7 +101,7 @@ test("RBAC: a token signed with the WRONG secret is rejected (401, not 403)", as
 
 test("RBAC: user role => 200 on self, 403 on the super_admin matrix", async () => {
   await withServer(async (base) => {
-    const t = tokenFor("1", "user");
+    const t = await tokenFor("1", "user");
 
     const self = await get(base, "/api/v1/admin/rbac/self", t);
     assert.equal(self.status, 200);
@@ -111,7 +117,7 @@ test("RBAC: user role => 200 on self, 403 on the super_admin matrix", async () =
 
 test("RBAC: admin role => panel access, but STILL 403 on the super_admin matrix", async () => {
   await withServer(async (base) => {
-    const t = tokenFor("2", "admin");
+    const t = await tokenFor("2", "admin");
 
     const self = await get(base, "/api/v1/admin/rbac/self", t);
     assert.equal(self.status, 200);
@@ -126,7 +132,7 @@ test("RBAC: admin role => panel access, but STILL 403 on the super_admin matrix"
 
 test("RBAC: super_admin role => 200 on the matrix, and it is a superset of admin", async () => {
   await withServer(async (base) => {
-    const res = await get(base, "/api/v1/admin/rbac/matrix", tokenFor("3", "super_admin"));
+    const res = await get(base, "/api/v1/admin/rbac/matrix", await tokenFor("3", "super_admin"));
     assert.equal(res.status, 200);
     const { data } = (await res.json()) as Envelope<{ roles: string[]; permissions: Record<string, string[]> }>;
     assert.deepEqual(data.roles, ["user", "admin", "super_admin"]);
@@ -142,7 +148,7 @@ test("RBAC: super_admin role => 200 on the matrix, and it is a superset of admin
 
 test("RBAC: client-supplied role via headers/query/body is IGNORED", async () => {
   await withServer(async (base) => {
-    const userToken = tokenFor("4", "user");
+    const userToken = await tokenFor("4", "user");
 
     // Every channel a client controls, all claiming super_admin.
     const attempts: Array<[string, RequestInit]> = [
@@ -170,7 +176,7 @@ test("RBAC: client-supplied role via headers/query/body is IGNORED", async () =>
 test("RBAC: an UNKNOWN role inside a validly-signed token fails closed to user", async () => {
   await withServer(async (base) => {
     for (const bogus of ["root", "owner", "SUPER_ADMIN", "superadmin", "", "velora_owner"]) {
-      const t = tokenFor("5", bogus);
+      const t = await tokenFor("5", bogus);
       const matrix = await get(base, "/api/v1/admin/rbac/matrix", t);
       assert.equal(matrix.status, 403, `role '${bogus}' must not grant the matrix`);
 
@@ -185,8 +191,10 @@ test("RBAC: an UNKNOWN role inside a validly-signed token fails closed to user",
 });
 
 test("RBAC: a token with NO role claim degrades to user (not to admin)", async () => {
-  await withServer(async (base) => {
-    const t = JwtService.create(SECRET).sign({ sub: "6" }, 900);
+  await withServer(async (base, { userStore }) => {
+    // User 6 is a plain `user` with a live session, but the access token's JWT
+    // has no `role` claim at all: the effective role is the row's, never admin.
+    const t = await sessionTokenFor(userStore, SECRET, "6", "user", { omitRoleClaim: true });
     const self = await get(base, "/api/v1/admin/rbac/self", t);
     assert.equal(self.status, 200);
     assert.equal(((await self.json()) as Envelope<{ role: string }>).data.role, "user");
@@ -200,7 +208,7 @@ test("RBAC: a token with NO role claim degrades to user (not to admin)", async (
 
 test("RBAC: elevated roles do NOT bypass trade ownership (still a non-disclosing 404)", async () => {
   await withServer(async (base) => {
-    const ownerToken = tokenFor("100", "user");
+    const ownerToken = await tokenFor("100", "user");
     const created = await fetch(`${base}/api/v1/trades`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${ownerToken}` },
@@ -217,7 +225,7 @@ test("RBAC: elevated roles do NOT bypass trade ownership (still a non-disclosing
     // owner, so they get the existing non-disclosing 404 — never 403, and
     // certainly never the record.
     for (const role of ["admin", "super_admin"]) {
-      const res = await get(base, `/api/v1/trades/${id}`, tokenFor("200", role));
+      const res = await get(base, `/api/v1/trades/${id}`, await tokenFor("200", role));
       assert.equal(res.status, 404, `${role} must not read another user's trade`);
       assert.equal(((await res.json()) as Envelope<null>).error?.code, "NOT_FOUND");
     }
