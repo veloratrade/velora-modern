@@ -37,6 +37,7 @@ import { MemoryOwnershipStore } from "../auth/memoryOwnershipStore.js";
 import { AdminConsoleService } from "./adminConsoleService.js";
 import { MemoryAdminConsoleStore } from "./adminConsoleStore.js";
 import type { AdminConsoleCapability } from "./adminConsoleRoutes.js";
+import { MemorySubscriptionStore } from "../billing/subscriptionService.js";
 
 const JWT_SECRET = "admin-console-routes-test-secret-0123456789ab";
 
@@ -87,6 +88,7 @@ async function withServer(
   });
   const users = new AdminUserService({
     store,
+    hasher: new VeloraHasher(),
     audit,
     getSystemOwnerUserId: async () => (await ownershipStore.getOwnership())?.ownerUserId ?? null,
   });
@@ -108,6 +110,7 @@ async function withServer(
     auth,
     adminUsers: users,
     ownership,
+    subscriptions: new MemorySubscriptionStore(),
     ...(capability !== undefined ? { adminConsole: capability } : {}),
     rateLimiter: new FixedWindowRateLimiter(new MemoryRateLimitStore()),
   });
@@ -286,6 +289,149 @@ test("CAPABILITY: with no console wired, every console route answers 503 rather 
     },
     { withConsole: false },
   );
+});
+
+// ── W1: user creation + invitations + subscription (ADR-023 / ADR-022) ────────
+// These run over the real kernel with real bearer verification, so they prove
+// the permission gate (users.create / users.invite / users.manage_subscription)
+// and the AdminUserService pair-rules (escalation) through HTTP.
+
+test("AUTHZ: W1 write routes refuse anonymous and plain-user callers", async () => {
+  await withServer(async ({ base }, { alice }) => {
+    const anonCreate = await fetch(`${base}/api/v1/admin/users`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "x@y.z", password: "p" }),
+    });
+    assert.equal(anonCreate.status, 401);
+    const anonInvite = await fetch(`${base}/api/v1/admin/users/invite`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "x@y.z" }),
+    });
+    assert.equal(anonInvite.status, 401);
+    const anonSub = await fetch(`${base}/api/v1/admin/users/1/subscription`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan: "pro" }),
+    });
+    assert.equal(anonSub.status, 401);
+
+    for (const [path, body] of [
+      ["/api/v1/admin/users", { email: "x@y.z", password: "p" }],
+      ["/api/v1/admin/users/invite", { email: "x@y.z" }],
+      ["/api/v1/admin/users/1/subscription", { plan: "pro" }],
+    ] as const) {
+      const res = await fetch(`${base}${path}`, {
+        method: "POST",
+        headers: bearer(alice),
+        body: JSON.stringify(body),
+      });
+      assert.equal(res.status, 403, path);
+      assert.equal(((await res.json()) as Envelope).error?.code, "FORBIDDEN");
+    }
+  });
+});
+
+test("W1: admin creates a user (201), cannot grant an admin role, duplicate email is 409", async () => {
+  await withServer(async ({ base, store }, { admin }) => {
+    const res = await fetch(`${base}/api/v1/admin/users`, {
+      method: "POST",
+      headers: bearer(admin),
+      body: JSON.stringify({
+        email: "newbie@velora.example",
+        password: "a-strong-password-123",
+        fullName: "Newbie User",
+        role: "user",
+      }),
+    });
+    const body = (await res.json()) as Envelope<{
+      user: { email: string; role: string; emailVerifiedAt: string | null };
+    }>;
+    assert.equal(res.status, 201, JSON.stringify(body));
+    assert.equal(body.data.user.email, "newbie@velora.example");
+    assert.equal(body.data.user.role, "user");
+    assert.ok(body.data.user.emailVerifiedAt !== null);
+    const created = await store.findUserByEmail("newbie@velora.example");
+    assert.ok(created !== null);
+
+    // An admin may not grant an admin-level role.
+    const escalate = await fetch(`${base}/api/v1/admin/users`, {
+      method: "POST",
+      headers: bearer(admin),
+      body: JSON.stringify({ email: "boss@velora.example", password: "a-strong-password-123", role: "admin" }),
+    });
+    assert.equal(escalate.status, 403);
+    assert.equal(((await escalate.json()) as Envelope).error?.code, "PRIVILEGE_ESCALATION_DENIED");
+
+    // Duplicate email is a conflict, not a second account.
+    const dupe = await fetch(`${base}/api/v1/admin/users`, {
+      method: "POST",
+      headers: bearer(admin),
+      body: JSON.stringify({ email: "newbie@velora.example", password: "a-strong-password-123" }),
+    });
+    assert.equal(dupe.status, 409);
+  });
+});
+
+test("W1: a super_admin may invite an admin-level role; an admin may not", async () => {
+  await withServer(async ({ base }, { admin, superAdmin }) => {
+    const invite = await fetch(`${base}/api/v1/admin/users/invite`, {
+      method: "POST",
+      headers: bearer(superAdmin),
+      body: JSON.stringify({ email: "guest@velora.example", role: "admin" }),
+    });
+    const ibody = (await invite.json()) as Envelope<{ token: string; expiresAt: string; role: string }>;
+    assert.equal(invite.status, 200, JSON.stringify(ibody));
+    assert.ok(typeof ibody.data.token === "string" && ibody.data.token.length > 0);
+    assert.equal(ibody.data.role, "admin");
+    const exp = new Date(ibody.data.expiresAt);
+    assert.ok(exp.getTime() > Date.now() && exp.getTime() <= Date.now() + 8 * 86_400 * 1000);
+
+    // An admin may not invite an admin-level role.
+    const escalate = await fetch(`${base}/api/v1/admin/users/invite`, {
+      method: "POST",
+      headers: bearer(admin),
+      body: JSON.stringify({ email: "guest2@velora.example", role: "super_admin" }),
+    });
+    assert.equal(escalate.status, 403);
+    assert.equal(((await escalate.json()) as Envelope).error?.code, "PRIVILEGE_ESCALATION_DENIED");
+  });
+});
+
+test("W1: admin sets a user's subscription plan; unknown user is 404; bad plan is 422", async () => {
+  await withServer(async ({ base, store }, { admin }) => {
+    const created = await store.createUser({
+      email: "subbie@velora.example",
+      passwordHash: "x",
+      fullName: "Subbie",
+      timezone: "UTC",
+      locale: "en",
+      now: new Date(),
+    });
+    const ok = await fetch(`${base}/api/v1/admin/users/${created.id}/subscription`, {
+      method: "POST",
+      headers: bearer(admin),
+      body: JSON.stringify({ plan: "pro" }),
+    });
+    const okBody = (await ok.json()) as Envelope<{ plan: string }>;
+    assert.equal(ok.status, 200, JSON.stringify(okBody));
+    assert.equal(okBody.data.plan, "pro");
+
+    const missing = await fetch(`${base}/api/v1/admin/users/no-such-id/subscription`, {
+      method: "POST",
+      headers: bearer(admin),
+      body: JSON.stringify({ plan: "pro" }),
+    });
+    assert.equal(missing.status, 404);
+
+    const bad = await fetch(`${base}/api/v1/admin/users/${created.id}/subscription`, {
+      method: "POST",
+      headers: bearer(admin),
+      body: JSON.stringify({ plan: "not-a-plan" }),
+    });
+    assert.equal(bad.status, 422);
+  });
 });
 
 // ── The sensitive-field rule ────────────────────────────────────────────────

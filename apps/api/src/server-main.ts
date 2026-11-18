@@ -401,6 +401,7 @@ async function main(): Promise<void> {
     });
     capabilities.adminUsers = new AdminUserService({
       store: userStore,
+      hasher: new VeloraHasher(),
       getSystemOwnerUserId: async () => (await ownershipStore.getOwnership())?.ownerUserId ?? null,
       audit: auditStore,
     });

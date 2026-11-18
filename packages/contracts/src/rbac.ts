@@ -62,6 +62,23 @@ export const PERMISSIONS = [
    * delegated to `admin`.
    */
   "users.change_role",
+  /**
+   * Create a new user account through the admin surface (W1 A1, ADR-023 = A:
+   * port both admin user creation and invitations).
+   */
+  "users.create",
+  /**
+   * Invite a new user with a single-use, 7-day invite token (W1 A2,
+   * ADR-023 = A). Invite *delivery* is deploy-gated (MG-WORKER-DEPLOY evidence
+   * class); the invite record and token are created here regardless.
+   */
+  "users.invite",
+  /**
+   * Create or change a user's subscription through the admin surface (W1 A3,
+   * ADR-022 = A: provider-agnostic model over the Stripe `subscriptions`
+   * object, keep history).
+   */
+  "users.manage_subscription",
 
   // --- Phase 5 (support). The capability Legacy named `communication.view` /
   // `communication.reply`. Both are granted to `admin` AND `super_admin` in
@@ -163,6 +180,12 @@ export const ROLE_PERMISSIONS: Readonly<Record<AppRole, readonly Permission[]>> 
     "system.health.view",
     "audit.view",
     "users.verify_email",
+    // W1 (ADR-023 = A): admin user creation + invitations. Granted to `admin`
+    // as well as `super_admin` — both may create users and invite.
+    "users.create",
+    "users.invite",
+    // W1 A3 (ADR-022 = A): admin may create/change a user's subscription.
+    "users.manage_subscription",
     // Phase 7 — Legacy grants P_AI_MANAGE to `admin` (Role.php), and withholds
     // P_AI_ROUTE_MANAGE for super_admin only.
     "aiManage",
@@ -194,6 +217,12 @@ export const ROLE_PERMISSIONS: Readonly<Record<AppRole, readonly Permission[]>> 
     // on audit/security reads.
     "audit.view_sensitive",
     "users.verify_email",
+    // W1 (ADR-023 = A): admin user creation + invitations — super_admin holds
+    // these alongside `admin`.
+    "users.create",
+    "users.invite",
+    // W1 A3 (ADR-022 = A): super_admin may create/change a user's subscription.
+    "users.manage_subscription",
     // Phase 7 — Legacy grants both AI permissions to super_admin, and
     // aiRouteManage to super_admin ONLY (Role.php: P_AI_ROUTE_MANAGE is one of the
     // six SA-exclusive permissions).

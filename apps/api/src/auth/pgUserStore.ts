@@ -20,6 +20,7 @@ import type {
   SessionRecord,
   DeviceRecord,
   VerificationRecord,
+  InvitationRecord,
   EmailPreferences,
   PasswordResetRecord,
 } from "./userStore.js";
@@ -67,6 +68,19 @@ function mapUser(r: UserRow): UserRecord {
     aiConsentAt: isoOrNull(r.ai_consent_at),
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
+  };
+}
+
+function mapInvitation(r: Record<string, unknown>): InvitationRecord {
+  return {
+    id: String(r.id),
+    email: String(r.email),
+    role: normalizeRole(r.role as string),
+    expiresAt: iso(r.expires_at as Date | string),
+    createdAt: iso(r.created_at as Date | string),
+    usedAt: isoOrNull(r.used_at as Date | string | null),
+    usedByUserId: r.used_by_user_id === null ? null : String(r.used_by_user_id),
+    invitedByUserId: String(r.invited_by_user_id),
   };
 }
 
@@ -596,5 +610,45 @@ export class PgUserStore implements UserStore {
         now,
       ],
     );
+  }
+
+  async createInvitation(input: {
+    email: string;
+    role: AppRoleName;
+    tokenHash: string;
+    expiresAt: Date;
+    now: Date;
+    invitedByUserId: string;
+  }): Promise<InvitationRecord> {
+    const rows = await this.q(
+      `INSERT INTO invitation_tokens
+         (email, role, token_hash, expires_at, created_at, invited_by_user_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [input.email, input.role, input.tokenHash, input.expiresAt, input.now, input.invitedByUserId],
+    );
+    if (rows.length === 0) throw new Error("createInvitation: INSERT returned no row");
+    return mapInvitation(rows[0]!);
+  }
+
+  async findInvitationByToken(tokenHash: string): Promise<InvitationRecord | null> {
+    const rows = await this.q(
+      `SELECT * FROM invitation_tokens
+       WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()`,
+      [tokenHash],
+    );
+    if (rows.length === 0) return null;
+    return mapInvitation(rows[0]!);
+  }
+
+  async consumeInvitation(id: string, usedByUserId: string, now: Date): Promise<boolean> {
+    const result = await this.q(
+      `UPDATE invitation_tokens
+         SET used_at = $2, used_by_user_id = $3
+       WHERE id = $1 AND used_at IS NULL AND expires_at > now()
+       RETURNING id`,
+      [id, now, usedByUserId],
+    );
+    return result.length > 0;
   }
 }

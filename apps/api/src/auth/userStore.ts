@@ -118,6 +118,23 @@ export class UserEmailExistsError extends Error {
   }
 }
 
+/**
+ * A single-use, time-bound invitation to create an account (W1, ADR-023 = A).
+ * The plaintext token is shown to the inviting administrator exactly once;
+ * persistence holds only its sha256 hash.
+ */
+export interface InvitationRecord {
+  readonly id: string;
+  readonly email: string;
+  readonly role: AppRoleName;
+  readonly expiresAt: string;
+  readonly createdAt: string;
+  /** Null while the invitation is pending; set when it is consumed. */
+  readonly usedAt: string | null;
+  readonly usedByUserId: string | null;
+  readonly invitedByUserId: string;
+}
+
 export interface UserStore {
   /** Create a user; throws UserEmailExistsError on duplicate email. */
   createUser(input: {
@@ -330,4 +347,27 @@ export interface UserStore {
 
   /** A user's known device fingerprints (empty until device tracking lands). */
   listDevices(userId: string): Promise<readonly DeviceRecord[]>;
+
+  // --- Phase 2 W1: invitations (ADR-023 = A) ---------------------------------
+  // Authorization is enforced in the service/route layer (users.invite); the
+  // store performs no authority check of its own.
+
+  /** Mint a pending invitation. Throws if a pending invitation for `email`
+   *  already exists (the pending-email unique index). */
+  createInvitation(input: {
+    email: string;
+    role: AppRoleName;
+    tokenHash: string;
+    expiresAt: Date;
+    now: Date;
+    invitedByUserId: string;
+  }): Promise<InvitationRecord>;
+
+  /** Find a pending invitation by its stored token hash. Returns null when
+   *  absent, already consumed, or expired. */
+  findInvitationByToken(tokenHash: string): Promise<InvitationRecord | null>;
+
+  /** Mark an invitation consumed (single-use). No-op-safe: returns whether a
+   *  row was actually marked. */
+  consumeInvitation(id: string, usedByUserId: string, now: Date): Promise<boolean>;
 }

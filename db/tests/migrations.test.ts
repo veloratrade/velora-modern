@@ -1328,3 +1328,68 @@ test("0043 AUTH-REVOKE: user_sessions.access_token_hash is indexed (every protec
     await engine.close();
   }
 });
+
+test("0044 invitations: USER_CREATED is writable and invitation_tokens enforces one pending row per e-mail", async () => {
+  const engine = await createEngine();
+  try {
+    await migrate(engine, MIGRATIONS);
+    const u = await engine.query(
+      "INSERT INTO users(email, password_hash) VALUES ($1,$2) RETURNING id",
+      ["inviter@velora.ir", "x"],
+    );
+    const inviterId = String((u.rows as { id: string | number }[])[0]!.id);
+
+    // USER_CREATED joins the audit vocabulary (0044).
+    await engine.query(
+      `INSERT INTO audit_log(action, actor_user_id, target_user_id, before_state, after_state)
+       VALUES ('USER_CREATED', $1, $1, null, 'role:user')`,
+      [inviterId],
+    );
+    const created = await engine.query(
+      "SELECT count(*)::int AS n FROM audit_log WHERE action = 'USER_CREATED'",
+    );
+    assert.equal((created.rows as { n: number }[])[0]!.n, 1, "USER_CREATED must be writable");
+
+    // An unknown action is still refused (the vocabulary stays closed).
+    await assert.rejects(
+      engine.query("INSERT INTO audit_log(action, actor_user_id) VALUES ('USER_IMPORTED', $1)", [
+        inviterId,
+      ]),
+      /audit_log_action_check/i,
+      "an undeclared action must be refused",
+    );
+
+    // invitation_tokens: insert one pending invite for an e-mail.
+    await engine.query(
+      `INSERT INTO invitation_tokens(email, role, token_hash, expires_at, invited_by_user_id)
+       VALUES ($1,'user','hash-abc', now() + interval '7 days', $2)`,
+      ["alice@velora.ir", inviterId],
+    );
+    // A second pending invite for the same e-mail collides (partial unique index).
+    await assert.rejects(
+      engine.query(
+        `INSERT INTO invitation_tokens(email, role, token_hash, expires_at, invited_by_user_id)
+         VALUES ($1,'admin','hash-def', now() + interval '7 days', $2)`,
+        ["alice@velora.ir", inviterId],
+      ),
+      /duplicate key|unique/i,
+      "one pending invitation per e-mail",
+    );
+    // Consuming the first frees the e-mail for a new pending invite.
+    await engine.query("UPDATE invitation_tokens SET used_at = now() WHERE email = $1", [
+      "alice@velora.ir",
+    ]);
+    await engine.query(
+      `INSERT INTO invitation_tokens(email, role, token_hash, expires_at, invited_by_user_id)
+       VALUES ($1,'admin','hash-def', now() + interval '7 days', $2)`,
+      ["alice@velora.ir", inviterId],
+    );
+    const rows = await engine.query(
+      "SELECT count(*)::int AS n FROM invitation_tokens WHERE email = $1",
+      ["alice@velora.ir"],
+    );
+    assert.equal((rows.rows as { n: number }[])[0]!.n, 2, "a consumed invite frees the e-mail");
+  } finally {
+    await engine.close();
+  }
+});

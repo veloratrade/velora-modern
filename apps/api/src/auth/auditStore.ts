@@ -102,6 +102,13 @@ export const AUDIT_ACTIONS = [
   // rest of the team. Without a row, "who decided this search key was fine, and when" is unanswerable —
   // and a stale green badge has no provenance. `afterState` carries `tool:<name> verdict:<ok|code>`.
   "AI_TOOL_VALIDATED",
+  // 0044 — an administrator created an account directly (W1, ADR-023 = A).
+  // `afterState` carries `role:<role>`; the invited-vs-created distinction is
+  // the `invitation_tokens` row, not a second action name.
+  "USER_CREATED",
+  // 0044 — an administrator minted a single-use invite token (W1, ADR-023 = A).
+  // Delivery is deploy-gated; the mint itself is audited here.
+  "USER_INVITED",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

@@ -8,6 +8,7 @@ import {
   type DeviceRecord,
   type VerificationRecord,
   type PasswordResetRecord,
+  type InvitationRecord,
   type UserStore,
   type AppRoleName,
   type EmailPreferences,
@@ -31,6 +32,13 @@ export class MemoryUserStore implements UserStore {
    */
   private readonly devices = new Map<string, DeviceRecord>();
   private readonly emailPrefs = new Map<string, EmailPreferences>();
+  /**
+   * Pending invitations keyed by id. Mirrors the DB: token_hash unique,
+   * one pending row per e-mail.
+   */
+  private readonly invitations = new Map<string, InvitationRecord>();
+  /** token_hash → invitation id (the plaintext token itself is never stored). */
+  private readonly invitationsByToken = new Map<string, string>();
   private idCounter = 0;
 
   async createUser(input: {
@@ -466,5 +474,53 @@ export class MemoryUserStore implements UserStore {
     this.emailPrefs.set(userId, prefs);
     const u = this.users.get(userId);
     if (u) this.users.set(userId, { ...u, updatedAt: iso(now) });
+  }
+
+  async createInvitation(input: {
+    email: string;
+    role: AppRoleName;
+    tokenHash: string;
+    expiresAt: Date;
+    now: Date;
+    invitedByUserId: string;
+  }): Promise<InvitationRecord> {
+    for (const inv of this.invitations.values()) {
+      if (inv.email === input.email && inv.usedAt === null) {
+        throw new UserEmailExistsError(input.email);
+      }
+    }
+    const id = String(++this.idCounter);
+    const invitation: InvitationRecord = {
+      id,
+      email: input.email,
+      role: input.role,
+      expiresAt: iso(input.expiresAt),
+      createdAt: iso(input.now),
+      usedAt: null,
+      usedByUserId: null,
+      invitedByUserId: input.invitedByUserId,
+    };
+    this.invitations.set(id, invitation);
+    this.invitationsByToken.set(input.tokenHash, id);
+    return invitation;
+  }
+
+  async findInvitationByToken(tokenHash: string): Promise<InvitationRecord | null> {
+    const id = this.invitationsByToken.get(tokenHash);
+    if (id === undefined) return null;
+    const inv = this.invitations.get(id);
+    if (!inv || inv.usedAt !== null || new Date(inv.expiresAt) <= new Date()) {
+      return null;
+    }
+    return inv;
+  }
+
+  async consumeInvitation(id: string, usedByUserId: string, now: Date): Promise<boolean> {
+    const inv = this.invitations.get(id);
+    if (!inv || inv.usedAt !== null || new Date(inv.expiresAt) <= new Date()) {
+      return false;
+    }
+    this.invitations.set(id, { ...inv, usedAt: iso(now), usedByUserId });
+    return true;
   }
 }
