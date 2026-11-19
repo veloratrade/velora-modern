@@ -23,8 +23,9 @@ export class PgNewsletterStore implements NewsletterStore {
        RETURNING id`,
       [email],
     );
-    if (rows.length !== 1) throw new Error("newsletter subscribe returned no row");
-    return { id: String(rows[0].id) };
+    const row = rows[0];
+    if (row === undefined) throw new Error("newsletter subscribe returned no row");
+    return { id: String(row.id) };
   }
 
   async subscribed(email: string): Promise<boolean> {

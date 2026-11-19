@@ -168,7 +168,7 @@ export interface ApiConfig {
   /** MG-DOMAIN-LEGACY-ONLY — achievements read surface (listForUser). */
   readonly achievements?: import("@velora/domain").AchievementStore;
   /** Phase 3 newsletter backend (GAP-NL): public subscribe store. */
-  readonly newsletter?: import("./newsletter/pgNewsletterStore.js").NewsletterStore;
+  readonly newsletter?: import("../newsletter/pgNewsletterStore.js").NewsletterStore;
 }
 
 /**

@@ -8,9 +8,9 @@ import assert from "node:assert/strict";
 import { createApp } from "../kernel/server.js";
 import type { NewsletterStore } from "./pgNewsletterStore.js";
 
-interface Envelope<T = unknown> {
+interface Envelope {
   status: "success" | "error";
-  data: T;
+  data: unknown;
   error: { code: string; message: string } | null;
   timestamp: string;
 }
@@ -46,6 +46,10 @@ async function withStore(fn: (base: string) => Promise<void>): Promise<void> {
   }
 }
 
+function json<T>(res: Response): Promise<T> {
+  return res.json() as Promise<T>;
+}
+
 test("POST /api/v1/newsletter/subscribe creates a subscription (201)", async () => {
   await withStore(async (base) => {
     const res = await fetch(`${base}/api/v1/newsletter/subscribe`, {
@@ -54,10 +58,11 @@ test("POST /api/v1/newsletter/subscribe creates a subscription (201)", async () 
       body: JSON.stringify({ email: "alice@example.com" }),
     });
     assert.equal(res.status, 201);
-    const body: Envelope = await res.json();
+    const body = await json<Envelope>(res);
     assert.equal(body.status, "success");
-    assert.equal(body.data.subscribed, true);
-    assert.ok(typeof body.data.id === "string" && body.data.id.length > 0);
+    assert.equal((body.data as { subscribed: boolean }).subscribed, true);
+    const id = (body.data as { id: string }).id;
+    assert.ok(typeof id === "string" && id.length > 0);
   });
 });
 
@@ -86,9 +91,9 @@ test("invalid email is rejected (400 VALIDATION_FAILED)", async () => {
       body: JSON.stringify({ email: "not-an-email" }),
     });
     assert.equal(res.status, 400);
-    const body: Envelope = await res.json();
+    const body = await json<Envelope>(res);
     assert.equal(body.status, "error");
-    assert.equal(body.error.code, "VALIDATION_FAILED");
+    assert.equal(body.error!.code, "VALIDATION_FAILED");
   });
 });
 
@@ -130,9 +135,9 @@ test("newsletter absent from config answers 503 SERVICE_UNAVAILABLE", async () =
       body: JSON.stringify({ email: "alice@example.com" }),
     });
     assert.equal(res.status, 503);
-    const body: Envelope = await res.json();
+    const body = await json<Envelope>(res);
     assert.equal(body.status, "error");
-    assert.equal(body.error.code, "SERVICE_UNAVAILABLE");
+    assert.equal(body.error!.code, "SERVICE_UNAVAILABLE");
   } finally {
     app.close();
   }
