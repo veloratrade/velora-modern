@@ -2001,3 +2001,26 @@ remains the no-egress path.
   - `npm audit --audit-level=high` → pre-existing advisories only; CI runs `|| true`.
 
 - **Authorization:** owner-approved W1 scope (create + invite + subscription POST, both admin and super_admin, 7-day invite TTL). No direct push to main; PR to `main`; normal merge only after green verify/tests; no force-push; no branch deletion.
+
+## AC-62 — 2026-11-18 · W6 data migration — ADR-004 naive-datetime interpretation (Asia/Tehran standby)
+
+- **Branch:** `phase2/w6-data-migration` (from `main` @ `ff7126c`, post-W1 merge). Commit: `data(migration): interpret naive legacy datetimes via ADR-004 Asia/Tehran standby (W6)` (`0880020`). PR #34 created via GitHub API, `verify` green (CI check-run `success`), merged normally — merge commit `4da5b608149ad450af92256af10cb1b145f1b961`. Synced local main → `4da5b60` (ff-only), working tree clean.
+
+- **What changed (W6 · ADR-004 Amendment A-3, Option C):** The ADR-004 §Decision item 4 sampling procedure was executed (`db/data-step/sampling-report.md`); no confirming evidence was available (synthetic fixture, no real production export, no host PHP-TZ evidence), so the **Asia/Tehran standby** is adopted as the documented site-local interpretation constant for Legacy's naive datetimes — a documented approximation that cannot be better than the evidence.
+  - `tools/lib/legacyTimeTransform.ts` NEW — pure naive→UTC interpreter: ISO-calendar naive text + confirmed/standby zone → UTC instant + `source_tz_offset`; unconfirmed calendars/zones (e.g. Jalali/SH) return `null` and are **quarantined, never invented**.
+  - `tools/lib/legacyTimeTransform.test.ts` NEW — 10 unit tests, 10/10 pass.
+  - `tools/load_rehearsal.ts` — wires `interpretNaiveInstant` into the trade load; unresolvable rows quarantined at load time, recorded next to the A-gate quarantine file.
+  - `db/data-step/fixtures/legacy-export.FIXTURE/decisions.json` — `time.mode = "interpreted_asia_tehran"`, `resolves_unresolved_rows: false` (standby cannot confirm unconfirmed calendars), basis cites Amendment A-3 + sampling report.
+  - `db/MIGRATION_MAP.md` — naive datetimes no longer `BLOCKED_ON_SAMPLING`; now `INTERPRETED_ASIA_TEHRAN_STANDBY`.
+  - `db/data-step/sampling-report.md` NEW — ADR-004 procedure execution record (steps 1–4, all not-possible against synthetic fixture → standby adopted).
+
+- **Impact on migration state:** migration transform code is **no longer blocked** by the ADR-004 outstanding item; interpretation constant adopted (standby). No gap rows/statuses/counts changed by this entry alone (MG-DATA-MIGRATION remains open pending a real export + owner confirmation of the interpretation): still **13 OPEN / 30 PARTIAL / 13 CLOSED** (56 total), hardcoded by `tools/registryConsistency.test.ts`. `current_verified` fields (`7d91ff1`, legacy `edede31…`, `verified_at` `2026-10-11`) untouched by design — W6 is application/evidence-affecting so the tree is DRIFTED until re-verified in a later session; this entry records the change, per CURRENT_STATE.md §7.
+
+- **Evidence (executed 2026-11-18 on this branch, after `npm ci`):**
+  - Typecheck: `npx tsc -b packages/contracts packages/domain apps/api apps/worker apps/web` → **0 errors**.
+  - `node tools/run-tests.mjs` → **ALL TEST FILES PASSED** (general + PGlite 99/99, 0 fail).
+  - `npm run test:migrations` → **29/29 pass** (disposable PGlite).
+  - `bash tools/secret-scan.sh` → **PASS (0 findings)**.
+  - `npm audit --audit-level=high` → pre-existing advisories only; CI runs `|| true`.
+
+- **Authorization:** owner instruction (2026-11-18) — do all remaining waves in order without waiting; W6 not blocked (Asia/Tehran standby). No direct push to main; PR to `main`; normal merge only after green verify/tests; no force-push; no branch deletion.
