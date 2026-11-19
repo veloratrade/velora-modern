@@ -2024,3 +2024,29 @@ remains the no-egress path.
   - `npm audit --audit-level=high` → pre-existing advisories only; CI runs `|| true`.
 
 - **Authorization:** owner instruction (2026-11-18) — do all remaining waves in order without waiting; W6 not blocked (Asia/Tehran standby). No direct push to main; PR to `main`; normal merge only after green verify/tests; no force-push; no branch deletion.
+
+## AC-63 — 2026-11-18 · Phase 3 feature GAP-NL: newsletter backend (public subscribe)
+
+- **Branch:** `phase3/newsletter-backend` (from `main` @ `9310977`, post-security-fixes merge). Commit: `feat(newsletter): add public subscribe backend (Phase 3 GAP-NL)`. PR created via GitHub API, `verify` green before normal merge; merged normally. Synced local main → new SHA (ff-only), working tree clean.
+
+- **What changed (Phase 3 · roadmap GAP-NL):** The newsletter capability had no backend on `main` (fake landing UI only in `apps/web/src/features/landing/LandingRuntime.tsx`, no migration, no routes) — a documented capability gap. Built the subscribe backend:
+  - `db/migrations/0045_newsletter_subscriptions.sql` NEW — `newsletter_subscriptions` table (id, email unique, status, source, subscribed_at/created_at timestamptz); forward-only, IF NOT EXISTS.
+  - `apps/api/src/newsletter/pgNewsletterStore.ts` NEW — `NewsletterStore` interface + `PgNewsletterStore` (QueryFn-backed, idempotent ON CONFLICT subscribe).
+  - `apps/api/src/newsletter/newsletterService.ts` NEW — `NewsletterService.subscribe` (email validation, normalization, idempotent delegate).
+  - `apps/api/src/newsletter/newsletterRoutes.ts` NEW — `handleNewsletterRoutes`: public POST /api/v1/newsletter/subscribe, validation 400, 201 on subscribe, 503 when unwired (capabilityAbsent).
+  - `apps/api/src/routes/extendedRoutes.ts` — registered `handleNewsletterRoutes` (directive t extended-route surface).
+  - `apps/api/src/kernel/server.ts` — added `newsletter?: NewsletterStore` slot to `ApiConfig`.
+  - `apps/api/src/server-main.ts` — wired `capabilities.newsletter = new PgNewsletterStore(q)` when a pool exists.
+  - Tests: `apps/api/src/newsletter/newsletterRoutes.test.ts` (real-kernel integration: 201 subscribe, idempotent re-subscribe, 400 invalid/missing email, 404 GET, 503 unwired) + `apps/api/src/newsletter/newsletterService.test.ts` (validation + normalization).
+  - Migration 0045 auto-covered by `db/tests/migrations.test.ts` (applies cleanly + idempotent against disposable PGlite).
+
+- **Evidence (executed on this branch, after `npm ci`):**
+  - Typecheck: `npx tsc -b packages/contracts packages/domain apps/api apps/worker apps/web` → **0 errors**.
+  - `node tools/run-tests.mjs` → **ALL TEST FILES PASSED** (general + PGlite, 0 fail).
+  - `npm run test:migrations` → **pass** (disposable PGlite, incl. new 0045).
+  - `bash tools/secret-scan.sh` → **PASS (0 findings)**.
+  - `npm audit --audit-level=high` → pre-existing advisories only; CI runs `|| true`.
+
+- **Scope notes:** subscribe is public (no bearer auth, no new Permission — avoids CHANGE_LOG/rbac verbatim churn); Resend is name-only and not wired, so live sends remain fail-closed. Rate limiting not yet applied (no THROTTLED_ROUTES entry); a follow-up can add it to `RATE_LIMIT_DEFAULTS` + `THROTTLED_ROUTES`.
+
+- **Authorization:** Phase 3 roadmap feature; owner-specified order after W7 docs assessment (no safe W7 edits — MG-DOC-3 owner-gated). No direct push to main; PR to `main`; normal merge only after green verify/tests; no force-push; no branch deletion.
