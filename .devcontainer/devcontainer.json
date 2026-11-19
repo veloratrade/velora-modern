@@ -1,0 +1,17 @@
+{
+  "name": "Velora Modern — Codespaces test environment",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "dev",
+  "workspaceFolder": "/workspaces/velora-modern",
+  "forwardPorts": [3000, 8080, 5432],
+  "postCreateCommand": "npm ci && npx tsx db/migrate.ts && npx tsx tools/seed-demo.ts",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "ms-vscode.vscode-typescript-next"
+      ]
+    }
+  }
+}
