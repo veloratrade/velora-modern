@@ -22,3 +22,28 @@ BLOCKING OPERATIONAL GAPS* (closure gates 0 PASS / 1 PARTIAL / 14 FAIL).
   `docs/state/CURRENT_STATE.md` (current state) → `docs/adr/`
   (ADR-001…014, 016, 017 — ADR-015 intentionally unassigned, see
   `docs/adr/README.md`).
+
+## Codespaces / local test environment
+
+A one-click dev/test environment is provided under `.devcontainer/`:
+
+- `.devcontainer/devcontainer.json` — Codespaces configuration; forwards ports
+  3000 (web), 8080 (api), 5432 (Postgres).
+- `.devcontainer/docker-compose.yml` — `dev` (interactive Node container,
+  workspace mounted), `postgres` (PostgreSQL 16), `migrate`, `api`, `worker`,
+  `web`.
+- `.devcontainer/Dockerfile` — Node 22 + `postgresql-client`/`git`/`curl`.
+- `tools/seed-demo.ts` — idempotent demo users/accounts/trades (test data
+  only, no real credentials).
+
+**Usage:** open this repo in GitHub Codespaces, or run
+`docker compose -f .devcontainer/docker-compose.yml up --build` locally.
+
+On first Codespaces start, `postCreateCommand` runs `npm ci`, applies the
+forward-only migrations (`db/migrate.ts`), and seeds demo data
+(`tools/seed-demo.ts`). The dev container then stays running; open a terminal
+and run `npm run dev` (web), `npm run start:worker` (worker), `npm test`,
+or `npm run typecheck`.
+
+⚠️ All environment values in the compose file are **development placeholders**
+— no real secrets, no production credentials, never production.
