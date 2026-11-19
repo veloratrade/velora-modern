@@ -1,8 +1,13 @@
 # MySQL → PostgreSQL Migration Map (Phase 1 record — transform itself is evidence-gated)
 
 Source of requirements: `docs/migration-strategy.md` + Accepted ADRs. The legacy
-timezone is **BLOCKED_ON_SAMPLING** (ADR-004): no transform code exists until the
-sampling procedure is executed and the owner confirms the interpretation.
+timezone is **INTERPRETED_ASIA_TEHRAN_STANDBY** (ADR-004 Amendment A-3,
+owner decision 2026-11-18): the ADR-004 sampling procedure was executed
+(`db/data-step/sampling-report.md`); no confirming evidence was available
+(synthetic fixture, no real production export, no host PHP-TZ evidence), so
+the Asia/Tehran standby is adopted as the documented site-local interpretation
+constant. Transform code exists in `tools/lib/legacyTimeTransform.ts`; the
+load rehearsal wires it in `tools/load_rehearsal.ts`.
 
 | Concern | MySQL (verified) | PostgreSQL (implemented in `migrations/0001_core.sql`) |
 |---|---|---|
@@ -11,7 +16,7 @@ sampling procedure is executed and the owner confirms the interpretation.
 | prices/volume/contract | decimal(15,5)/(15,2)/(18,8) mixed | `NUMERIC(20,8)` (ADR-001 matrix) |
 | currency amounts | decimal(15,2)/(18,2) | `NUMERIC(20,2)` |
 | r_multiple | decimal(10,4) | `NUMERIC(20,8)` — parity rule in `packages/domain/src/legacyParity.ts`: imported values are preserved BY VALUE and a historical recomputation is compared at the LEGACY scale with the LEGACY mode (bcmath-truncate). MG-RMULTIPLE-SCALE, CLOSED 2026-10-04 |
-| naive datetimes | `datetime` (TZ meaning unresolved) | `timestamptz` UTC + dual `source_time_naive`/`source_tz_offset` (ADR-004); legacy transform BLOCKED |
+| naive datetimes | `datetime` (TZ meaning unresolved) | `timestamptz` UTC + dual `source_time_naive`/`source_tz_offset` (ADR-004); legacy transform INTERPRETED_ASIA_TEHRAN_STANDBY — ISO naive text + zone → UTC via `tools/lib/legacyTimeTransform.ts`; unconfirmed calendars/zones quarantined, never invented |
 | enum status | `enum('OPEN','CLOSED')` | CHECK constraints |
 | trade mutation | mutable rows + PUT/DELETE | ledger: `trade_events` append-only + `version` + tombstone `deleted_at` + allocation CHECK/trigger (ADR-002/D-01) |
 | external ids | external_deal_id column (index set unverified) | `UNIQUE (account_id, external_deal_id)` idempotency |

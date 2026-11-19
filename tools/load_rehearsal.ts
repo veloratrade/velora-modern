@@ -41,6 +41,7 @@ import { createEngine, migrate } from "../db/migrate.ts";
 import { computePnl } from "@velora/domain";
 import { currencyParity, legacyRMultiple, rMultipleParity, LEGACY_ROUNDING_MODE } from "@velora/domain";
 import { runAgates, moneyTotals, decimalSum, decimalSubtract, parseCsv, type Decisions } from "./lib/legacyLoadGates.ts";
+import { interpretNaiveInstant } from "./lib/legacyTimeTransform.ts";
 
 const MIGRATIONS = join(import.meta.dirname, "..", "db", "migrations");
 const ROOT = join(import.meta.dirname, "..");
@@ -167,23 +168,50 @@ async function main(): Promise<void> {
     }
     let loadedTrades = 0;
     const loadedTradeRows: Record<string, string | null>[] = [];
+    const loadQuarantine: Array<{ table: string; id: string; reason: string }> = [];
     for (const t of trades.rows) {
       if (agates.quarantine.some((q) => q.table === "trades" && q.id === String(t["id"]))) continue;
+      // ADR-004 Amendment A-3: interpret a naive legacy datetime using its
+      // source timezone, falling back to the Asia/Tehran standby. Rows whose
+      // naive text cannot be confirmed (e.g. unconfirmed Jalali calendar) are
+      // quarantined — never promoted to an invented instant.
+      const resolvedOpen = t["occurred_open_at_utc"] === null
+        ? interpretNaiveInstant(t["open_time"], t["source_timezone"])
+        : null;
+      const resolvedClose = t["occurred_close_at_utc"] === null
+        ? interpretNaiveInstant(t["close_time"], t["source_timezone"])
+        : null;
+      const timeUnresolved = t["occurred_open_at_utc"] === null || t["occurred_close_at_utc"] === null;
+      if (timeUnresolved && resolvedOpen === null && resolvedClose === null) {
+        loadQuarantine.push({
+          table: "trades",
+          id: String(t["id"]),
+          reason: "UNRESOLVED_TIME — naive text cannot be interpreted to a confirmed UTC instant (ADR-004 standby Asia/Tehran cannot confirm this calendar/zone)",
+        });
+        continue;
+      }
+      const occurredAt = resolvedOpen?.occurredAtUtc ?? t["occurred_open_at_utc"];
+      const timeStatus = timeUnresolved && resolvedOpen !== null ? "resolved" : (t["time_status"] ?? "unresolved");
       await engine.query(
         `INSERT INTO trades (id, user_id, account_id, symbol, direction, status, entry_price, exit_price, volume, contract_size,
                              commission, swap, net_pnl, r_multiple, stop_loss, take_profit, source, occurred_at,
                              occurred_open_at_utc, occurred_close_at_utc, time_status, source_timezone,
-                             source_time_naive, raw_open_text, raw_close_text)
+                             source_tz_offset, source_time_naive, raw_open_text, raw_close_text)
          OVERRIDING SYSTEM VALUE
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$18,$19,'resolved',$20,$21,$22,$23)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
         [t["id"], t["user_id"], t["account_id"], agates.symbols.get(t["symbol"] ?? "") ?? t["symbol"], t["direction"], t["status"] ?? "CLOSED",
          t["entry_price"], t["exit_price"], t["volume"], t["contract_size"], t["commission"], t["swap"], t["profit_loss"],
          t["r_multiple"], t["stop_loss"], t["take_profit"], agates.sources.get(t["source"] ?? "") ?? "manual",
-         t["occurred_open_at_utc"], t["occurred_close_at_utc"], t["source_timezone"], t["source_time_naive"],
-         t["open_time"], t["close_time"]],
+         occurredAt, t["occurred_open_at_utc"], t["occurred_close_at_utc"], timeStatus,
+         t["source_timezone"], resolvedOpen?.sourceTzOffset ?? null,
+         t["source_time_naive"], t["open_time"], t["close_time"]],
       );
       loadedTrades += 1;
       loadedTradeRows.push(t);
+    }
+    // Record load-time quarantines next to the A-gate quarantine file.
+    if (loadQuarantine.length > 0) {
+      for (const q of loadQuarantine) agates.quarantine.push(q);
     }
     for (const e of tradeExits.rows) {
       await engine.query(
