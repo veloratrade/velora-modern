@@ -34,9 +34,10 @@ ADR-019 takes the next free number. **ADR-020 is the next free number.**
 | ADR-021 | `ADR-021-public-vs-protected-routes.md` | Public vs protected public surfaces — `/markets`/`/news` public, `/support` behind login (W0 decision R8 = C) | Accepted 2026-11-18 (owner); blocks W7 public surfaces + edge gate |
 | ADR-022 | `ADR-022-subscription-status-vocabulary.md` | Subscription status vocabulary mapping — provider-agnostic model, keep history (W0 decision OD-AC-SUBMAP = A) | Accepted 2026-11-18 (owner); blocks W1 A3 subscription POST |
 | ADR-023 | `ADR-023-admin-user-create-invitations.md` | Admin user creation + invitations — both, 7-day TTL, admin & super_admin invite (W0 decision user create/invite = A) | Accepted 2026-11-18 (owner); blocks W1 A1 + A2 + 4 RBAC |
+| ADR-024 | `ADR-024-canonical-staging-origin.md` | Canonical staging origin — OD-1 = `https://staging.veloratrade.ir` (candidate only, not prod) (W5 ops setup) | Proposed — owner decision required (OD-1) |
 
 **ADR-004 amendment:** `ADR-004-time-model.md` carries Amendment A-3 (2026-11-18) — owner confirms sampling-first for naive datetimes, Asia/Tehran standby (W0 decision ADR-004 = C); blocks W6 data migration (MG-G10, MG-DATA-MIGRATION).
 
 Note: the **legacy** repository has its own, unrelated `ADR-014` (census-probe
 transport); modern ADR numbering is independent of legacy numbering
-(`docs/provenance/REMOTE_LINEAGE.md`). ADR-024 is the next free number.
+(`docs/provenance/REMOTE_LINEAGE.md`). ADR-025 is the next free number.
