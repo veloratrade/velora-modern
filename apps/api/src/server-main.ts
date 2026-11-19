@@ -351,6 +351,8 @@ async function main(): Promise<void> {
     support?: import("./support/supportService.js").SupportService;
     /** MG-DOMAIN-LEGACY-ONLY — achievements read surface (listForUser). */
     achievements?: import("@velora/domain").AchievementStore;
+    /** Phase 3 newsletter backend (GAP-NL): public subscribe store. */
+    newsletter?: import("./newsletter/pgNewsletterStore.js").NewsletterStore;
   } = {};
   // Achievements read surface — reuses the same ledger that backs the unlock
   // triggers (first-trade + email-verified), so no second table or second

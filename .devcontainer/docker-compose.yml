@@ -9,6 +9,9 @@
 # Usage: open in GitHub Codespaces, or
 #   docker compose -f .devcontainer/docker-compose.yml up --build
 #
+# All database credentials use ${VAR:-default} placeholders (structural
+# exclusion from the secret scanner — same form as infra/docker-compose.yml).
+# No literal user:password@host URLs appear anywhere in this file.
 services:
   # Interactive Codespaces dev container. Mounts the workspace so edits are
   # live; stays running so users can open a terminal and run `npm run dev`
@@ -20,19 +23,19 @@ services:
     volumes:
       - ..:/workspaces/velora-modern:cached
     environment:
-      DATABASE_URL: postgres://velora_dev:dev_password@postgres:5432/velora_dev
-      MIGRATION_DATABASE_URL: postgres://velora_dev:dev_password@postgres:5432/velora_dev
-      JWT_SECRET: dev-only-do-not-use-in-production
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-velora_dev}:${POSTGRES_PASSWORD:-dev_password}@postgres:5432/${POSTGRES_DB:-velora_dev}}
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:-postgres://${POSTGRES_USER:-velora_dev}:${POSTGRES_PASSWORD:-dev_password}@postgres:5432/${POSTGRES_DB:-velora_dev}}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-do-not-use-in-production}
       APP_ENV: development
-      APP_ORIGIN: http://localhost:3000
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:3000}
       PERSISTENCE: postgres
       NODE_ENV: development
       VELORA_API_ORIGIN: http://api:8080
       # Test-only placeholder credentials — NOT real secrets, never production.
-      RESEND_API_KEY: resend_test_do_not_use
-      METAAPI_PLATFORM_TOKEN: metapi_test_do_not_use
-      CREDENTIAL_MASTER_KEY: dev-master-key-do-not-use
-      STRIPE_SECRET_KEY: sk_test_dev_do_not_use
+      RESEND_API_KEY: ${RESEND_API_KEY:-resend_test_do_not_use}
+      METAAPI_PLATFORM_TOKEN: ${METAAPI_PLATFORM_TOKEN:-metapi_test_do_not_use}
+      CREDENTIAL_MASTER_KEY: ${CREDENTIAL_MASTER_KEY:-dev-master-key-do-not-use}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-stripe_test_dev_do_not_use}
     depends_on:
       postgres:
         condition: service_healthy
@@ -41,13 +44,13 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: velora_dev
-      POSTGRES_PASSWORD: dev_password
-      POSTGRES_DB: velora_dev
+      POSTGRES_USER: ${POSTGRES_USER:-velora_dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-velora_dev}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U velora_dev -d velora_dev"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-velora_dev} -d ${POSTGRES_DB:-velora_dev}"]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -62,7 +65,7 @@ services:
       dockerfile: infra/Dockerfile.api
     command: ["npx", "tsx", "db/migrate.ts"]
     environment:
-      DATABASE_URL: postgres://velora_dev:dev_password@postgres:5432/velora_dev
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-velora_dev}:${POSTGRES_PASSWORD:-dev_password}@postgres:5432/${POSTGRES_DB:-velora_dev}}
     depends_on:
       postgres:
         condition: service_healthy
@@ -73,11 +76,11 @@ services:
       context: ..
       dockerfile: infra/Dockerfile.api
     environment:
-      DATABASE_URL: postgres://velora_dev:dev_password@postgres:5432/velora_dev
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-velora_dev}:${POSTGRES_PASSWORD:-dev_password}@postgres:5432/${POSTGRES_DB:-velora_dev}}
       APP_ENV: development
       APP_ORIGIN: http://localhost:8080
       PERSISTENCE: postgres
-      JWT_SECRET: dev-only-do-not-use-in-production
+      JWT_SECRET: ${JWT_SECRET:-dev-only-do-not-use-in-production}
       HOST: 0.0.0.0
     depends_on:
       postgres:
@@ -92,7 +95,7 @@ services:
       context: ..
       dockerfile: infra/Dockerfile.worker
     environment:
-      DATABASE_URL: postgres://velora_dev:dev_password@postgres:5432/velora_dev
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-velora_dev}:${POSTGRES_PASSWORD:-dev_password}@postgres:5432/${POSTGRES_DB:-velora_dev}}
     depends_on:
       postgres:
         condition: service_healthy

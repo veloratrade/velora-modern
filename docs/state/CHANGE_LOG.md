@@ -2050,3 +2050,23 @@ remains the no-egress path.
 - **Scope notes:** subscribe is public (no bearer auth, no new Permission — avoids CHANGE_LOG/rbac verbatim churn); Resend is name-only and not wired, so live sends remain fail-closed. Rate limiting not yet applied (no THROTTLED_ROUTES entry); a follow-up can add it to `RATE_LIMIT_DEFAULTS` + `THROTTLED_ROUTES`.
 
 - **Authorization:** Phase 3 roadmap feature; owner-specified order after W7 docs assessment (no safe W7 edits — MG-DOC-3 owner-gated). No direct push to main; PR to `main`; normal merge only after green verify/tests; no force-push; no branch deletion.
+
+## AC-64 — 2026-11-18 · Fix main CI (typecheck + secret scan) after #37/#38/#39 merges
+
+- **Branch:** `phase2/fix-main-ci` (from `main` @ `3028f7a`, red on `ci/verify`). Commit: `fix(main-ci): resolve typecheck + secret-scan failures from devcontainer + newsletter changes`. PR created via GitHub API, `verify` green before normal merge; merged normally. Synced local main → new SHA (ff-only), working tree clean.
+
+- **What changed (fixes both failing verify steps):**
+  - `.devcontainer/docker-compose.yml` — replaced literal `postgres://velora_dev:dev_password@...` URLs (flagged by `tools/secret-scan.sh` URL-credential detector) with `${VAR:-default}` env placeholders, mirroring `infra/docker-compose.yml`. Secret scan now PASS (0 findings).
+  - `apps/api/src/kernel/server.ts` — `ApiConfig.newsletter` import path `./newsletter/` → `../newsletter/` (kernel is a subdirectory; fixes TS2307).
+  - `apps/api/src/server-main.ts` — added `newsletter?: NewsletterStore` slot to the inline `capabilities` type (fixes TS2339 'newsletter' does not exist on services type); corrected import to `./newsletter/`.
+  - `apps/api/src/newsletter/pgNewsletterStore.ts` — `subscribe` null-checks the returned row before reading `.id` (fixes TS2532 possibly undefined).
+  - `apps/api/src/newsletter/newsletterRoutes.test.ts` — cast `res.json()` (returns `unknown`) to `Envelope`; non-null assert `body.error!` (fixes TS2322/TS18046/TS18047).
+
+- **Evidence (executed on this branch, after `npm ci`):**
+  - Typecheck: `npx tsc -b packages/contracts packages/domain apps/api apps/worker apps/web` → **0 errors**.
+  - `node tools/run-tests.mjs` → **ALL TEST FILES PASSED** (general + PGlite 99/99, 0 fail).
+  - `npm run test:migrations` → **29/29 pass** (disposable PGlite, incl. new 0045).
+  - `bash tools/secret-scan.sh` → **PASS (0 findings)**.
+  - `npm audit --audit-level=high` → pre-existing advisories only; CI runs `|| true`.
+
+- **Authorization:** CI fix to unblock main after red merges. No direct push to main; PR to `main`; normal merge only after green verify/tests; no force-push; no branch deletion.
