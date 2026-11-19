@@ -39,12 +39,16 @@ import { handleSupportRoutes } from "../support/supportRoutes.js";
 import { handleIntegrationRoutes } from "../integrations/integrationRoutes.js";
 import { handleAdminPlatformRoutes } from "../adminPlatform/adminPlatformRoutes.js";
 import { handleAchievementsRoutes } from "../achievements/achievementsRoutes.js";
+import { handleNewsletterRoutes } from "../newsletter/newsletterRoutes.js";
 
 /**
  * Registration order is significant only for readability: each handler matches
  * on its own (method, path) pairs, and a `null` return means "not mine".
  */
 const ROUTE_HANDLERS: readonly ExtendedRouteHandler[] = [
+  // Newsletter: public marketing signup, matched before the admin surface so it
+  // can never shadow an authenticated route.
+  handleNewsletterRoutes,
   // Ingress first: it is unauthenticated (signature-authenticated) and must not
   // be reachable behind any bearer check.
   handleWebhookRoutes,

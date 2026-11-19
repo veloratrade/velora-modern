@@ -94,6 +94,7 @@ import { ManualSyncService, PgManualSyncStore } from "./accounts/manualSyncServi
 import { makeSyncPendingMarker } from "./accounts/syncPending.js";
 import { PgAnalyticsStore } from "./analytics/analyticsStore.js";
 import { PgTagStore } from "./tags/tagService.js";
+import { PgNewsletterStore } from "./newsletter/pgNewsletterStore.js";
 import { PgSupportStore, SupportService } from "./support/supportService.js";
 import { AttachmentService, PgAttachmentStore, LocalAttachmentStorage } from "./attachments/attachmentService.js";
 import { PgSubscriptionStore } from "./billing/subscriptionService.js";
@@ -567,6 +568,7 @@ async function main(): Promise<void> {
     capabilities.syncStatus = new PgSyncStatusStore(q);
     capabilities.analytics = new PgAnalyticsStore(q);
     capabilities.tags = new PgTagStore(q);
+    capabilities.newsletter = new PgNewsletterStore(q);
     capabilities.subscriptions = new PgSubscriptionStore(q);
     capabilities.aiCoach = new PgAiCoachStore(q);
     capabilities.admin = new PgAdminStore(q);
