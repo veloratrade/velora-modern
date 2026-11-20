@@ -2056,7 +2056,7 @@ remains the no-egress path.
 - **Branch:** `phase2/fix-main-ci` (from `main` @ `3028f7a`, red on `ci/verify`). Commit: `fix(main-ci): resolve typecheck + secret-scan failures from devcontainer + newsletter changes`. PR created via GitHub API, `verify` green before normal merge; merged normally. Synced local main → new SHA (ff-only), working tree clean.
 
 - **What changed (fixes both failing verify steps):**
-  - `.devcontainer/docker-compose.yml` — replaced literal `postgres://velora_dev:dev_password@...` URLs (flagged by `tools/secret-scan.sh` URL-credential detector) with `${VAR:-default}` env placeholders, mirroring `infra/docker-compose.yml`. Secret scan now PASS (0 findings).
+  - `.devcontainer/docker-compose.yml` — replaced literal Postgres connection URLs with inline user:password credentials (flagged by `tools/secret-scan.sh` URL-credential detector) with `${VAR:-default}` env placeholders, mirroring `infra/docker-compose.yml`. Secret scan now PASS (0 findings).
   - `apps/api/src/kernel/server.ts` — `ApiConfig.newsletter` import path `./newsletter/` → `../newsletter/` (kernel is a subdirectory; fixes TS2307).
   - `apps/api/src/server-main.ts` — added `newsletter?: NewsletterStore` slot to the inline `capabilities` type (fixes TS2339 'newsletter' does not exist on services type); corrected import to `./newsletter/`.
   - `apps/api/src/newsletter/pgNewsletterStore.ts` — `subscribe` null-checks the returned row before reading `.id` (fixes TS2532 possibly undefined).
