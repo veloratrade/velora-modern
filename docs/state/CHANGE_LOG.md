@@ -2070,3 +2070,22 @@ remains the no-egress path.
   - `npm audit --audit-level=high` → pre-existing advisories only; CI runs `|| true`.
 
 - **Authorization:** CI fix to unblock main after red merges. No direct push to main; PR to `main`; normal merge only after green verify/tests; no force-push; no branch deletion.
+
+## AC-65 — 2026-11-18 · Security: bump next 16.4.1 → 16.4.5 (fixes Critical Next.js Image Optimization RCE alerts)
+
+- **Branch:** `phase2/security-next-bump` (from `main` @ `bb414c0`, green on `ci/verify`). Commit: `security(deps): bump next 16.4.1 → 16.4.5 (apps/web)`. PR created via GitHub API, `verify` green before normal merge; merged normally. Synced local main → new SHA (ff-only), working tree clean.
+
+- **What changed (security wave 1 — critical Dependabot alerts):**
+  - `apps/web/package.json` — `next` 16.4.1 → 16.4.5.
+  - `package-lock.json` — regenerated via `npm install` (next resolved to 16.4.5).
+  - Fixes the 5 Critical Next.js "Unauthenticated Remote Code Execution in Image Optimization" Dependabot alerts (#91, #80, #79 and related) and several High Next.js alerts (#69, #67, #58, #56, #55, #53, #49).
+  - Remaining open Dependabot alerts (undici/zod/glob/sharp/ws/body-parser High; Tinypool/Vitest Critical) are transitive deps not directly declared; addressed in subsequent security waves where a direct upgrade path exists without breaking the build.
+
+- **Evidence (executed on this branch, after `npm install`):**
+  - Typecheck: `npx tsc -b packages/contracts packages/domain apps/api apps/worker apps/web` → **0 errors**.
+  - `node tools/run-tests.mjs` → **ALL TEST FILES PASSED** (general + PGlite 99/99, 0 fail).
+  - `npm run test:migrations` → **29/29 pass** (disposable PGlite).
+  - `bash tools/secret-scan.sh` → **PASS (0 findings)**.
+  - `npm audit --audit-level=high` → 13 vulns (down from 14); CI runs `|| true` (informational).
+
+- **Authorization:** security wave per supervisor directive. No direct push to main; PR to `main`; normal merge only after green verify/tests; no force-push; no branch deletion.
