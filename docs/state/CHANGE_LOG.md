@@ -2106,3 +2106,18 @@ remains the no-egress path.
 - **Evidence:** CodeQL is not part of CI `verify` gate, so main remains green; no production code changed. Typecheck/tests/migrations/secret-scan unaffected (docs-only change).
 
 - **Authorization:** security wave per supervisor directive. No direct push to main; PR to `main`; normal merge only after green verify/tests; no force-push; no branch deletion.
+
+## AC-67 — 2026-11-18 · W7 governance: migrate gap register reconciled to reality
+
+- **Branch:** `phase2/w7-governance` (from `main` @ `91f10ef`, green on `ci/verify`). Commit: `docs(w7): reconcile migration gap register to reality`. PR created via GitHub API, `verify` green before normal merge; merged normally. Synced local main → new SHA (ff-only), working tree clean.
+
+- **What changed (W7 governance):**
+  - `docs/state/MIGRATION_GAP_REGISTER.md` — §C owner decisions reconciled:
+    - OD-AC-OD1 resolved via ADR-024 (canonical staging origin adopted W5).
+    - OD-AC-ADR004 resolved via ADR-004 Amendment A-3 (Asia/Tehran standby adopted W6; real export pending).
+    - MG-DATA-MIGRATION blocking text updated (ADR-004 decision made; real export + owner confirmation still pending).
+  - MASTER_ROADMAP wave rows left unedited (MG-DOC-3 owner-gated, per owner instruction 2026-09-26). CURRENT_STATE.md already accurate.
+
+- **Evidence:** docs-only change; typecheck/tests/migrations/secret-scan unaffected.
+
+- **Authorization:** W7 governance per supervisor directive. No direct push to main; PR to `main`; normal merge only after green verify/tests; no force-push; no branch deletion.
