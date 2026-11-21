@@ -21,7 +21,7 @@ export const errorEnvelope = z.object({
     code: z.string(),
     message: z.string(),
     requestId: z.string().optional(),
-    details: z.record(z.union([z.string(), z.number()])).optional(),
+    details: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
   }),
   timestamp: z.string(),
 });
