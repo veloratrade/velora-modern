@@ -28,7 +28,6 @@ const ME_USER = {
   aiConsent: true,
 };
 
-// @ts-expect-error — test double for the global fetch
 globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const raw = String(input);
   const pathname = raw.startsWith("http") ? new URL(raw).pathname : raw;
@@ -53,14 +52,19 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
   });
 };
 
+function firstCall(): Call {
+  assert.equal(calls.length, 1, "exactly one request");
+  return calls[0]!;
+}
+
 test("getMe() calls GET /api/v1/auth/me and normalizes the numeric id to string", async () => {
   calls.length = 0;
   const { user } = await getMe();
 
-  assert.equal(calls.length, 1, "exactly one request");
-  assert.equal(calls[0].path, "/api/v1/auth/me");
-  assert.equal(calls[0].method, "GET");
-  assert.equal(calls[0].body, undefined, "GET /me has no body");
+  const c = firstCall();
+  assert.equal(c.path, "/api/v1/auth/me");
+  assert.equal(c.method, "GET");
+  assert.equal(c.body, undefined, "GET /me has no body");
 
   // `AccountUserView.id` is a string; Modern answers numeric ids here and the
   // client normalizes (mirrors client.setSession).
@@ -75,10 +79,10 @@ test("updatePreferences() calls PATCH /api/v1/auth/me/preferences with {locale, 
   calls.length = 0;
   const result = await updatePreferences({ locale: "en", ai_consent: true });
 
-  assert.equal(calls.length, 1, "exactly one request");
-  assert.equal(calls[0].path, "/api/v1/auth/me/preferences");
-  assert.equal(calls[0].method, "PATCH");
-  assert.deepEqual(calls[0].body, { locale: "en", ai_consent: true });
+  const c = firstCall();
+  assert.equal(c.path, "/api/v1/auth/me/preferences");
+  assert.equal(c.method, "PATCH");
+  assert.deepEqual(c.body, { locale: "en", ai_consent: true });
 
   assert.equal(result.locale, "en");
   assert.equal(result.ai_consent, true);
@@ -88,7 +92,7 @@ test("updatePreferences() sends only the fields the caller provided", async () =
   calls.length = 0;
   await updatePreferences({ ai_consent: false });
 
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].method, "PATCH");
-  assert.deepEqual(calls[0].body, { ai_consent: false });
+  const c = firstCall();
+  assert.equal(c.method, "PATCH");
+  assert.deepEqual(c.body, { ai_consent: false });
 });
