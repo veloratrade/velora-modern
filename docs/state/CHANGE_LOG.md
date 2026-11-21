@@ -2121,3 +2121,18 @@ remains the no-egress path.
 - **Evidence:** docs-only change; typecheck/tests/migrations/secret-scan unaffected.
 
 - **Authorization:** W7 governance per supervisor directive. No direct push to main; PR to `main`; normal merge only after green verify/tests; no force-push; no branch deletion.
+
+## AC-68 — 2026-11-21 · deps: resolve critical/high Dependabot alerts across /web and root
+
+- **Branch:** `phase2/dependabot-critical-fix` (from `main` @ `ff546f4`, green on `ci/verify`). Commit: `deps: resolve critical/high Dependabot alerts across /web and root`. PR created via GitHub API, `verify` green before normal merge; merged normally. Synced local main → new SHA (ff-only), working tree clean.
+
+- **What changed:**
+  - `web/package.json` + `web/package-lock.json` — next 14.2.35 → 15.5.29; vitest ^2.0.5 → ^4.1.12 (vitest 4.x vendors patched tinypool/vite). Clears all 6 critical (/web next×3, tinypool×2, vitest×1) and /web high next/vite/postcss/source-map-js/glob.
+  - `package.json` + `package-lock.json` — npm overrides (no --force): undici ^7.30.1, body-parser ^2.4.0, glob ^10.5.0, ws ^8.21.0, sharp ^0.35.5, zod ^4.6.6. Preserves the `@cloudflare/workers-types` <> wrangler peer constraint (`npm audit fix` remains blocked).
+  - `packages/contracts/package.json` — zod ^3.23.8 → ^4.6.6.
+  - `packages/contracts/src/envelope.ts` — `z.record(keySchema, valueSchema)` zod 4 signature change (`details` field).
+  - `/web` confirmed unused by CI (no workflow references) and legacy per docs (`apps/web` canonical); not deleted.
+
+- **Evidence:** local verify — tsc 0 errors, tests 99/99, migrations 29/29, secret-scan PASS 0 findings, `npm audit --audit-level=high` 0 high. Root audit: 0 critical, 0 high (5 moderate, 2 low remain, below gate). /web audit: 0 critical, 0 high (6 moderate remain).
+
+- **Authorization:** Dependabot remediation per supervisor directive. No direct push to main; PR to `main`; normal merge only after green verify/tests; no force-push; no branch deletion.
