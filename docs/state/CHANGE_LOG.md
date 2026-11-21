@@ -2136,3 +2136,19 @@ remains the no-egress path.
 - **Evidence:** local verify — tsc 0 errors, tests 99/99, migrations 29/29, secret-scan PASS 0 findings, `npm audit --audit-level=high` 0 high. Root audit: 0 critical, 0 high (5 moderate, 2 low remain, below gate). /web audit: 0 critical, 0 high (6 moderate remain).
 
 - **Authorization:** Dependabot remediation per supervisor directive. No direct push to main; PR to `main`; normal merge only after green verify/tests; no force-push; no branch deletion.
+
+## AC-69 — 2026-11-21 · test(profile-01): add preference-update + getMe wire-contract tests
+
+- **Branch:** `phase3/profile-01` (from `main` @ `e230429`, green on `ci/verify`). Commit: `test(profile-01): add preference-update + getMe wire-contract tests`. PR created via GitHub API, `verify` green before normal merge; merged normally. Synced local main → new SHA (ff-only), working tree clean.
+
+- **What changed:**
+  - `apps/web/src/lib/api/preferencesContract.test.ts` — NEW. Wire-contract tests for PROFILE-01:
+    - `getMe()` calls GET `/api/v1/auth/me` and normalizes the numeric id to string.
+    - `updatePreferences({locale, ai_consent})` calls PATCH `/api/v1/auth/me/preferences` with exactly `{locale, ai_consent}`.
+    - `updatePreferences()` sends only the fields the caller provided (partial-patch semantics).
+  - `globalThis.fetch` doubled; no browser; runs in the general batch of `tools/run-tests.mjs`. Same wire-contract class as `analyticsContract.test.ts`.
+  - Profile page itself already exists on main (`apps/web/src/app/(app)/profile/page.tsx`); `/profile` is in `PROTECTED_APP_ROUTES` (covered by `protectedRoutes.test.ts` route-tree walk).
+
+- **Evidence:** `preferencesContract.test.ts` 3/3 pass locally. Full suite re-run as part of CI `verify`.
+
+- **Authorization:** Phase 3 per supervisor directive. No direct push to main; PR to `main`; normal merge only after green verify/tests; no force-push; no branch deletion.
