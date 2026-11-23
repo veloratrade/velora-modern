@@ -28,7 +28,7 @@
     "@electric-sql/pglite": "^0.5.8",
     "@types/node": "^20.14.0",
     "typescript": "^5.5.4",
-    "wrangler": "^4.86.0"
+    "wrangler": "^4.166.0"
   },
   "overrides": {
     "undici": "^7.30.1",
