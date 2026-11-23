@@ -9,7 +9,7 @@
     "@velora/contracts": "0.1.0",
     "@velora/domain": "0.1.0",
     "pg": "^8.12.0",
-    "pg-boss": "^10.1.0"
+    "pg-boss": "^12.38.2"
   },
   "devDependencies": {
     "@types/pg": "^8.23.1"
