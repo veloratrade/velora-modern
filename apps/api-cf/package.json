@@ -11,6 +11,6 @@
   },
   "dependencies": {
     "@noble/hashes": "2.4.0",
-    "postgres": "^3.4.9"
+    "postgres": "^4.1.1"
   }
 }

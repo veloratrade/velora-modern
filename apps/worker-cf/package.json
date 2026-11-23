@@ -13,6 +13,6 @@
     "lp": "tsx scripts/leastPrivilege.mjs"
   },
   "dependencies": {
-    "postgres": "^3.4.9"
+    "postgres": "^4.1.1"
   }
 }
