@@ -27,7 +27,7 @@
     "@cloudflare/workers-types": "^4.20260702.1",
     "@electric-sql/pglite": "^0.5.8",
     "@types/node": "^20.14.0",
-    "typescript": "^5.5.4",
+    "typescript": "^7.0.2",
     "wrangler": "^4.86.0"
   },
   "overrides": {
